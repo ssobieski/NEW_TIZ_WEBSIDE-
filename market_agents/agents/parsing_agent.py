@@ -45,19 +45,19 @@ class ParsingAgent:
         industry = self.config.industry
         system = (
             "Jesteś agentem wywiadu rynkowego TIZ (narzędzia skrawające) na lokalnym GPU. "
-            "Masz narzędzia do parsowania WWW ORAZ dostęp do istniejącej bazy Notion "
-            "i archiwum Cloudflare R2.\n"
+            "Priorytet: e-catalogi, PDF katalogi, digital catalogues, publikacje/handbooki "
+            "i e-shopy konkurencji.\n"
+            "Masz narzędzia WWW + Notion + R2 + dedykowane tooli katalogowe.\n"
             "Procedura:\n"
-            "1) list_candidates — przejrzyj świeże sygnały\n"
-            "2) search_notion — sprawdź katalogi konkurencji / handbooki / ISO 13399\n"
-            "3) search_r2 — jeśli włączone, przeszukaj duże archiwum plików\n"
-            "4) search_memory — kontekst z poprzednich cykli\n"
-            "5) batch_parse / fetch_and_parse / fetch_notion_page — głęboki research\n"
-            "6) extract_market_intel — ustrukturyzuj wnioski\n"
-            "7) remember — zapisz kluczowe fakty\n"
-            "Na końcu napisz zwięzły briefing po polsku (bez JSON).\n"
-            "Priorytet: katalogi/gatunki/geometrie konkurencji, kalkulatory online, "
-            "ISO 13399/GTC, luki vs TIZ. Ignoruj spam i oferty pracy."
+            "1) list_catalog_sources — przegląd skonfigurowanych e-katalogów/PDF/eshop\n"
+            "2) list_candidates — świeże sygnały (w tym discovery z hubów katalogów)\n"
+            "3) discover_catalog_assets — znajdź PDF-y / shop / online catalog na hubie\n"
+            "4) fetch_pdf_text — treść PDF katalogu / publikacji\n"
+            "5) search_notion — Twoja baza (Katalogi konkurencji, Handbooki, ISO 13399)\n"
+            "6) search_r2 / search_memory — archiwum i kontekst\n"
+            "7) extract_market_intel — ustrukturyzuj wnioski (nowe gatunki, geometrie, "
+            "kalkulatory, ceny e-shop, luki vs TIZ)\n"
+            "Na końcu briefing po polsku. Ignoruj spam i oferty pracy."
         )
         user = (
             f"Branża: {industry.name}\n"
@@ -65,11 +65,12 @@ class ParsingAgent:
             f"Keywords: {', '.join(industry.keywords)}\n"
             f"Konkurenci: {', '.join(industry.competitors)}\n"
             f"Pytania fokusowe: {'; '.join(industry.focus_questions) or 'brak'}\n"
+            f"Catalog sources: {len(self.config.sources.catalogs)}\n"
             f"Notion enabled: {self.config.sources.notion.enabled}\n"
             f"R2 enabled: {self.config.sources.cloudflare_r2.enabled}\n"
             f"Liczba kandydatów: {len(candidates)}\n"
             f"Limit głębokich parse: {self.config.agents.agentic.max_deep_parses}\n"
-            "Zacznij od list_candidates, potem search_notion dla kontekstu TIZ."
+            "Zacznij od list_catalog_sources, potem discover_catalog_assets / fetch_pdf_text."
         )
 
         messages: list[dict[str, Any]] = [

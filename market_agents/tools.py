@@ -4,9 +4,10 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
+from market_agents.collectors.catalog import CatalogCollector
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import build_r2_collector
-from market_agents.config import AppConfig
+from market_agents.config import AppConfig, CatalogSource
 from market_agents.memory import MarketMemory
 from market_agents.models import MarketItem
 from market_agents.parsing import IntelligentParser, ParsedDocument
@@ -16,7 +17,7 @@ ToolFn = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 class ToolRegistry:
-    """Narzędzia dla agenta ReAct — parsing + Notion + Cloudflare R2."""
+    """Narzędzia dla agenta ReAct — parsing + katalogi/PDF + Notion + R2."""
 
     def __init__(
         self,
@@ -44,6 +45,9 @@ class ToolRegistry:
             "fetch_notion_page": self.fetch_notion_page,
             "search_r2": self.search_r2,
             "fetch_r2_object": self.fetch_r2_object,
+            "list_catalog_sources": self.list_catalog_sources,
+            "discover_catalog_assets": self.discover_catalog_assets,
+            "fetch_pdf_text": self.fetch_pdf_text,
         }
 
     def _get_notion(self) -> NotionCollector:
@@ -267,6 +271,62 @@ class ToolRegistry:
                     },
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_catalog_sources",
+                    "description": (
+                        "Lista skonfigurowanych źródeł: e-catalog, PDF, digital catalogue, "
+                        "publikacje, e-shop konkurencji."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "description": "Opcjonalny filtr: ecatalog|pdf|eshop|publication|digital_catalogue",
+                            }
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discover_catalog_assets",
+                    "description": (
+                        "Odkryj PDF-y / linki e-catalog / e-shop na stronie hubu katalogu "
+                        "(po nazwie źródła lub URL)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source_name": {"type": "string"},
+                            "url": {"type": "string"},
+                            "max_links": {"type": "integer", "default": 30},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "fetch_pdf_text",
+                    "description": (
+                        "Pobierz meta PDF i wyodrębnij tekst (pierwsze strony) z katalogu "
+                        "lub publikacji konkurencji."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string"},
+                            "source_name": {"type": "string"},
+                            "max_pages": {"type": "integer", "default": 8},
+                            "max_chars": {"type": "integer", "default": 12000},
+                        },
+                    },
+                },
+            },
         ]
 
     def call(self, name: str, arguments: dict[str, Any] | str) -> dict[str, Any]:
@@ -421,3 +481,63 @@ class ToolRegistry:
             "chars": len(text),
             "excerpt": text[:max_chars],
         }
+
+    def list_catalog_sources(self, args: dict[str, Any]) -> dict[str, Any]:
+        kind_filter = str(args.get("kind") or "").strip().lower()
+        rows = []
+        for src in self.config.sources.catalogs:
+            if kind_filter and src.kind.lower() != kind_filter:
+                continue
+            rows.append(
+                {
+                    "name": src.name,
+                    "brand": src.brand,
+                    "kind": src.kind,
+                    "url": src.url,
+                }
+            )
+        return {"ok": True, "count": len(rows), "sources": rows}
+
+    def _resolve_catalog(self, args: dict[str, Any]) -> CatalogCollector:
+        source_name = str(args.get("source_name") or "").strip().lower()
+        url = str(args.get("url") or "").strip()
+        if source_name:
+            for src in self.config.sources.catalogs:
+                if src.name.lower() == source_name or (
+                    src.brand and src.brand.lower() == source_name
+                ):
+                    return CatalogCollector(src)
+        if url:
+            # ad-hoc źródło z URL
+            kind = "pdf" if ".pdf" in url.lower() else "ecatalog"
+            return CatalogCollector(
+                CatalogSource(name="ad-hoc", url=url, kind=kind, brand="unknown")
+            )
+        if self.config.sources.catalogs:
+            return CatalogCollector(self.config.sources.catalogs[0])
+        raise RuntimeError("Brak sources.catalogs w config — dodaj e-catalog/PDF/eshop")
+
+    def discover_catalog_assets(self, args: dict[str, Any]) -> dict[str, Any]:
+        max_links = int(args.get("max_links") or 30)
+        collector = self._resolve_catalog(args)
+        assets = collector.discover_assets(max_links=max_links)
+        self.memory.add(
+            "catalog_discover",
+            f"{collector.name}: {len(assets)} assets",
+            meta={"source": collector.name, "count": len(assets)},
+        )
+        return {"ok": True, "source": collector.name, "count": len(assets), "assets": assets}
+
+    def fetch_pdf_text(self, args: dict[str, Any]) -> dict[str, Any]:
+        max_pages = int(args.get("max_pages") or 8)
+        max_chars = int(args.get("max_chars") or 12000)
+        url = str(args.get("url") or "").strip() or None
+        collector = self._resolve_catalog(args)
+        result = collector.fetch_pdf_text(url=url, max_pages=max_pages, max_chars=max_chars)
+        if result.get("ok"):
+            self.memory.add(
+                "pdf",
+                f"{result.get('filename')}: {(result.get('text_excerpt') or '')[:400]}",
+                meta={"url": result.get("url")},
+            )
+        return result

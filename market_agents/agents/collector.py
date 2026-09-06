@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from market_agents.collectors import RssCollector, WebCollector
+from market_agents.collectors import CatalogCollector, RssCollector, WebCollector
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import build_r2_collector
 from market_agents.config import AppConfig
@@ -12,7 +12,7 @@ from market_agents.storage import Storage
 
 
 class CollectorAgent:
-    """Zbiera sygnały z RSS/WWW + istniejącej bazy Notion + archiwum Cloudflare R2."""
+    """Zbiera sygnały: RSS/WWW + e-katalogi/PDF/eshop + Notion + Cloudflare R2."""
 
     def __init__(self, config: AppConfig, storage: Storage) -> None:
         self.config = config
@@ -26,6 +26,8 @@ class CollectorAgent:
             )
         for src in self.config.sources.web:
             collectors.append(WebCollector(src))
+        for src in self.config.sources.catalogs:
+            collectors.append(CatalogCollector(src))
 
         raw: list[MarketItem] = []
         for collector in collectors:
@@ -67,13 +69,15 @@ class CollectorAgent:
             if item.url in seen:
                 continue
             score = self._relevance(item)
-            # Notion/R2 knowledge często ma wysoką wartość nawet bez keyword match
-            if item.source in {"notion", "cloudflare_r2"}:
+            # Notion/R2/katalogi — wysoka wartość nawet bez keyword match
+            if item.source in {"notion", "cloudflare_r2"} or str(item.source).startswith(
+                "catalog:"
+            ):
                 score = max(score, float(item.relevance_score or 0.45))
             if score < self.config.agents.min_relevance_score and item.source not in {
                 "notion",
                 "cloudflare_r2",
-            }:
+            } and not str(item.source).startswith("catalog:"):
                 continue
             title_key = self._normalize_title(item.title)
             if any(SequenceMatcher(None, title_key, prev).ratio() >= 0.9 for prev in titles_norm):

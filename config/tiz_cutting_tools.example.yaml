@@ -1,4 +1,5 @@
 # Profil TIZ — narzędzia skrawające / machining
+# Fokus: e-catalog, PDF, publikacje, digital catalogue, e-shop
 # Istniejąca baza Notion + archiwum Cloudflare R2
 # cp config/tiz_cutting_tools.example.yaml config/industry.yaml
 
@@ -9,6 +10,15 @@ industry:
     - "narzędzia skrawające"
     - "parametry skrawania"
     - "ISO 13399"
+    - "e-catalog"
+    - "ecatalog"
+    - "katalog"
+    - "catalogue"
+    - "digital catalogue"
+    - "PDF"
+    - "handbook"
+    - "webshop"
+    - "e-shop"
     - "Sandvik Coromant"
     - "Kennametal"
     - "Walter"
@@ -18,6 +28,9 @@ industry:
     - "Fraisa"
     - "Ceratizit"
     - "Hoffmann"
+    - "Guehring"
+    - "Tungaloy"
+    - "Horn"
     - "vc"
     - "fz"
     - "toczenie"
@@ -38,19 +51,86 @@ industry:
     - "Ceratizit"
     - "Mitsubishi Materials"
     - "Tungaloy"
+    - "Hoffmann Group"
+    - "Guehring"
+    - "Horn"
   focus_questions:
-    - "Jakie nowe katalogi / gatunki / geometrie wypuszczają konkurenci?"
-    - "Jak wyglądają ich kalkulatory / selektory online vs TIZ?"
+    - "Jakie nowe e-katalogi / PDF / digital catalogues wypuszczają konkurenci?"
+    - "Co zmienia się w e-shopach (asortyment, ceny, selektory)?"
+    - "Jakie publikacje / handbooki / application guides są nowe?"
+    - "Jak wyglądają kalkulatory / selektory online vs TIZ?"
     - "Jakie standardy danych (ISO 13399 / DIN 4000 / GTC) są w ruchu?"
-    - "Gdzie są luki w tool data / 3D / application guides?"
 
 sources:
   rss:
-    - name: "Google News — tooling"
-      url: "https://news.google.com/rss/search?q=%22cutting+tools%22+OR+%22Sandvik+Coromant%22+OR+Kennametal&hl=pl&gl=PL&ceid=PL:pl"
+    - name: "Google News — tooling catalogs"
+      url: "https://news.google.com/rss/search?q=%22cutting+tools%22+catalog+OR+ecatalog+OR+%22digital+catalogue%22&hl=pl&gl=PL&ceid=PL:pl"
     - name: "Google News — ISO 13399"
       url: "https://news.google.com/rss/search?q=%22ISO+13399%22+OR+%22cutting+tool+data%22&hl=en&gl=US&ceid=US:en"
   web: []
+
+  # E-catalogi / PDF / publikacje / e-shopy — z Notion „Katalogi konkurencji”
+  catalogs:
+    - name: "Iscar eCatalog"
+      brand: "Iscar"
+      kind: "ecatalog"
+      url: "https://www.iscar.com/eCatalog/"
+    - name: "Sandvik Coromant downloads"
+      brand: "Sandvik Coromant"
+      kind: "digital_catalogue"
+      url: "https://www.sandvik.coromant.com/en-gb/downloads"
+    - name: "Kennametal catalogs"
+      brand: "Kennametal"
+      kind: "digital_catalogue"
+      url: "https://www.kennametal.com/us/en/resources/catalogs.html"
+    - name: "Walter Tools catalog"
+      brand: "Walter"
+      kind: "digital_catalogue"
+      url: "https://www.walter-tools.com/en-gb/downloads/catalogues"
+    - name: "Seco Tools catalog"
+      brand: "Seco Tools"
+      kind: "digital_catalogue"
+      url: "https://www.secotools.com/article/services/downloads"
+    - name: "Hoffmann e-catalog"
+      brand: "Hoffmann Group"
+      kind: "ecatalog"
+      url: "https://www.hoffmann-group.com/GB/en/houk/services/e-catalogue"
+    - name: "Guehring online catalogue"
+      brand: "Guehring"
+      kind: "ecatalog"
+      url: "https://www.guehring.com/en/products/online-catalogue"
+    - name: "Guehring webshop"
+      brand: "Guehring"
+      kind: "eshop"
+      url: "https://www.guehring.com/en/webshop"
+    - name: "Fraisa flip catalog"
+      brand: "Fraisa"
+      kind: "ecatalog"
+      url: "https://www.fraisa.com/en/downloads"
+    - name: "Ceratizit catalog"
+      brand: "Ceratizit"
+      kind: "digital_catalogue"
+      url: "https://www.ceratizit.com/int/en/services/downloads.html"
+    - name: "Tungaloy catalog hub"
+      brand: "Tungaloy"
+      kind: "digital_catalogue"
+      url: "https://www.tungaloy.com/download/"
+    - name: "Horn e-shop / catalog"
+      brand: "Horn"
+      kind: "eshop"
+      url: "https://www.horn-group.com/en/products/"
+    - name: "Mapal catalogs"
+      brand: "Mapal"
+      kind: "digital_catalogue"
+      url: "https://www.mapal.com/en/downloads"
+    - name: "Mitsubishi Materials catalog"
+      brand: "Mitsubishi Materials"
+      kind: "digital_catalogue"
+      url: "https://www.mitsubishicarbide.com/en/download"
+    - name: "Nexgen tooling PDF hub"
+      brand: "Nexgen"
+      kind: "pdf"
+      url: "https://www.nexgentooling.com/"
 
   notion:
     enabled: true
@@ -62,6 +142,7 @@ sources:
       - "3c2bdd41-cccd-8152-9e94-d21ca8f3e95b"  # Standardy katalogu: ISO 13399
     search_queries:
       - "katalogi konkurencji"
+      - "ecatalog PDF eshop"
       - "Sandvik Kennametal Walter"
       - "ISO 13399"
       - "handbook machining"
@@ -76,7 +157,7 @@ sources:
     bucket: "tiz-market-intel"
     prefix: "monitoring/"
     max_objects: 200
-    text_extensions: [".json", ".jsonl", ".md", ".txt", ".html", ".csv", ".xml"]
+    text_extensions: [".json", ".jsonl", ".md", ".txt", ".html", ".csv", ".xml", ".pdf"]
 
 llm:
   provider: "vllm"

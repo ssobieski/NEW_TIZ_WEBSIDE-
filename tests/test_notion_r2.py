@@ -37,3 +37,6 @@ def test_tool_registry_has_notion_r2_tools():
         assert "fetch_notion_page" in names
         assert "search_r2" in names
         assert "fetch_r2_object" in names
+        assert "list_catalog_sources" in names
+        assert "discover_catalog_assets" in names
+        assert "fetch_pdf_text" in names

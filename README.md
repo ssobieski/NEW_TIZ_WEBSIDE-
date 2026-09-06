@@ -41,13 +41,14 @@ pip install -e .
 # pip install vllm
 ```
 
-## Konfiguracja (TIZ + Notion + Cloudflare)
+## Konfiguracja (TIZ + e-catalog / PDF / e-shop + Notion)
 
-Masz już dużą bazę w Notion (katalogi konkurencji, handbooki, ISO 13399) i archiwum na Cloudflare.
-Agenci **nie zaczynają od zera** — najpierw sync istniejącej wiedzy, potem monitoring.
+Fokus monitoringu: **e-catalogi, PDF katalogi, digital catalogues, publikacje, e-shopy**.
+Masz też bazę w Notion (Katalogi konkurencji, handbooki, ISO 13399) i archiwum na Cloudflare.
+Agenci **nie zaczynają od zera** — sync Notion/R2 + discovery z hubów katalogowych.
 
 ```bash
-# profil pod narzędzia skrawające + Twoje strony Notion
+# profil pod narzędzia skrawające + katalogi konkurencji
 python -m market_agents init --profile tiz --force
 
 # sekrety
@@ -64,6 +65,10 @@ python -m market_agents sync-notion
 # python -m market_agents sync-r2
 ```
 
+Źródła katalogowe są w `sources.catalogs` (`config/tiz_cutting_tools.example.yaml`):
+Iscar eCatalog, Sandvik downloads, Kennametal, Walter, Seco, Hoffmann, Guehring webshop,
+Fraisa, Ceratizit, Tungaloy, Horn, Mapal, Mitsubishi…
+
 ## Uruchomienie na Dellu
 
 ```bash
@@ -76,7 +81,8 @@ python -m market_agents run --agentic
 python -m market_agents schedule
 ```
 
-Agent w trybie ReAct używa m.in.: `search_notion`, `fetch_notion_page`, `search_r2`, `fetch_r2_object`.
+Tooli katalogowe: `list_catalog_sources`, `discover_catalog_assets`, `fetch_pdf_text`
+(+ Notion/R2: `search_notion`, `fetch_notion_page`, `search_r2`, `fetch_r2_object`).
 
 Szybki test parsera (bez LLM):
 
@@ -84,7 +90,7 @@ Szybki test parsera (bez LLM):
 python -m market_agents parse "https://example.com/news/article"
 ```
 
-Tylko zbieranie RSS:
+Tylko zbieranie (RSS + katalogi, bez LLM):
 
 ```bash
 python -m market_agents run --skip-llm --pipeline
@@ -93,14 +99,15 @@ python -m market_agents run --skip-llm --pipeline
 ## Jak działa agentic parsing
 
 ```text
-RSS/WWW → kandydaci
+RSS/WWW + catalogs (PDF/ecatalog/eshop) → kandydaci
             │
             ▼
    ParsingAgent (ReAct, max_steps)
+     ├─ list_catalog_sources / discover_catalog_assets / fetch_pdf_text
      ├─ list_candidates
-     ├─ search_memory
-     ├─ batch_parse / fetch_and_parse   ← pełny tekst (trafilatura)
-     ├─ extract_market_intel            ← threat/opportunity/competitor/...
+     ├─ search_notion / search_r2 / search_memory
+     ├─ batch_parse / fetch_and_parse
+     ├─ extract_market_intel
      └─ remember
             │
             ▼
@@ -116,8 +123,9 @@ RSS/WWW → kandydaci
 
 ## Rozszerzanie
 
-- Dodaj feedy / strony w `sources`
-- Dopisz narzędzie w `market_agents/tools.py` (np. PDF, IMAP, API branżowe)
+- Dodaj e-catalog / PDF / e-shop w `sources.catalogs`
+- Dodaj feedy / strony w `sources.rss` / `sources.web`
+- Dopisz narzędzie w `market_agents/tools.py`
 - Zwiększ `agents.agentic.max_steps` / `max_deep_parses` przy mocniejszym modelu
 
 ## Uwagi prawne

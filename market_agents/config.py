@@ -28,6 +28,21 @@ class WebSource(BaseModel):
     css_selector: str | None = None
 
 
+class CatalogSource(BaseModel):
+    """E-katalog / PDF / publikacja / digital catalogue / e-shop konkurencji."""
+
+    name: str
+    url: str
+    brand: str | None = None
+    # ecatalog | pdf | eshop | publication | digital_catalogue
+    kind: str = "ecatalog"
+    extract_text: bool = True
+    max_pdf_pages: int = 8
+    max_pdf_chars: int = 12000
+    # jeśli True — zbieraj też zwykłe linki (rzadko potrzebne)
+    discover_all_links: bool = False
+
+
 class NotionConfig(BaseModel):
     """Istniejąca baza wiedzy w Notion — katalogi konkurencji, literatura, review."""
 
@@ -55,13 +70,23 @@ class CloudflareR2Config(BaseModel):
     max_objects: int = 100
     # rozszerzenia traktowane jako źródła tekstowe
     text_extensions: list[str] = Field(
-        default_factory=lambda: [".json", ".jsonl", ".md", ".txt", ".html", ".csv", ".xml"]
+        default_factory=lambda: [
+            ".json",
+            ".jsonl",
+            ".md",
+            ".txt",
+            ".html",
+            ".csv",
+            ".xml",
+            ".pdf",
+        ]
     )
 
 
 class SourcesConfig(BaseModel):
     rss: list[RssSource] = Field(default_factory=list)
     web: list[WebSource] = Field(default_factory=list)
+    catalogs: list[CatalogSource] = Field(default_factory=list)
     notion: NotionConfig = Field(default_factory=NotionConfig)
     cloudflare_r2: CloudflareR2Config = Field(default_factory=CloudflareR2Config)
 
