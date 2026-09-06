@@ -1,0 +1,108 @@
+# Profil TIZ — narzędzia skrawające / machining
+# Istniejąca baza Notion + archiwum Cloudflare R2
+# cp config/tiz_cutting_tools.example.yaml config/industry.yaml
+
+industry:
+  name: "Narzędzia skrawające / machining (TIZ)"
+  language: "pl"
+  keywords:
+    - "narzędzia skrawające"
+    - "parametry skrawania"
+    - "ISO 13399"
+    - "Sandvik Coromant"
+    - "Kennametal"
+    - "Walter"
+    - "Seco"
+    - "Iscar"
+    - "Mapal"
+    - "Fraisa"
+    - "Ceratizit"
+    - "Hoffmann"
+    - "vc"
+    - "fz"
+    - "toczenie"
+    - "frezowanie"
+    - "wiercenie"
+  exclude_keywords:
+    - "oferta pracy"
+    - "rekrutacja"
+    - "OLX"
+  competitors:
+    - "Sandvik Coromant"
+    - "Kennametal"
+    - "Walter"
+    - "Seco Tools"
+    - "Iscar"
+    - "Mapal"
+    - "Fraisa"
+    - "Ceratizit"
+    - "Mitsubishi Materials"
+    - "Tungaloy"
+  focus_questions:
+    - "Jakie nowe katalogi / gatunki / geometrie wypuszczają konkurenci?"
+    - "Jak wyglądają ich kalkulatory / selektory online vs TIZ?"
+    - "Jakie standardy danych (ISO 13399 / DIN 4000 / GTC) są w ruchu?"
+    - "Gdzie są luki w tool data / 3D / application guides?"
+
+sources:
+  rss:
+    - name: "Google News — tooling"
+      url: "https://news.google.com/rss/search?q=%22cutting+tools%22+OR+%22Sandvik+Coromant%22+OR+Kennametal&hl=pl&gl=PL&ceid=PL:pl"
+    - name: "Google News — ISO 13399"
+      url: "https://news.google.com/rss/search?q=%22ISO+13399%22+OR+%22cutting+tool+data%22&hl=en&gl=US&ceid=US:en"
+  web: []
+
+  notion:
+    enabled: true
+    token_env: "NOTION_TOKEN"
+    root_pages:
+      - "3c2bdd41-cccd-8176-bf12-f6efd37baacc"  # Katalogi konkurencji — źródła techniczne
+      - "3c2bdd41-cccd-81dc-8c62-e9aa3ff740aa"  # Konkurencja — review stron
+      - "3c2bdd41-cccd-816f-8171-c28e1128cf1c"  # Handbooki obróbki (konkurencja)
+      - "3c2bdd41-cccd-8152-9e94-d21ca8f3e95b"  # Standardy katalogu: ISO 13399
+    search_queries:
+      - "katalogi konkurencji"
+      - "Sandvik Kennametal Walter"
+      - "ISO 13399"
+      - "handbook machining"
+    max_pages: 80
+    include_child_pages: true
+
+  cloudflare_r2:
+    enabled: false
+    account_id_env: "CF_ACCOUNT_ID"
+    access_key_env: "CF_R2_ACCESS_KEY_ID"
+    secret_key_env: "CF_R2_SECRET_ACCESS_KEY"
+    bucket: "tiz-market-intel"
+    prefix: "monitoring/"
+    max_objects: 200
+    text_extensions: [".json", ".jsonl", ".md", ".txt", ".html", ".csv", ".xml"]
+
+llm:
+  provider: "vllm"
+  base_url: "http://127.0.0.1:8000"
+  model: "Qwen/Qwen2.5-72B-Instruct-AWQ"
+  temperature: 0.1
+  timeout_seconds: 300
+  api_key: "EMPTY"
+  max_tokens: 4096
+  tensor_parallel_size: 4
+  gpu_memory_utilization: 0.90
+  max_model_len: 32768
+
+agents:
+  max_items_per_source: 20
+  lookback_hours: 168
+  report_dir: "reports"
+  data_dir: "data"
+  min_relevance_score: 0.25
+  agentic:
+    enabled: true
+    max_steps: 14
+    max_deep_parses: 10
+    parallel_fetches: 6
+    require_tool_use: true
+    trace_dir: "data/agent_traces"
+
+schedule:
+  every_hours: 6

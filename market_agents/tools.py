@@ -4,6 +4,8 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
+from market_agents.collectors.notion import NotionCollector
+from market_agents.collectors.r2 import build_r2_collector
 from market_agents.config import AppConfig
 from market_agents.memory import MarketMemory
 from market_agents.models import MarketItem
@@ -14,7 +16,7 @@ ToolFn = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 class ToolRegistry:
-    """Narzędzia dla agenta ReAct — inteligentny parsing i wywiad rynkowy."""
+    """Narzędzia dla agenta ReAct — parsing + Notion + Cloudflare R2."""
 
     def __init__(
         self,
@@ -28,6 +30,8 @@ class ToolRegistry:
         self.candidates = candidates or []
         self.parsed_cache: dict[str, ParsedDocument] = {}
         self.structured: list[dict[str, Any]] = []
+        self._notion: NotionCollector | None = None
+        self._r2 = None
         self._handlers: dict[str, ToolFn] = {
             "list_candidates": self.list_candidates,
             "fetch_and_parse": self.fetch_and_parse,
@@ -36,7 +40,27 @@ class ToolRegistry:
             "search_memory": self.search_memory,
             "remember": self.remember,
             "score_item": self.score_item,
+            "search_notion": self.search_notion,
+            "fetch_notion_page": self.fetch_notion_page,
+            "search_r2": self.search_r2,
+            "fetch_r2_object": self.fetch_r2_object,
         }
+
+    def _get_notion(self) -> NotionCollector:
+        if self._notion is None:
+            token = self.config.notion_token()
+            if not token:
+                raise RuntimeError("Brak NOTION_TOKEN — ustaw env z tokenem integracji Notion")
+            self._notion = NotionCollector(self.config.sources.notion, token)
+        return self._notion
+
+    def _get_r2(self):
+        if self._r2 is None:
+            self._r2 = build_r2_collector(
+                self.config.sources.cloudflare_r2,
+                self.config.r2_credentials(),
+            )
+        return self._r2
 
     def openai_tools_schema(self) -> list[dict[str, Any]]:
         return [
@@ -181,6 +205,68 @@ class ToolRegistry:
                     },
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_notion",
+                    "description": (
+                        "Przeszukaj istniejącą bazę Notion (katalogi konkurencji TIZ, "
+                        "handbooki, literatura, review stron)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "limit": {"type": "integer", "default": 10},
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "fetch_notion_page",
+                    "description": "Pobierz pełną treść strony Notion po URL lub ID.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"page_id_or_url": {"type": "string"}},
+                        "required": ["page_id_or_url"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_r2",
+                    "description": (
+                        "Przeszukaj duże archiwum na Cloudflare R2 (pliki JSON/MD/HTML/CSV)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "limit": {"type": "integer", "default": 15},
+                        },
+                        "required": ["query"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "fetch_r2_object",
+                    "description": "Pobierz treść obiektu z Cloudflare R2 po kluczu.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "key": {"type": "string"},
+                            "max_chars": {"type": "integer", "default": 12000},
+                        },
+                        "required": ["key"],
+                    },
+                },
+            },
         ]
 
     def call(self, name: str, arguments: dict[str, Any] | str) -> dict[str, Any]:
@@ -300,3 +386,38 @@ class ToolRegistry:
                 }
                 break
         return {"ok": True, "url": url, "score": score}
+
+    def search_notion(self, args: dict[str, Any]) -> dict[str, Any]:
+        query = str(args.get("query") or "")
+        limit = int(args.get("limit") or 10)
+        hits = self._get_notion().search(query, limit=limit)
+        self.memory.add("notion_search", query, meta={"hits": len(hits)})
+        return {"ok": True, "hits": hits}
+
+    def fetch_notion_page(self, args: dict[str, Any]) -> dict[str, Any]:
+        page_id_or_url = str(args.get("page_id_or_url") or "")
+        doc = self._get_notion().fetch_page_text(page_id_or_url)
+        if doc.get("ok"):
+            self.memory.add(
+                "notion_page",
+                f"{doc.get('title')}: {(doc.get('excerpt') or '')[:500]}",
+                meta={"url": doc.get("url"), "id": doc.get("id")},
+            )
+        return doc
+
+    def search_r2(self, args: dict[str, Any]) -> dict[str, Any]:
+        query = str(args.get("query") or "")
+        limit = int(args.get("limit") or 15)
+        hits = self._get_r2().search(query, limit=limit)
+        return {"ok": True, "hits": hits}
+
+    def fetch_r2_object(self, args: dict[str, Any]) -> dict[str, Any]:
+        key = str(args.get("key") or "")
+        max_chars = int(args.get("max_chars") or 12000)
+        text = self._get_r2().get_text(key)
+        return {
+            "ok": True,
+            "key": key,
+            "chars": len(text),
+            "excerpt": text[:max_chars],
+        }

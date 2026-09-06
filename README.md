@@ -41,11 +41,27 @@ pip install -e .
 # pip install vllm
 ```
 
-## Konfiguracja
+## Konfiguracja (TIZ + Notion + Cloudflare)
+
+Masz już dużą bazę w Notion (katalogi konkurencji, handbooki, ISO 13399) i archiwum na Cloudflare.
+Agenci **nie zaczynają od zera** — najpierw sync istniejącej wiedzy, potem monitoring.
 
 ```bash
-python -m market_agents init --profile dell
-# edytuj config/industry.yaml — branża, keywords, konkurenci, feedy
+# profil pod narzędzia skrawające + Twoje strony Notion
+python -m market_agents init --profile tiz --force
+
+# sekrety
+cp .env.example .env
+# NOTION_TOKEN=secret_...
+# CF_ACCOUNT_ID / CF_R2_ACCESS_KEY_ID / CF_R2_SECRET_ACCESS_KEY
+
+# w Notion: Share stron TIZ → zaproszenie Internal Integration
+export NOTION_TOKEN=secret_...
+
+# jednorazowy import istniejącej wiedzy
+python -m market_agents sync-notion
+# po włączeniu cloudflare_r2.enabled: true w YAML:
+# python -m market_agents sync-r2
 ```
 
 ## Uruchomienie na Dellu
@@ -59,6 +75,8 @@ python -m market_agents doctor
 python -m market_agents run --agentic
 python -m market_agents schedule
 ```
+
+Agent w trybie ReAct używa m.in.: `search_notion`, `fetch_notion_page`, `search_r2`, `fetch_r2_object`.
 
 Szybki test parsera (bez LLM):
 

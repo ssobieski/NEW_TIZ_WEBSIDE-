@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -27,14 +28,45 @@ class WebSource(BaseModel):
     css_selector: str | None = None
 
 
+class NotionConfig(BaseModel):
+    """Istniejąca baza wiedzy w Notion — katalogi konkurencji, literatura, review."""
+
+    enabled: bool = False
+    # Integration token: env NOTION_TOKEN albo tu (lepiej env)
+    token_env: str = "NOTION_TOKEN"
+    # Root pages / databases do zsynchronizowania (URL lub ID)
+    root_pages: list[str] = Field(default_factory=list)
+    # Opcjonalnie: query po tytule przy sync
+    search_queries: list[str] = Field(default_factory=list)
+    max_pages: int = 50
+    include_child_pages: bool = True
+
+
+class CloudflareR2Config(BaseModel):
+    """Duże archiwum na Cloudflare R2 (S3-compatible)."""
+
+    enabled: bool = False
+    account_id_env: str = "CF_ACCOUNT_ID"
+    access_key_env: str = "CF_R2_ACCESS_KEY_ID"
+    secret_key_env: str = "CF_R2_SECRET_ACCESS_KEY"
+    bucket: str = "market-intel"
+    prefix: str = "monitoring/"
+    endpoint_url: str | None = None  # domyślnie https://<account>.r2.cloudflarestorage.com
+    max_objects: int = 100
+    # rozszerzenia traktowane jako źródła tekstowe
+    text_extensions: list[str] = Field(
+        default_factory=lambda: [".json", ".jsonl", ".md", ".txt", ".html", ".csv", ".xml"]
+    )
+
+
 class SourcesConfig(BaseModel):
     rss: list[RssSource] = Field(default_factory=list)
     web: list[WebSource] = Field(default_factory=list)
+    notion: NotionConfig = Field(default_factory=NotionConfig)
+    cloudflare_r2: CloudflareR2Config = Field(default_factory=CloudflareR2Config)
 
 
 class LlmConfig(BaseModel):
-    """Lokalny inference — domyślnie vLLM (OpenAI-compatible) na 4x A100."""
-
     provider: Literal["vllm", "ollama", "openai_compatible"] = "vllm"
     base_url: str = "http://127.0.0.1:8000"
     model: str = "Qwen/Qwen2.5-72B-Instruct-AWQ"
@@ -84,13 +116,29 @@ class AppConfig(BaseModel):
     def data_path(self) -> Path:
         return Path(self.agents.data_dir)
 
+    def notion_token(self) -> str | None:
+        return os.environ.get(self.sources.notion.token_env) or None
+
+    def r2_credentials(self) -> dict[str, str | None]:
+        r2 = self.sources.cloudflare_r2
+        account = os.environ.get(r2.account_id_env)
+        return {
+            "account_id": account,
+            "access_key": os.environ.get(r2.access_key_env),
+            "secret_key": os.environ.get(r2.secret_key_env),
+            "endpoint": r2.endpoint_url
+            or (f"https://{account}.r2.cloudflarestorage.com" if account else None),
+            "bucket": r2.bucket,
+            "prefix": r2.prefix,
+        }
+
 
 def load_config(path: str | Path) -> AppConfig:
     config_path = Path(path)
     if not config_path.exists():
         raise FileNotFoundError(
             f"Brak pliku konfiguracji: {config_path}. "
-            "Skopiuj config/dell_a100.example.yaml → config/industry.yaml"
+            "Skopiuj config/tiz_cutting_tools.example.yaml → config/industry.yaml"
         )
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     return AppConfig.model_validate(raw)
@@ -99,6 +147,7 @@ def load_config(path: str | Path) -> AppConfig:
 def default_config_path() -> Path:
     for candidate in (
         Path("config/industry.yaml"),
+        Path("config/tiz_cutting_tools.example.yaml"),
         Path("config/dell_a100.example.yaml"),
         Path("config/industry.example.yaml"),
     ):

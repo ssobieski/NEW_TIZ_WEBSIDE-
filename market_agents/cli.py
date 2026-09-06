@@ -37,9 +37,9 @@ def _resolve_config(config: Optional[Path]) -> Path:
 def init_config(
     force: bool = typer.Option(False, "--force", help="Nadpisz istniejący plik"),
     profile: str = typer.Option(
-        "dell",
+        "tiz",
         "--profile",
-        help="dell (4x A100 / vLLM) | basic | furniture",
+        help="tiz (Notion+R2 tooling) | dell | basic | furniture",
     ),
 ) -> None:
     """Utwórz config/industry.yaml z profilu."""
@@ -47,6 +47,7 @@ def init_config(
         "dell": Path("config/dell_a100.example.yaml"),
         "basic": Path("config/industry.example.yaml"),
         "furniture": Path("config/furniture.pl.example.yaml"),
+        "tiz": Path("config/tiz_cutting_tools.example.yaml"),
     }
     src = mapping.get(profile, mapping["dell"])
     dst = Path("config/industry.yaml")
@@ -76,6 +77,8 @@ def doctor(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> Non
     table.add_row("Agentic", str(cfg.agents.agentic.enabled))
     table.add_row("Max steps", str(cfg.agents.agentic.max_steps))
     table.add_row("Źródła RSS", str(len(cfg.sources.rss)))
+    table.add_row("Notion", str(cfg.sources.notion.enabled))
+    table.add_row("Cloudflare R2", str(cfg.sources.cloudflare_r2.enabled))
     table.add_row("LLM provider", cfg.llm.provider)
     table.add_row("Model", cfg.llm.model)
     table.add_row("TP (A100)", str(cfg.llm.tensor_parallel_size))
@@ -86,7 +89,70 @@ def doctor(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> Non
             "LLM",
             f"[red]OFF[/red] {health.get('error')}\n{health.get('hint', '')}",
         )
+    # Notion / R2 health
+    if cfg.sources.notion.enabled:
+        token = cfg.notion_token()
+        table.add_row(
+            "NOTION_TOKEN",
+            "[green]set[/green]" if token else "[red]missing[/red] (export NOTION_TOKEN=...)",
+        )
+    if cfg.sources.cloudflare_r2.enabled:
+        creds = cfg.r2_credentials()
+        ok = all(creds.get(k) for k in ("account_id", "access_key", "secret_key"))
+        table.add_row("R2 creds", "[green]set[/green]" if ok else "[red]missing[/red]")
+        if ok:
+            try:
+                from market_agents.collectors.r2 import build_r2_collector
+
+                r2 = build_r2_collector(cfg.sources.cloudflare_r2, creds)
+                table.add_row("R2", str(r2.healthcheck()))
+            except Exception as exc:  # noqa: BLE001
+                table.add_row("R2", f"[red]{exc}[/red]")
     console.print(table)
+
+
+@app.command("sync-notion")
+def sync_notion(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    no_enrich: bool = typer.Option(False, "--no-enrich", help="Bez pobierania pełnego tekstu stron"),
+) -> None:
+    """Zsynchronizuj istniejącą bazę Notion → lokalny cache wiedzy."""
+    from market_agents.sync import KnowledgeSync
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    cfg.sources.notion.enabled = True
+    result = KnowledgeSync(cfg).sync_notion(enrich_text=not no_enrich)
+    console.print(
+        f"[green]Notion sync OK[/green]: {result.items} stron → {result.path}"
+    )
+
+
+@app.command("sync-r2")
+def sync_r2(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+    """Zsynchronizuj archiwum Cloudflare R2 → lokalny cache."""
+    from market_agents.sync import KnowledgeSync
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    cfg.sources.cloudflare_r2.enabled = True
+    result = KnowledgeSync(cfg).sync_r2()
+    console.print(f"[green]R2 sync OK[/green]: {result.items} obiektów → {result.path}")
+
+
+@app.command("sync-all")
+def sync_all(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+    """Sync Notion + R2 (wg configu)."""
+    from market_agents.sync import KnowledgeSync
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    results = KnowledgeSync(cfg).sync_all()
+    if not results:
+        console.print("[yellow]Nic do sync — włącz notion/cloudflare_r2 w YAML.[/yellow]")
+        raise typer.Exit(0)
+    for r in results:
+        console.print(f"[green]{r.source}[/green]: {r.items} → {r.path}")
 
 
 @app.command("parse")

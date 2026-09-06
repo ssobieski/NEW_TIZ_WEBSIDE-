@@ -44,18 +44,20 @@ class ParsingAgent:
         tools = ToolRegistry(self.config, self.memory, candidates=candidates)
         industry = self.config.industry
         system = (
-            "Jesteś agentem wywiadu rynkowego działającym lokalnie na serwerze GPU. "
-            "Masz narzędzia do inteligentnego parsowania stron i ekstrakcji intelu. "
-            "Cel: głęboko zrozumieć sygnały rynkowe, nie tylko tytuły RSS.\n"
+            "Jesteś agentem wywiadu rynkowego TIZ (narzędzia skrawające) na lokalnym GPU. "
+            "Masz narzędzia do parsowania WWW ORAZ dostęp do istniejącej bazy Notion "
+            "i archiwum Cloudflare R2.\n"
             "Procedura:\n"
-            "1) list_candidates — przejrzyj kandydatów\n"
-            "2) search_memory — sprawdź kontekst historyczny\n"
-            "3) batch_parse / fetch_and_parse — pełny tekst najważniejszych URL\n"
-            "4) extract_market_intel — ustrukturyzuj wnioski\n"
-            "5) remember — zapisz kluczowe fakty\n"
+            "1) list_candidates — przejrzyj świeże sygnały\n"
+            "2) search_notion — sprawdź katalogi konkurencji / handbooki / ISO 13399\n"
+            "3) search_r2 — jeśli włączone, przeszukaj duże archiwum plików\n"
+            "4) search_memory — kontekst z poprzednich cykli\n"
+            "5) batch_parse / fetch_and_parse / fetch_notion_page — głęboki research\n"
+            "6) extract_market_intel — ustrukturyzuj wnioski\n"
+            "7) remember — zapisz kluczowe fakty\n"
             "Na końcu napisz zwięzły briefing po polsku (bez JSON).\n"
-            "Priorytet: high-impact, konkurenci, regulacje, ceny, ekspansja, M&A.\n"
-            "Ignoruj spam, ogłoszenia, oferty pracy."
+            "Priorytet: katalogi/gatunki/geometrie konkurencji, kalkulatory online, "
+            "ISO 13399/GTC, luki vs TIZ. Ignoruj spam i oferty pracy."
         )
         user = (
             f"Branża: {industry.name}\n"
@@ -63,9 +65,11 @@ class ParsingAgent:
             f"Keywords: {', '.join(industry.keywords)}\n"
             f"Konkurenci: {', '.join(industry.competitors)}\n"
             f"Pytania fokusowe: {'; '.join(industry.focus_questions) or 'brak'}\n"
+            f"Notion enabled: {self.config.sources.notion.enabled}\n"
+            f"R2 enabled: {self.config.sources.cloudflare_r2.enabled}\n"
             f"Liczba kandydatów: {len(candidates)}\n"
             f"Limit głębokich parse: {self.config.agents.agentic.max_deep_parses}\n"
-            "Zacznij od list_candidates i prowadź research narzędziami."
+            "Zacznij od list_candidates, potem search_notion dla kontekstu TIZ."
         )
 
         messages: list[dict[str, Any]] = [

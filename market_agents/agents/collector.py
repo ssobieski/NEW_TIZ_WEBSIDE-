@@ -4,20 +4,22 @@ import re
 from difflib import SequenceMatcher
 
 from market_agents.collectors import RssCollector, WebCollector
+from market_agents.collectors.notion import NotionCollector
+from market_agents.collectors.r2 import build_r2_collector
 from market_agents.config import AppConfig
 from market_agents.models import MarketItem
 from market_agents.storage import Storage
 
 
 class CollectorAgent:
-    """Zbiera sygnały rynkowe z RSS/WWW i filtruje po słowach kluczowych."""
+    """Zbiera sygnały z RSS/WWW + istniejącej bazy Notion + archiwum Cloudflare R2."""
 
     def __init__(self, config: AppConfig, storage: Storage) -> None:
         self.config = config
         self.storage = storage
 
     def run(self) -> list[MarketItem]:
-        collectors = []
+        collectors: list[object] = []
         for src in self.config.sources.rss:
             collectors.append(
                 RssCollector(src, lookback_hours=self.config.agents.lookback_hours)
@@ -28,9 +30,35 @@ class CollectorAgent:
         raw: list[MarketItem] = []
         for collector in collectors:
             try:
-                raw.extend(collector.collect(self.config.agents.max_items_per_source))
+                raw.extend(collector.collect(self.config.agents.max_items_per_source))  # type: ignore[attr-defined]
             except Exception as exc:  # noqa: BLE001
-                print(f"[collector:{collector.name}] pominięto źródło: {exc}")
+                print(f"[collector:{getattr(collector, 'name', '?')}] pominięto: {exc}")
+
+        # Notion — Twoja istniejąca baza
+        if self.config.sources.notion.enabled:
+            token = self.config.notion_token()
+            if not token:
+                print(
+                    "[notion] brak tokenu — ustaw NOTION_TOKEN "
+                    f"(env: {self.config.sources.notion.token_env})"
+                )
+            else:
+                try:
+                    notion = NotionCollector(self.config.sources.notion, token)
+                    raw.extend(notion.collect(self.config.sources.notion.max_pages))
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[notion] pominięto: {exc}")
+
+        # Cloudflare R2 — duże archiwum
+        if self.config.sources.cloudflare_r2.enabled:
+            try:
+                r2 = build_r2_collector(
+                    self.config.sources.cloudflare_r2,
+                    self.config.r2_credentials(),
+                )
+                raw.extend(r2.collect(self.config.sources.cloudflare_r2.max_objects))
+            except Exception as exc:  # noqa: BLE001
+                print(f"[r2] pominięto: {exc}")
 
         seen = self.storage.load_seen()
         unique: list[MarketItem] = []
@@ -39,13 +67,19 @@ class CollectorAgent:
             if item.url in seen:
                 continue
             score = self._relevance(item)
-            if score < self.config.agents.min_relevance_score:
+            # Notion/R2 knowledge często ma wysoką wartość nawet bez keyword match
+            if item.source in {"notion", "cloudflare_r2"}:
+                score = max(score, float(item.relevance_score or 0.45))
+            if score < self.config.agents.min_relevance_score and item.source not in {
+                "notion",
+                "cloudflare_r2",
+            }:
                 continue
             title_key = self._normalize_title(item.title)
             if any(SequenceMatcher(None, title_key, prev).ratio() >= 0.9 for prev in titles_norm):
                 continue
             item.relevance_score = score
-            item.tags = self._match_keywords(item)
+            item.tags = list({*item.tags, *self._match_keywords(item)})
             unique.append(item)
             titles_norm.append(title_key)
 
@@ -63,7 +97,7 @@ class CollectorAgent:
         return [kw for kw in self.config.industry.keywords if kw.lower() in text]
 
     def _relevance(self, item: MarketItem) -> float:
-        text = f"{item.title} {item.summary}".lower()
+        text = f"{item.title} {item.summary} {item.content[:500]}".lower()
         for bad in self.config.industry.exclude_keywords:
             if bad.lower() in text:
                 return 0.0
