@@ -109,6 +109,54 @@ def test_build_from_knowledge_includes_firms():
         assert jld.exists()
 
 
+def test_attach_domain_context_to_market_item():
+    from market_agents.models import MarketItem
+    from market_agents.ontology import attach_domain_context, enrich_items_domain_context
+
+    item = MarketItem(
+        title="HSM milling Inconel with MQL",
+        url="https://example.com/hsm",
+        source="test",
+        summary="5-axis machining center, ISO S, through-tool coolant, vc fz ap",
+        content="High-speed milling of titanium on machining center using MQL.",
+    )
+    compact = attach_domain_context(item)
+    assert "material:iso-s" in compact["materials"] or "material" in str(compact)
+    assert item.analysis.get("domain_context")
+    assert "tech_context" in item.tags
+    stats = enrich_items_domain_context([item])
+    assert stats["with_domain_context"] >= 1
+
+
+def test_reporter_includes_tech_section():
+    from market_agents.agents.reporter import ReporterAgent
+    from market_agents.config import AppConfig, IndustryConfig, LlmConfig
+    from market_agents.llm import LocalLLM
+    from market_agents.models import MarketItem
+    from market_agents.ontology import attach_domain_context
+
+    item = MarketItem(
+        title="Carbide milling steel emulsion",
+        url="https://example.com/x",
+        source="test",
+        summary="Milling ISO P on VMC with flood emulsion coolant",
+        content="Face milling of steel (ISO P) on machining center with emulsion.",
+    )
+    attach_domain_context(item)
+    cfg = AppConfig(
+        industry=IndustryConfig(name="Test", keywords=["milling"]),
+        llm=LlmConfig(base_url="http://127.0.0.1:9"),
+    )
+
+    class DummyLLM(LocalLLM):
+        def chat(self, *a, **k):
+            return "Brief testowy."
+
+    report = ReporterAgent(cfg, DummyLLM(cfg.llm)).build([item])
+    assert "Kontekst technologiczny" in report.summary_markdown
+    assert "iso-p" in report.summary_markdown.lower() or "milling" in report.summary_markdown.lower()
+
+
 def test_ontology_tools():
     with tempfile.TemporaryDirectory() as tmp:
         cfg = AppConfig(

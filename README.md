@@ -181,6 +181,10 @@ Config: `sources.literature` + `sources.notion.literature_database`.
 Boty muszą rozumieć **materiały, maszyny, chłodziwo i procesy** — nie tylko nazwy firm.
 Lokalny graf (`data/knowledge/ontology.json`) to trwała **ontology DB** (zamiast Grok).
 
+Każdy zebrany sygnał dostaje automatycznie `analysis.domain_context` (bez LLM):
+materiały ISO · maszyny · chłodziwo · procesy · parametry (schemat). Briefing ma sekcję
+**Kontekst technologiczny**.
+
 Encje: `firm` · `material` (ISO P/M/K/N/S/H) · `machine` · `coolant` · `process` · `tool_family` · `parameter` · `standard` · `literature` · `concept`
 
 ```bash

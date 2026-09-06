@@ -56,6 +56,16 @@ class Orchestrator:
         items = self.collector.run()
         agentic_result: AgenticResult | None = None
 
+        # Upewnij się że ontology DB istnieje (kontekst dla botów)
+        try:
+            from market_agents.ontology import MachiningOntology
+
+            ont = MachiningOntology.load(self.config.data_path)
+            if len(ont.nodes) < 10:
+                ont.build_from_knowledge(self.config.data_path)
+        except Exception:  # noqa: BLE001
+            pass
+
         if use_agentic and items:
             agentic_result = self.parsing_agent.run(items)
             items = agentic_result.items

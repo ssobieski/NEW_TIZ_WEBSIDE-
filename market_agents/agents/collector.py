@@ -138,6 +138,14 @@ class CollectorAgent:
             titles_norm.append(title_key)
 
         unique.sort(key=lambda x: x.relevance_score, reverse=True)
+
+        # Kontekst tech bez LLM — materiały / maszyny / chłodziwo / procesy
+        from market_agents.ontology import MachiningOntology, enrich_items_domain_context
+
+        ont = MachiningOntology.load(self.config.data_path)
+        if len(ont.nodes) < 5:
+            ont.merge_seed("config/machining_ontology.seed.json")
+        enrich_items_domain_context(unique, ontology=ont, ingest=False)
         return unique
 
     @staticmethod

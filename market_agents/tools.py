@@ -1562,6 +1562,7 @@ class ToolRegistry:
                 "summary": (item.summary or "")[:280],
                 "relevance_score": item.relevance_score,
                 "tags": item.tags,
+                "domain_context": (item.analysis or {}).get("domain_context"),
             }
             for item in self.candidates[:limit]
         ]
@@ -1591,6 +1592,9 @@ class ToolRegistry:
                         item.title = doc.title
                     if doc.published_at:
                         item.published_at = doc.published_at
+                    from market_agents.ontology import attach_domain_context
+
+                    attach_domain_context(item, ontology=self._get_ontology(), ingest=True)
             if self.config.agents.agentic.learn_parse_rules:
                 self._parse_rules.save(self.config.data_path)
         hint = None
@@ -1599,6 +1603,20 @@ class ToolRegistry:
                 "Słaby parse — zaproponuj upsert_parse_rule "
                 "(preferred_method/css_selector), potem fetch_and_parse z bypass_cache=true."
             )
+        domain_ctx = None
+        if doc.ok and doc.text:
+            from market_agents.ontology import extract_domain_context
+
+            domain_ctx = extract_domain_context(doc.text)
+            # skróć do idów w odpowiedzi toola
+            domain_ctx = {
+                "materials": [m["id"] for m in domain_ctx.get("materials") or []],
+                "machines": [m["id"] for m in domain_ctx.get("machines") or []],
+                "coolants": [c["id"] for c in domain_ctx.get("coolants") or []],
+                "processes": [p["id"] for p in domain_ctx.get("processes") or []],
+                "parameters": [p["id"] for p in domain_ctx.get("parameters") or []],
+                "summary": domain_ctx.get("summary"),
+            }
         return {
             "ok": doc.ok,
             "url": url,
@@ -1610,6 +1628,7 @@ class ToolRegistry:
             "error": doc.error,
             "meta": doc.meta,
             "hint": hint,
+            "domain_context": domain_ctx,
             "learn_parse_rules": bool(self.config.agents.agentic.learn_parse_rules),
         }
 

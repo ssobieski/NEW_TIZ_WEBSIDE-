@@ -94,11 +94,13 @@ class ParsingAgent:
             "przy problemach crawl_status; ten sam host = sekwencyjnie\n"
             "11) extract_market_intel — signal_type=new_firm | relation | competitor | product_tech | literature\n"
             "12) remember — zapisz wnioski do pamięci\n"
-            "Na końcu briefing po polsku: KONTEKST TECH (materiały/maszyny/chłodziwo/procesy z ontologii) → "
+            "Na końcu briefing po polsku: KONTEKST TECH (materiały ISO / maszyny / chłodziwo / procesy "
+            "— obowiązkowa sekcja, nawet jeśli pusta napisz 'brak') → "
             "LITERATURA (book/article/video) → TECH PRODUKTÓW "
             "(handbook/cutting data/ISO13399 + schemat pól) → CENNIKI (dostępne URL + access) → "
             "SOCIAL (posty/wideo) → NOWE FIRMY (w tym wystawcy targów) → POWIĄZANIA → "
-            "ruchy znanych / media. Ignoruj spam i oferty pracy."
+            "ruchy znanych / media. Ignoruj spam i oferty pracy. "
+            "Każdy ważny sygnał wiąż z materiałem/maszyną/chłodziwem/procesem gdy da się wywnioskować."
         )
         # Lokalny brief ontologii — tani kontekst zamiast Grok
         try:

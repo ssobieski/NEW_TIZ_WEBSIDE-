@@ -235,6 +235,80 @@ def _context_summary(
     return "; ".join(parts) if parts else "brak wykrytego kontekstu technologicznego"
 
 
+def attach_domain_context(
+    item: Any,
+    *,
+    ontology: "MachiningOntology | None" = None,
+    ingest: bool = False,
+) -> dict[str, Any]:
+    """
+    Dołącz do MarketItem kontekst: materiały / maszyny / chłodziwo / procesy.
+    Działa bez LLM — boty zawsze widzą technologię w analysis.domain_context.
+    """
+    text = " ".join(
+        [
+            str(getattr(item, "title", "") or ""),
+            str(getattr(item, "summary", "") or ""),
+            str(getattr(item, "content", "") or "")[:8000],
+        ]
+    )
+    ctx = extract_domain_context(text)
+    compact = {
+        "materials": [m["id"] for m in ctx.get("materials") or []],
+        "machines": [m["id"] for m in ctx.get("machines") or []],
+        "coolants": [c["id"] for c in ctx.get("coolants") or []],
+        "processes": [p["id"] for p in ctx.get("processes") or []],
+        "parameters": [p["id"] for p in ctx.get("parameters") or []],
+        "summary": ctx.get("summary") or "",
+    }
+    analysis = getattr(item, "analysis", None)
+    if not isinstance(analysis, dict):
+        analysis = {}
+        try:
+            item.analysis = analysis
+        except Exception:  # noqa: BLE001
+            pass
+    analysis["domain_context"] = compact
+    # tagi dla filtrów / raportów
+    tags = list(getattr(item, "tags", None) or [])
+    for group in ("materials", "machines", "coolants", "processes"):
+        for nid in compact[group]:
+            short = nid.split(":")[-1]
+            if short and short not in tags:
+                tags.append(short)
+    if any(compact[g] for g in ("materials", "machines", "coolants", "processes")):
+        if "tech_context" not in tags:
+            tags.append("tech_context")
+        # lekki boost relevance gdy jest kontekst tech
+        try:
+            score = float(getattr(item, "relevance_score", 0) or 0)
+            item.relevance_score = max(score, min(1.0, score + 0.08))
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        item.tags = tags
+    except Exception:  # noqa: BLE001
+        pass
+    if ingest and ontology is not None:
+        ontology.ingest_context(ctx, source_url=str(getattr(item, "url", "") or ""), origin="auto")
+    return compact
+
+
+def enrich_items_domain_context(
+    items: list[Any],
+    *,
+    ontology: "MachiningOntology | None" = None,
+    ingest: bool = False,
+) -> dict[str, Any]:
+    """Batch: każdy sygnał dostaje domain_context (materiały/maszyny/chłodziwo/procesy)."""
+    with_ctx = 0
+    for item in items:
+        compact = attach_domain_context(item, ontology=ontology, ingest=ingest)
+        if any(compact.get(k) for k in ("materials", "machines", "coolants", "processes")):
+            with_ctx += 1
+    return {"ok": True, "items": len(items), "with_domain_context": with_ctx}
+
+
 def firm_node_id(company: str) -> str:
     return _slug(company, "firm:")
 
