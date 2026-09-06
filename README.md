@@ -85,6 +85,8 @@ python -m market_agents schedule
 Tooli: `list_known_firms`, `get_firm_presentation`, `discover_new_firms`, `check_firm_known`,
 `list_relations`, `add_relation`, `discover_relations`, `firm_neighborhood`,
 `list_media_sources`, `discover_media_links`, `parse_media_page`, `extract_fair_exhibitors`,
+`list_parsing_skills`, `match_parsing_skills`, `learn_parsing_skill`, `improve_parsing_skill`,
+`rate_parsing_skill`, `promote_host_skill`,
 `list_parse_rules`, `upsert_parse_rule`, `rate_parse`,
 `list_catalog_sources`, `discover_catalog_assets`, `fetch_pdf_text`
 (+ Notion/R2: `search_notion`, `fetch_notion_page`, `search_r2`, `fetch_r2_object`).
@@ -124,18 +126,24 @@ oraz **przedstawienie**:
 
 Agent używa `list_known_firms` + `get_firm_presentation` zanim scrapuje WWW znanej marki.
 
-## Samorozwijający się parser
+## Samorozwijający się parser + wspólne skills
 
-Agent nie ma sztywnego jednego sposobu czytania stron — uczy się per host:
+Dwie warstwy uczenia (wszystkie agenty dzielą tę samą wiedzę):
 
-1. `fetch_and_parse` (trafilatura → bs4, potem reguła hosta)
-2. przy słabym wyniku → `upsert_parse_rule` (CSS / preferred_method)
-3. `rate_parse` wzmacnia albo osłabia regułę
-4. reguły w `data/knowledge/site_parse_rules.json` (`agents.agentic.learn_parse_rules`)
-
-Szybki test parsera (bez LLM):
+1. **Reguły per-host** (`data/knowledge/site_parse_rules.json`)
+   - `fetch_and_parse` → przy słabym wyniku `upsert_parse_rule` / `rate_parse`
+2. **Wspólne skills** (`data/knowledge/parsing_skills.json`)
+   - przepisy wielokrotnego użytku: targi, artykuły, katalogi, ekstrakcja firm/powiązań
+   - `list_parsing_skills` / `match_parsing_skills` → dobór skillu do URL
+   - `learn_parsing_skill` / `improve_parsing_skill` / `rate_parsing_skill` → wspólna ewolucja
+   - `promote_host_skill` — udaną regułę hosta wypromuj do skillu dla innych agentów
+   - przy `rate_parse` ≥ 0.75 automatyczna promocja (`auto_promote_host_skills`)
 
 ```bash
+# w config (domyślnie włączone):
+# agents.agentic.learn_parse_rules: true
+# agents.agentic.learn_parsing_skills: true
+# agents.agentic.auto_promote_host_skills: true
 python -m market_agents parse "https://example.com/news/article"
 ```
 
@@ -153,12 +161,14 @@ RSS/WWW + catalogs + media (targi/czasopisma/portale) → kandydaci
             ▼
    ParsingAgent (ReAct, max_steps)
      ├─ list_known_firms / list_relations / firm_neighborhood
+     ├─ list_parsing_skills / match_parsing_skills / learn_parsing_skill
      ├─ list_media_sources / discover_media_links / extract_fair_exhibitors
      ├─ parse_media_page / discover_new_firms / discover_relations / add_relation
      ├─ list_catalog_sources / discover_catalog_assets / fetch_pdf_text
      ├─ list_candidates
      ├─ search_notion / search_r2 / search_memory
      ├─ batch_parse / fetch_and_parse
+     ├─ upsert_parse_rule / rate_parse / improve_parsing_skill / promote_host_skill
      ├─ extract_market_intel  (new_firm | relation | competitor)
      └─ remember
             │

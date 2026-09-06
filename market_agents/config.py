@@ -160,6 +160,10 @@ class AgenticConfig(BaseModel):
     trace_dir: str = "data/agent_traces"
     learn_parse_rules: bool = True
     parse_rules_path: str = "data/knowledge/site_parse_rules.json"
+    # Wspólna baza umiejętności parsowania (agenty uczą się razem)
+    learn_parsing_skills: bool = True
+    parsing_skills_path: str = "data/knowledge/parsing_skills.json"
+    auto_promote_host_skills: bool = True
 
 
 class AgentsConfig(BaseModel):

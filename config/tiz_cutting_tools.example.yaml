@@ -501,5 +501,10 @@ agents:
     parallel_fetches: 6
     require_tool_use: true
     trace_dir: data/agent_traces
+    learn_parse_rules: true
+    parse_rules_path: data/knowledge/site_parse_rules.json
+    learn_parsing_skills: true
+    parsing_skills_path: data/knowledge/parsing_skills.json
+    auto_promote_host_skills: true
 schedule:
   every_hours: 6

@@ -21,6 +21,7 @@ from market_agents.memory import MarketMemory
 from market_agents.models import MarketItem
 from market_agents.parse_rules import PARSE_METHODS, SiteParseRulesStore
 from market_agents.parsing import IntelligentParser, ParsedDocument
+from market_agents.parsing_skills import SKILL_CATEGORIES, ParsingSkillsStore
 
 
 ToolFn = Callable[[dict[str, Any]], dict[str, Any]]
@@ -42,6 +43,12 @@ class ToolRegistry:
             if config.agents.agentic.learn_parse_rules
             else SiteParseRulesStore()
         )
+        if config.agents.agentic.learn_parsing_skills:
+            self._parsing_skills = ParsingSkillsStore.load(
+                data_dir=config.data_path, with_seeds=True
+            )
+        else:
+            self._parsing_skills = ParsingSkillsStore()
         self.parser = IntelligentParser(
             rules=self._parse_rules if config.agents.agentic.learn_parse_rules else None,
             learn=bool(config.agents.agentic.learn_parse_rules),
@@ -81,6 +88,12 @@ class ToolRegistry:
             "list_parse_rules": self.list_parse_rules,
             "upsert_parse_rule": self.upsert_parse_rule,
             "rate_parse": self.rate_parse,
+            "list_parsing_skills": self.list_parsing_skills,
+            "match_parsing_skills": self.match_parsing_skills,
+            "learn_parsing_skill": self.learn_parsing_skill,
+            "improve_parsing_skill": self.improve_parsing_skill,
+            "rate_parsing_skill": self.rate_parsing_skill,
+            "promote_host_skill": self.promote_host_skill,
         }
         self._known: KnownFirmsIndex | None = None
         self._relations: FirmRelationsGraph | None = None
@@ -764,6 +777,215 @@ class ToolRegistry:
                     },
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_parsing_skills",
+                    "description": (
+                        "Wspólna baza umiejętności parsowania (shared across agents): "
+                        "targi, artykuły, katalogi, ekstrakcja firm/powiązań. "
+                        "Agenty uczą się razem i ulepszają te skills."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "category": {
+                                "type": "string",
+                                "enum": list(SKILL_CATEGORIES),
+                            },
+                            "limit": {"type": "integer", "default": 50},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "match_parsing_skills",
+                    "description": (
+                        "Dobierz najlepsze wspólne skills do URL / kind "
+                        "(trade_fair, magazine, portal, catalog…)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string"},
+                            "kind": {"type": "string"},
+                            "limit": {"type": "integer", "default": 5},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "learn_parsing_skill",
+                    "description": (
+                        "Naucz / zapisz nową współdzieloną umiejętność parsowania "
+                        "(CSS, keywords, hints, patterns). Inne agenty od razu z niej korzystają."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "skill_id": {"type": "string"},
+                            "category": {
+                                "type": "string",
+                                "enum": list(SKILL_CATEGORIES),
+                            },
+                            "description": {"type": "string"},
+                            "preferred_method": {
+                                "type": "string",
+                                "enum": list(PARSE_METHODS),
+                            },
+                            "css_selectors": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "drop_selectors": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "link_keywords": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "extract_patterns": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "hints": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "applies_to_hosts": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "applies_to_kinds": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "url_contains": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "notes": {"type": "string"},
+                            "examples": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "taught_by": {"type": "string", "default": "parsing_agent"},
+                            "merge": {"type": "boolean", "default": True},
+                        },
+                        "required": ["name"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "improve_parsing_skill",
+                    "description": (
+                        "Ulepsz istniejącą umiejętność (nowy CSS / metoda / hints) "
+                        "i podbij version — wspólna ewolucja parsera."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "skill_id": {"type": "string"},
+                            "preferred_method": {
+                                "type": "string",
+                                "enum": list(PARSE_METHODS),
+                            },
+                            "css_selectors": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "drop_selectors": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "link_keywords": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "extract_patterns": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "hints": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "applies_to_hosts": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "applies_to_kinds": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "url_contains": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "notes": {"type": "string"},
+                            "taught_by": {"type": "string", "default": "parsing_agent"},
+                        },
+                        "required": ["skill_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "rate_parsing_skill",
+                    "description": (
+                        "Oceń skill po użyciu (0–1). Wysoka ocena wzmacnia skill; "
+                        "niska → improve_parsing_skill."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "skill_id": {"type": "string"},
+                            "quality_0_to_1": {"type": "number"},
+                            "notes": {"type": "string"},
+                            "taught_by": {"type": "string"},
+                        },
+                        "required": ["skill_id", "quality_0_to_1"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "promote_host_skill",
+                    "description": (
+                        "Wypromuj udaną regułę hosta do wspólnej umiejętności "
+                        "(inne agenty / kolejne runy od razu z niej korzystają)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "host_or_url": {"type": "string"},
+                            "preferred_method": {
+                                "type": "string",
+                                "enum": list(PARSE_METHODS),
+                            },
+                            "css_selector": {"type": "string"},
+                            "category": {
+                                "type": "string",
+                                "enum": list(SKILL_CATEGORIES),
+                            },
+                            "notes": {"type": "string"},
+                            "taught_by": {"type": "string"},
+                        },
+                        "required": ["host_or_url"],
+                    },
+                },
+            },
         ]
 
     def call(self, name: str, arguments: dict[str, Any] | str) -> dict[str, Any]:
@@ -1353,6 +1575,147 @@ class ToolRegistry:
             "parse_rate",
             f"rate {url} q={quality:.2f}",
             meta=result.get("rule") or {},
+        )
+        promoted = None
+        if (
+            self.config.agents.agentic.learn_parsing_skills
+            and self.config.agents.agentic.auto_promote_host_skills
+            and quality >= 0.75
+            and result.get("rule")
+        ):
+            rule = result["rule"]
+            promoted = self._parsing_skills.promote_host_rule(
+                url,
+                preferred_method=str(rule.get("preferred_method") or "auto"),
+                css_selector=str(rule.get("css_selector") or ""),
+                notes=f"auto-promote from rate_parse q={quality:.2f}",
+                taught_by="parsing_agent",
+            )
+            self._parsing_skills.save(self.config.data_path)
+        out = {**result, "path": str(path)}
+        if promoted:
+            out["promoted_skill"] = promoted.get("skill")
+        return out
+
+    def list_parsing_skills(self, args: dict[str, Any]) -> dict[str, Any]:
+        rows = self._parsing_skills.list_skills(
+            query=str(args.get("query") or "").strip() or None,
+            category=str(args.get("category") or "").strip() or None,
+            limit=int(args.get("limit") or 50),
+        )
+        return {
+            "ok": True,
+            "count": len(rows),
+            "skills": rows,
+            "categories": list(SKILL_CATEGORIES),
+            "learn_enabled": bool(self.config.agents.agentic.learn_parsing_skills),
+        }
+
+    def match_parsing_skills(self, args: dict[str, Any]) -> dict[str, Any]:
+        rows = self._parsing_skills.match(
+            url=str(args.get("url") or "").strip() or None,
+            kind=str(args.get("kind") or "").strip() or None,
+            limit=int(args.get("limit") or 5),
+        )
+        return {"ok": True, "count": len(rows), "skills": rows}
+
+    def learn_parsing_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+        name = str(args.get("name") or "").strip()
+        if not name:
+            return {"ok": False, "error": "name required"}
+        try:
+            result = self._parsing_skills.learn(
+                name=name,
+                skill_id=str(args.get("skill_id") or "").strip() or None,
+                category=str(args.get("category") or "generic"),
+                description=str(args.get("description") or ""),
+                preferred_method=str(args.get("preferred_method") or "auto"),
+                css_selectors=list(args.get("css_selectors") or []) or None,
+                drop_selectors=list(args.get("drop_selectors") or []) or None,
+                link_keywords=list(args.get("link_keywords") or []) or None,
+                extract_patterns=list(args.get("extract_patterns") or []) or None,
+                hints=list(args.get("hints") or []) or None,
+                applies_to_hosts=list(args.get("applies_to_hosts") or []) or None,
+                applies_to_kinds=list(args.get("applies_to_kinds") or []) or None,
+                url_contains=list(args.get("url_contains") or []) or None,
+                taught_by=str(args.get("taught_by") or "parsing_agent"),
+                notes=str(args.get("notes") or ""),
+                examples=list(args.get("examples") or []) or None,
+                merge=bool(args.get("merge", True)),
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        path = self._parsing_skills.save(self.config.data_path)
+        self.memory.add(
+            "parsing_skill",
+            f"learn {result['skill']['id']} v{result['skill']['version']} "
+            f"({result.get('action')})",
+            meta=result.get("skill") or {},
+        )
+        return {**result, "path": str(path)}
+
+    def improve_parsing_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+        skill_id = str(args.get("skill_id") or "").strip()
+        if not skill_id:
+            return {"ok": False, "error": "skill_id required"}
+        result = self._parsing_skills.improve(
+            skill_id,
+            preferred_method=str(args.get("preferred_method") or "") or None,
+            css_selectors=list(args.get("css_selectors") or []) or None,
+            drop_selectors=list(args.get("drop_selectors") or []) or None,
+            link_keywords=list(args.get("link_keywords") or []) or None,
+            extract_patterns=list(args.get("extract_patterns") or []) or None,
+            hints=list(args.get("hints") or []) or None,
+            applies_to_hosts=list(args.get("applies_to_hosts") or []) or None,
+            applies_to_kinds=list(args.get("applies_to_kinds") or []) or None,
+            url_contains=list(args.get("url_contains") or []) or None,
+            notes=str(args.get("notes") or ""),
+            taught_by=str(args.get("taught_by") or "parsing_agent"),
+        )
+        if not result.get("ok"):
+            return result
+        path = self._parsing_skills.save(self.config.data_path)
+        self.memory.add(
+            "parsing_skill",
+            f"improve {skill_id} → v{result['skill']['version']}",
+            meta=result.get("skill") or {},
+        )
+        return {**result, "path": str(path)}
+
+    def rate_parsing_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+        skill_id = str(args.get("skill_id") or "").strip()
+        if not skill_id:
+            return {"ok": False, "error": "skill_id required"}
+        result = self._parsing_skills.rate(
+            skill_id,
+            quality_0_to_1=float(args.get("quality_0_to_1") or 0),
+            notes=str(args.get("notes") or ""),
+            taught_by=str(args.get("taught_by") or "parsing_agent"),
+        )
+        if not result.get("ok"):
+            return result
+        path = self._parsing_skills.save(self.config.data_path)
+        return {**result, "path": str(path)}
+
+    def promote_host_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+        host_or_url = str(args.get("host_or_url") or "").strip()
+        if not host_or_url:
+            return {"ok": False, "error": "host_or_url required"}
+        result = self._parsing_skills.promote_host_rule(
+            host_or_url,
+            preferred_method=str(args.get("preferred_method") or "auto"),
+            css_selector=str(args.get("css_selector") or ""),
+            category=str(args.get("category") or "generic"),
+            notes=str(args.get("notes") or ""),
+            taught_by=str(args.get("taught_by") or "parsing_agent"),
+        )
+        if not result.get("ok"):
+            return result
+        path = self._parsing_skills.save(self.config.data_path)
+        self.memory.add(
+            "parsing_skill",
+            f"promote host → {result['skill']['id']}",
+            meta=result.get("skill") or {},
         )
         return {**result, "path": str(path)}
 

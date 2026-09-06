@@ -61,7 +61,11 @@ class ParsingAgent:
             "8) add_relation — zapisz potwierdzone powiązania (source→target)\n"
             "9) list_candidates / list_catalog_sources — świeże sygnały + huby katalogów\n"
             "10) discover_catalog_assets / fetch_pdf_text / fetch_and_parse — głęboki research\n"
-            "10b) ROZWIJAJ PARSER: gdy chars niskie / ok=false → list_parse_rules, "
+            "10b) WSPÓLNE SKILLS PARSOWANIA (agenty uczą się razem): "
+            "list_parsing_skills / match_parsing_skills przed trudnym URL; "
+            "po sukcesie learn_parsing_skill lub improve_parsing_skill + rate_parsing_skill; "
+            "udaną regułę hosta → promote_host_skill (dzielona z innymi agentami)\n"
+            "10c) ROZWIJAJ PARSER PER-HOST: gdy chars niskie / ok=false → list_parse_rules, "
             "upsert_parse_rule (preferred_method/css_selector), rate_parse, "
             "potem fetch_and_parse z bypass_cache=true\n"
             "11) extract_market_intel — signal_type=new_firm | relation | competitor\n"
@@ -85,9 +89,12 @@ class ParsingAgent:
             f"Liczba kandydatów: {len(candidates)}\n"
             f"Limit głębokich parse: {self.config.agents.agentic.max_deep_parses}\n"
             f"Learn parse rules: {self.config.agents.agentic.learn_parse_rules}\n"
+            f"Learn parsing skills (shared): {self.config.agents.agentic.learn_parsing_skills}\n"
             "Zacznij od list_known_firms (Notion katalog). Dla ważnych marek użyj "
-            "get_firm_presentation. Potem list_media_sources + extract_fair_exhibitors "
-            "(targi), list_relations, discover_new_firms i discover_relations."
+            "get_firm_presentation. Potem list_parsing_skills + list_media_sources + "
+            "extract_fair_exhibitors (targi), list_relations, discover_new_firms "
+            "i discover_relations. Po udanym parse: rate_parse / rate_parsing_skill "
+            "albo improve_parsing_skill."
         )
 
         messages: list[dict[str, Any]] = [
