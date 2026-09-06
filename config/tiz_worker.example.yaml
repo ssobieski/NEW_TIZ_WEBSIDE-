@@ -28,6 +28,8 @@ sources:
   web: []
   catalogs: []
   media: []
+  social: []
+  literature: []
   firm_discovery:
     enabled: true
     max_items: 15

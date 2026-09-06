@@ -17,6 +17,7 @@ KNOWLEDGE_FILES = (
     "crawl_health.json",
     "available_pricelists.json",
     "product_tech.json",
+    "literature.json",
 )
 
 FEEDBACK_FILES = (

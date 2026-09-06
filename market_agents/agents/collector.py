@@ -7,6 +7,7 @@ from market_agents.collectors import (
     CatalogCollector,
     FirmDiscoveryCollector,
     IndustryMediaCollector,
+    LiteratureCollector,
     SocialMediaCollector,
     RssCollector,
     WebCollector,
@@ -21,7 +22,7 @@ from market_agents.storage import Storage
 
 
 class CollectorAgent:
-    """Zbiera sygnały: RSS/WWW + katalogi + media + social + discovery + Notion + R2."""
+    """Zbiera sygnały: RSS/WWW + katalogi + media + social + literatura + discovery + Notion + R2."""
 
     def __init__(self, config: AppConfig, storage: Storage) -> None:
         self.config = config
@@ -58,6 +59,10 @@ class CollectorAgent:
                         lookback_hours=max(self.config.agents.lookback_hours, 720),
                     )
                 )
+
+        for src in self.config.sources.literature:
+            if src.enabled:
+                collectors.append(LiteratureCollector(src, fetcher=fetcher))
 
         if self.config.sources.firm_discovery.enabled:
             collectors.append(
@@ -118,6 +123,7 @@ class CollectorAgent:
                 or src_name.startswith("catalog:")
                 or src_name.startswith("media:")
                 or src_name.startswith("social:")
+                or src_name.startswith("literature:")
             )
             if is_priority:
                 score = max(score, float(item.relevance_score or 0.45))

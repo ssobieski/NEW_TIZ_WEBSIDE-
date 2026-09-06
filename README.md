@@ -140,6 +140,21 @@ python -m market_agents run --agentic
 Tooli: `list_social_sources`, `discover_social_posts`, `parse_social_post`  
 Konfiguracja: `sources.social` w profilu TIZ.
 
+## Literatura: książki, artykuły, wideo
+
+Korpus jak w Notion **Pozycje** (`Type=book|paper|video`): odkrywanie hubów WWW + sync z Notion.
+Lokalnie: `book` | `article` | `video` | `proceedings` | `whitepaper` (`paper`→`article`).
+
+```bash
+python -m market_agents literature --sources
+python -m market_agents literature --kind article
+python -m market_agents run --agentic
+```
+
+Rejestr: `data/knowledge/literature.json`  
+Tooli: `list_literature_sources`, `discover_literature`, `list_literature`, `register_literature`, `sync_notion_literature`  
+Config: `sources.literature` + `sources.notion.literature_database`.
+
 ## Informacje techniczne o produktach
 
 Agenty zbierają **źródła tech** konkurencji (cutting data, handbooki, application guides, ISO 13399)

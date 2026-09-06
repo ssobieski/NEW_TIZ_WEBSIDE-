@@ -311,6 +311,64 @@ def social_cmd(
     )
 
 
+@app.command("literature")
+def literature_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    kind: Optional[str] = typer.Option(
+        None, "--kind", help="book|article|video|proceedings|whitepaper"
+    ),
+    topic: Optional[str] = typer.Option(None, "--topic"),
+    q: Optional[str] = typer.Option(None, "--q"),
+    sources: bool = typer.Option(False, "--sources", help="Pokaż sources.literature z config"),
+) -> None:
+    """Pokaż zarejestrowaną literaturę (książki / artykuły / wideo) lub źródła."""
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    if sources:
+        rows = cfg.sources.literature
+        if kind:
+            rows = [s for s in rows if (s.kind or "mixed").lower() == kind.lower()]
+        table = Table(title=f"Literature sources ({len(rows)})")
+        table.add_column("Name")
+        table.add_column("Kind")
+        table.add_column("Publisher")
+        table.add_column("URL")
+        table.add_column("Feed")
+        for s in rows:
+            table.add_row(
+                s.name,
+                s.kind or "mixed",
+                s.publisher or s.brand or "—",
+                s.url[:48],
+                "yes" if s.feed_url else "—",
+            )
+        console.print(table)
+        return
+
+    from market_agents.literature import LiteratureRegistry
+
+    registry = LiteratureRegistry.load(cfg.data_path)
+    items = registry.list(kind=kind, topic=topic, q=q, limit=100)
+    table = Table(title=f"Literatura ({len(items)} / {len(registry.items)})")
+    table.add_column("Kind")
+    table.add_column("Tytuł")
+    table.add_column("Year")
+    table.add_column("URL")
+    for item in items:
+        table.add_row(
+            item.kind,
+            item.title[:40],
+            item.year or "—",
+            item.url[:50],
+        )
+    console.print(table)
+    console.print(
+        "Notion Pozycje: Type book|paper|video → local book|article|video. "
+        "Sync: tool sync_notion_literature."
+    )
+    console.print(f"Plik: {LiteratureRegistry.path_for(cfg.data_path)}")
+
+
 @app.command("product-tech")
 def product_tech_cmd(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),

@@ -4,6 +4,7 @@ from market_agents.collectors.catalog import CatalogCollector
 from market_agents.collectors.firm_discovery import FirmDiscoveryCollector
 from market_agents.collectors.media import IndustryMediaCollector
 from market_agents.collectors.social import SocialMediaCollector
+from market_agents.collectors.literature import LiteratureCollector
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import CloudflareR2Collector, build_r2_collector
 
@@ -14,6 +15,7 @@ __all__ = [
     "FirmDiscoveryCollector",
     "IndustryMediaCollector",
     "SocialMediaCollector",
+    "LiteratureCollector",
     "NotionCollector",
     "CloudflareR2Collector",
     "build_r2_collector",

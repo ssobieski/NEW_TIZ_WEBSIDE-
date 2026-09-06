@@ -157,6 +157,44 @@ class NotionCollector:
         rows.sort(key=lambda x: str(x.get("company") or "").lower())
         return rows[:limit]
 
+    def list_literature(
+        self,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """
+        Lista pozycji z bazy Notion „Pozycje” (literatura).
+        Type Notion: book|paper|video|code → local: book|article|video|(skip code or map article).
+        """
+        db_ref = self.config.literature_database
+        if not db_ref:
+            raise RuntimeError(
+                "Brak sources.notion.literature_database w config — "
+                "wskaż ID bazy „Pozycje” / literatura"
+            )
+        database_id = _to_notion_id(db_ref)
+        rows: list[dict[str, Any]] = []
+        cursor = None
+        with httpx.Client(timeout=60, headers=self._headers) as client:
+            while len(rows) < limit:
+                payload: dict[str, Any] = {"page_size": min(100, limit - len(rows))}
+                if cursor:
+                    payload["start_cursor"] = cursor
+                r = client.post(
+                    f"https://api.notion.com/v1/databases/{database_id}/query",
+                    json=payload,
+                )
+                r.raise_for_status()
+                data = r.json()
+                for page in data.get("results", []):
+                    item = _literature_from_page(page)
+                    if item.get("title"):
+                        rows.append(item)
+                if not data.get("has_more"):
+                    break
+                cursor = data.get("next_cursor")
+        rows.sort(key=lambda x: str(x.get("title") or "").lower())
+        return rows[:limit]
+
     def _get_page(self, page_id: str) -> dict[str, Any]:
         with httpx.Client(timeout=60, headers=self._headers) as client:
             r = client.get(f"https://api.notion.com/v1/pages/{page_id}")
@@ -338,6 +376,50 @@ def _firm_from_page(page: dict[str, Any]) -> dict[str, Any]:
         row["presentation"] = presentation
         row["presentation_source"] = "notion_property"
     return row
+
+
+_NOTION_TYPE_TO_KIND = {
+    "book": "book",
+    "paper": "article",
+    "article": "article",
+    "video": "video",
+    "proceedings": "proceedings",
+    "whitepaper": "whitepaper",
+    "white paper": "whitepaper",
+    "code": "article",  # kod / repo traktujemy jako powiązany materiał
+}
+
+
+def _literature_from_page(page: dict[str, Any]) -> dict[str, Any]:
+    props = page.get("properties") or {}
+    title = _page_title(page) or _prop_plain(props.get("Title") or props.get("Name"))
+    raw_type = _prop_plain(props.get("Type") or props.get("Rodzaj") or props.get("Kind")).lower()
+    kind = _NOTION_TYPE_TO_KIND.get(raw_type, "article" if raw_type else "article")
+    topics_raw = _prop_plain(props.get("Topics") or props.get("Tematy") or props.get("Tags"))
+    topics = [t.strip() for t in re.split(r"[,;|/]", topics_raw) if t.strip()] if topics_raw else []
+    return {
+        "id": page.get("id"),
+        "title": title,
+        "kind": kind,
+        "notion_type": raw_type or None,
+        "authors": _prop_plain(props.get("Authors") or props.get("Author") or props.get("Autorzy"))
+        or None,
+        "year": _prop_plain(props.get("Year") or props.get("Rok")) or None,
+        "doi": _prop_plain(props.get("DOI") or props.get("Doi")) or None,
+        "venue": _prop_plain(props.get("Venue") or props.get("Journal") or props.get("Źródło"))
+        or None,
+        "url": _prop_plain(props.get("URL") or props.get("Url") or props.get("Link")) or None,
+        "notes": _prop_plain(props.get("Notes") or props.get("Notatki") or props.get("Note"))
+        or "",
+        "language": _prop_plain(props.get("Language") or props.get("Język")) or None,
+        "country": _prop_plain(props.get("Country") or props.get("Kraj")) or None,
+        "citations": _prop_plain(props.get("Citations") or props.get("Cytowania")) or None,
+        "method": _prop_plain(props.get("Method") or props.get("Metoda")) or None,
+        "code": _prop_plain(props.get("Code") or props.get("Repo")) or None,
+        "topics": topics,
+        "notion_url": page.get("url"),
+        "source": "notion:pozycje",
+    }
 
 
 def _rich_text(parts: list[dict[str, Any]] | None) -> str:

@@ -9,15 +9,23 @@ from market_agents.collectors.catalog import CatalogCollector
 from market_agents.collectors.firm_discovery import FirmDiscoveryCollector
 from market_agents.collectors.media import IndustryMediaCollector, extract_exhibitors_from_html
 from market_agents.collectors.social import SocialMediaCollector, detect_platform, SOCIAL_PLATFORMS
+from market_agents.collectors.literature import LiteratureCollector
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import build_r2_collector
-from market_agents.config import AppConfig, CatalogSource, IndustryMediaSource, SocialMediaSource
+from market_agents.config import (
+    AppConfig,
+    CatalogSource,
+    IndustryMediaSource,
+    LiteratureSource,
+    SocialMediaSource,
+)
 from market_agents.firm_relations import (
     RELATION_TYPES,
     FirmRelationsGraph,
     extract_relation_candidates,
 )
 from market_agents.firms import KnownFirmsIndex, extract_candidate_firm_names, filter_new_firms
+from market_agents.literature import LITERATURE_KINDS, LiteratureRegistry, classify_literature_kind
 from market_agents.memory import MarketMemory
 from market_agents.models import MarketItem
 from market_agents.parse_rules import PARSE_METHODS, SiteParseRulesStore
@@ -92,6 +100,11 @@ class ToolRegistry:
             "list_social_sources": self.list_social_sources,
             "discover_social_posts": self.discover_social_posts,
             "parse_social_post": self.parse_social_post,
+            "list_literature_sources": self.list_literature_sources,
+            "discover_literature": self.discover_literature,
+            "list_literature": self.list_literature,
+            "register_literature": self.register_literature,
+            "sync_notion_literature": self.sync_notion_literature,
             "list_known_firms": self.list_known_firms,
             "get_firm_presentation": self.get_firm_presentation,
             "discover_new_firms": self.discover_new_firms,
@@ -246,6 +259,7 @@ class ToolRegistry:
                                     "pricing",
                                     "product_tech",
                                     "social",
+                                    "literature",
                                     "noise",
                                 ],
                             },
@@ -753,6 +767,119 @@ class ToolRegistry:
                             "url": {"type": "string"},
                             "platform": {"type": "string"},
                             "max_chars": {"type": "integer", "default": 8000},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_literature_sources",
+                    "description": (
+                        "Lista źródeł literatury (książki / artykuły / wideo / proceedings). "
+                        "sources.literature — huby wydawców, arXiv, CTE, kanały edukacyjne."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "description": "book|article|video|proceedings|whitepaper|mixed",
+                            },
+                            "enabled_only": {"type": "boolean", "default": True},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discover_literature",
+                    "description": (
+                        "Odkryj książki/artykuły/wideo z hubu literatury (RSS lub HTML). "
+                        "Opcjonalnie zapisz do data/knowledge/literature.json."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source_name": {"type": "string"},
+                            "url": {"type": "string"},
+                            "kind": {"type": "string"},
+                            "max_items": {"type": "integer", "default": 25},
+                            "register": {
+                                "type": "boolean",
+                                "default": True,
+                                "description": "Zapisz znalezione pozycje do literature.json",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_literature",
+                    "description": (
+                        "Lista zarejestrowanej literatury "
+                        "(data/knowledge/literature.json): book|article|video|…"
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"type": "string"},
+                            "topic": {"type": "string"},
+                            "q": {"type": "string"},
+                            "limit": {"type": "integer", "default": 50},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "register_literature",
+                    "description": (
+                        "Zarejestruj książkę / artykuł / wideo w literature.json "
+                        "(URL, kind, authors, year, topics)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string"},
+                            "title": {"type": "string"},
+                            "kind": {
+                                "type": "string",
+                                "description": "book|article|video|proceedings|whitepaper",
+                            },
+                            "authors": {"type": "string"},
+                            "year": {"type": "string"},
+                            "source": {"type": "string"},
+                            "brand": {"type": "string"},
+                            "topics": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "access": {"type": "string", "default": "unknown"},
+                            "notes": {"type": "string"},
+                            "confirmed": {"type": "boolean", "default": False},
+                        },
+                        "required": ["url"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "sync_notion_literature",
+                    "description": (
+                        "Zsynchronizuj bazę Notion „Pozycje” (Type=book|paper|video) "
+                        "do lokalnego literature.json. paper→article."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "default": 200},
+                            "save": {"type": "boolean", "default": True},
                         },
                     },
                 },
@@ -2056,6 +2183,175 @@ class ToolRegistry:
                 },
             )
         return result
+
+    def list_literature_sources(self, args: dict[str, Any]) -> dict[str, Any]:
+        kind = str(args.get("kind") or "").strip().lower()
+        enabled_only = args.get("enabled_only", True)
+        rows = []
+        for src in self.config.sources.literature:
+            if enabled_only and not src.enabled:
+                continue
+            sk = (src.kind or "mixed").lower()
+            if kind and sk != kind and not (kind == "article" and sk in {"article", "mixed"}):
+                if kind != sk:
+                    continue
+            rows.append(
+                {
+                    "name": src.name,
+                    "kind": sk,
+                    "brand": src.brand,
+                    "publisher": src.publisher,
+                    "url": src.url,
+                    "feed_url": src.feed_url,
+                    "language": src.language,
+                    "enabled": src.enabled,
+                }
+            )
+        return {"ok": True, "count": len(rows), "sources": rows}
+
+    def _resolve_literature(self, args: dict[str, Any]) -> LiteratureCollector:
+        source_name = str(args.get("source_name") or "").strip().lower()
+        url = str(args.get("url") or "").strip()
+        kind = str(args.get("kind") or "").strip().lower() or "mixed"
+        if source_name:
+            for src in self.config.sources.literature:
+                if src.name.lower() == source_name or (
+                    src.brand and src.brand.lower() == source_name
+                ):
+                    return LiteratureCollector(src, fetcher=self._fetcher)
+        if url:
+            return LiteratureCollector(
+                LiteratureSource(
+                    name="ad-hoc",
+                    url=url,
+                    kind=kind if kind in {*LITERATURE_KINDS, "mixed"} else "mixed",
+                    brand="unknown",
+                ),
+                fetcher=self._fetcher,
+            )
+        enabled = [s for s in self.config.sources.literature if s.enabled]
+        if enabled:
+            return LiteratureCollector(enabled[0], fetcher=self._fetcher)
+        raise RuntimeError(
+            "Brak sources.literature w config — dodaj huby książek/artykułów/wideo"
+        )
+
+    def discover_literature(self, args: dict[str, Any]) -> dict[str, Any]:
+        max_items = int(args.get("max_items") or 25)
+        register = args.get("register", True)
+        collector = self._resolve_literature(args)
+        result = collector.discover_items(max_items=max_items)
+        registered = 0
+        if register and result.get("ok"):
+            registry = LiteratureRegistry.load(self.config.data_path)
+            saved = registry.ingest_discovered(
+                list(result.get("items") or []),
+                source=collector.name,
+                auto_save_dir=self.config.data_path,
+            )
+            registered = len(saved)
+            result["registered"] = registered
+            result["registry_path"] = str(LiteratureRegistry.path_for(self.config.data_path))
+        self.memory.add(
+            "literature_discover",
+            f"{collector.name}: {result.get('count', 0)} items registered={registered}",
+            meta={
+                "source": collector.name,
+                "kind": getattr(collector, "kind", None),
+                "url": result.get("url"),
+            },
+        )
+        return result
+
+    def list_literature(self, args: dict[str, Any]) -> dict[str, Any]:
+        registry = LiteratureRegistry.load(self.config.data_path)
+        items = registry.list(
+            kind=str(args.get("kind") or "").strip() or None,
+            topic=str(args.get("topic") or "").strip() or None,
+            q=str(args.get("q") or "").strip() or None,
+            limit=int(args.get("limit") or 50),
+        )
+        return {
+            "ok": True,
+            "count": len(items),
+            "total": len(registry.items),
+            "items": [i.to_dict() for i in items],
+            "path": str(LiteratureRegistry.path_for(self.config.data_path)),
+        }
+
+    def register_literature(self, args: dict[str, Any]) -> dict[str, Any]:
+        url = str(args.get("url") or "").strip()
+        if not url:
+            return {"ok": False, "error": "url jest wymagany"}
+        kind = str(args.get("kind") or "").strip().lower() or None
+        if kind and kind not in LITERATURE_KINDS:
+            kind = classify_literature_kind(url, str(args.get("title") or ""))
+        topics = args.get("topics")
+        if isinstance(topics, str):
+            topics = [t.strip() for t in topics.split(",") if t.strip()]
+        registry = LiteratureRegistry.load(self.config.data_path)
+        item = registry.upsert(
+            url=url,
+            title=str(args.get("title") or "").strip() or None,
+            kind=kind,
+            authors=str(args.get("authors") or "").strip() or None,
+            year=str(args.get("year") or "").strip() or None,
+            source=str(args.get("source") or "").strip() or None,
+            brand=str(args.get("brand") or "").strip() or None,
+            topics=list(topics or []) or None,
+            access=str(args.get("access") or "unknown"),
+            notes=str(args.get("notes") or ""),
+            confirmed=bool(args.get("confirmed")),
+        )
+        path = registry.save(self.config.data_path)
+        self.memory.add(
+            "literature_register",
+            f"{item.kind}: {item.title}",
+            meta={"url": item.url, "kind": item.kind},
+        )
+        return {"ok": True, "item": item.to_dict(), "path": str(path)}
+
+    def sync_notion_literature(self, args: dict[str, Any]) -> dict[str, Any]:
+        limit = int(args.get("limit") or 200)
+        save = args.get("save", True)
+        rows = self._get_notion().list_literature(limit=limit)
+        registry = LiteratureRegistry.load(self.config.data_path)
+        saved = 0
+        for row in rows:
+            url = str(row.get("url") or row.get("notion_url") or "").strip()
+            if not url:
+                continue
+            kind = str(row.get("kind") or "article")
+            if kind not in LITERATURE_KINDS:
+                kind = "article"
+            registry.upsert(
+                url=url,
+                title=str(row.get("title") or "") or None,
+                kind=kind,
+                authors=row.get("authors"),
+                year=row.get("year"),
+                source=str(row.get("source") or "notion:pozycje"),
+                topics=list(row.get("topics") or []),
+                access="unknown",
+                notes=str(row.get("notes") or "")[:1000],
+                confirmed=True,
+            )
+            saved += 1
+        path = None
+        if save and saved:
+            path = str(registry.save(self.config.data_path))
+        self.memory.add(
+            "literature_notion_sync",
+            f"synced {saved}/{len(rows)} from Notion Pozycje",
+            meta={"saved": saved, "fetched": len(rows)},
+        )
+        return {
+            "ok": True,
+            "fetched": len(rows),
+            "saved": saved,
+            "path": path,
+            "sample": rows[:5],
+        }
 
     def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:
         query = str(args.get("query") or "").strip().lower()

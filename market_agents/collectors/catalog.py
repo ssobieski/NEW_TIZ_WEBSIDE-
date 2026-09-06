@@ -154,7 +154,7 @@ class CatalogCollector(BaseCollector):
                     source=f"catalog:{self.source.name}",
                     summary=f"Odkryty asset ({atype}) z hubu {url}",
                     tags=[atype, "discovered", brand],
-                    relevance_score=(0.85 if atype in {"pricelist", "cutting_data", "handbook", "iso13399", "application_guide", "tech_datasheet", "grade_chart"} else (0.65 if atype == "pdf" else 0.5)),
+                    relevance_score=(0.85 if atype in {"pricelist", "cutting_data", "handbook", "iso13399", "application_guide", "tech_datasheet", "grade_chart", "book", "article", "video", "proceedings", "whitepaper"} else (0.65 if atype == "pdf" else 0.5)),
                 )
             )
             if len(items) >= max_items:
@@ -197,7 +197,26 @@ class CatalogCollector(BaseCollector):
                 break
 
         # Preferuj PDF / catalog / shop
-        priority = {"pricelist": 0, "cutting_data": 1, "handbook": 1, "iso13399": 1, "application_guide": 1, "tech_datasheet": 1, "grade_chart": 1, "pdf": 2, "ecatalog": 3, "digital_catalogue": 4, "eshop": 5, "publication": 6, "link": 9}
+        priority = {
+            "pricelist": 0,
+            "cutting_data": 1,
+            "handbook": 1,
+            "iso13399": 1,
+            "application_guide": 1,
+            "tech_datasheet": 1,
+            "grade_chart": 1,
+            "book": 2,
+            "article": 2,
+            "video": 2,
+            "proceedings": 2,
+            "whitepaper": 2,
+            "pdf": 3,
+            "ecatalog": 4,
+            "digital_catalogue": 5,
+            "eshop": 6,
+            "publication": 7,
+            "link": 9,
+        }
         found.sort(key=lambda x: priority.get(str(x.get("asset_type")), 8))
         return found
 
@@ -263,6 +282,12 @@ def _classify_asset(url: str, text: str) -> str | None:
 
         kind = classify_tech_kind(url, text)
         return kind or "tech_datasheet"
+    # Literatura (książka / artykuł / wideo) — przed generycznym publication
+    from market_agents.literature import classify_literature_kind
+
+    lit = classify_literature_kind(url, text)
+    if lit in {"book", "article", "video", "proceedings", "whitepaper"}:
+        return lit
     if _PDF_EXT.search(url) or "application/pdf" in blob:
         return "pdf"
     if re.search(r"e-?shop|webshop|/shop|/store|buy.?online", blob):

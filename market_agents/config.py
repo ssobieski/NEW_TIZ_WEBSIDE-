@@ -53,6 +53,8 @@ class NotionConfig(BaseModel):
     root_pages: list[str] = Field(default_factory=list)
     # Baza „Katalogi konkurencji — indeks” ze znanymi firmami
     known_firms_database: str | None = None
+    # Baza „Pozycje” / literatura (book|paper|video|code) — Notion Type→local kind
+    literature_database: str | None = None
     # Opcjonalnie: query po tytule przy sync
     search_queries: list[str] = Field(default_factory=list)
     max_pages: int = 50
@@ -124,6 +126,22 @@ class SocialMediaSource(BaseModel):
     enabled: bool = True
 
 
+class LiteratureSource(BaseModel):
+    """Książki / artykuły / wideo / proceedings (literatura branżowa)."""
+
+    name: str
+    url: str
+    # book | article | video | proceedings | whitepaper | mixed
+    kind: str = "mixed"
+    brand: str | None = None
+    publisher: str | None = None
+    feed_url: str | None = None
+    language: str | None = None
+    link_keywords: list[str] = Field(default_factory=list)
+    max_items: int = 25
+    enabled: bool = True
+
+
 class FirmDiscoveryConfig(BaseModel):
     """Parsing wyszukiwania nowych firm (spoza known_firms)."""
 
@@ -152,6 +170,7 @@ class SourcesConfig(BaseModel):
     catalogs: list[CatalogSource] = Field(default_factory=list)
     media: list[IndustryMediaSource] = Field(default_factory=list)
     social: list[SocialMediaSource] = Field(default_factory=list)
+    literature: list[LiteratureSource] = Field(default_factory=list)
     firm_discovery: FirmDiscoveryConfig = Field(default_factory=FirmDiscoveryConfig)
     notion: NotionConfig = Field(default_factory=NotionConfig)
     cloudflare_r2: CloudflareR2Config = Field(default_factory=CloudflareR2Config)

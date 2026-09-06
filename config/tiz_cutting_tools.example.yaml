@@ -116,8 +116,11 @@ industry:
   - Którzy wystawcy pojawiają się na targach (EMO / AMB / IMTS) poza known_firms?
   - Co piszą czasopisma i portale branżowe o nowych markach / katalogach / przejęciach?
   - Co firmy komunikują w mediach społecznościowych (YouTube/LinkedIn/X) o nowych produktach, katalogach, targach?
+  - "Jakie książki / artykuły naukowe / wideo (literatura: dynamika obróbki, narzędzia) warto dodać do korpusu Pozycje?"
 sources:
   rss:
+  - name: Google News — machining literature books papers
+    url: https://news.google.com/rss/search?q=%22cutting+tools%22+(book+OR+textbook+OR+%22research+paper%22+OR+webinar+OR+proceedings)&hl=en&gl=US&ceid=US:en
   - name: Google News — cutting data / handbooks
     url: https://news.google.com/rss/search?q=%22cutting+tools%22+(%22cutting+data%22+OR+handbook+OR+%22application+guide%22+OR+%22ISO+13399%22)&hl=pl&gl=PL&ceid=PL:pl
   - name: Google News — cutting tools price lists
@@ -233,6 +236,51 @@ sources:
     url: https://www.linkedin.com/company/sandvik-coromant/
     link_keywords: [catalog, launch, product, cutting]
     max_items: 12
+  literature:
+  # Książki / artykuły / wideo — korpus jak Notion „Pozycje” (book|paper|video)
+  - name: Cutting Tool Engineering
+    kind: article
+    publisher: CTE
+    url: https://www.ctemag.com/
+    link_keywords: [article, cutting, tooling, machining, carbide]
+    max_items: 25
+  - name: SME Manufacturing Engineering
+    kind: article
+    publisher: SME
+    url: https://www.sme.org/technologies/articles/
+    link_keywords: [machining, cutting, tooling, manufacturing]
+    max_items: 20
+  - name: arXiv — machining / cutting tools
+    kind: article
+    publisher: arXiv
+    url: https://arxiv.org/search/?query=machining+cutting+tool&searchtype=all&source=header
+    link_keywords: [pdf, abs, machining, cutting, chatter]
+    max_items: 20
+  - name: SpringerLink — machining books
+    kind: book
+    publisher: Springer
+    url: https://link.springer.com/search?query=machining+cutting+tools&facet-content-type=%22Book%22
+    link_keywords: [book, machining, cutting, manufacturing]
+    max_items: 15
+  - name: CIRP Annals overview
+    kind: proceedings
+    publisher: CIRP / Elsevier
+    url: https://www.sciencedirect.com/journal/cirp-annals
+    link_keywords: [article, volume, machining, cutting]
+    max_items: 15
+  - name: YouTube — machining dynamics / chatter
+    kind: video
+    publisher: YouTube
+    url: https://www.youtube.com/results?search_query=machining+dynamics+chatter+stability
+    link_keywords: [watch, machining, chatter, dynamics, lecture]
+    max_items: 15
+  - name: Sandvik Coromant knowledge — tech articles
+    kind: article
+    brand: Sandvik Coromant
+    publisher: Sandvik Coromant
+    url: https://www.sandvik.coromant.com/en-gb/knowledge
+    link_keywords: [article, machining, cutting, handbook, guide]
+    max_items: 20
   catalogs:
   - name: BIG DAISHOWA downloads
     brand: BIG DAISHOWA
@@ -507,18 +555,23 @@ sources:
     - 3c2bdd41-cccd-816f-8171-c28e1128cf1c
     - 3c2bdd41-cccd-8152-9e94-d21ca8f3e95b
     - 308dfae4-647b-40e7-84a3-0b3f8406c769
+    - 3c1bdd41-cccd-8113-abfc-e4de309c512f
     search_queries:
     - katalogi konkurencji
     - ecatalog PDF eshop
     - znane firmy indeks
     - ISO 13399
     - handbook machining
+    - literatura dynamika obróbki
+    - książki artykuły wideo narzędzia
     max_pages: 100
     include_child_pages: true
     # Notion = źródło prawdy: jakie firmy istnieją + ich przedstawienie
     enrich_firm_presentations: true
     presentation_max_chars: 4000
     known_firms_database: 308dfae4-647b-40e7-84a3-0b3f8406c769
+    # Baza Pozycje (Type=book|paper|video|code) — paper→article
+    literature_database: 948d6c02-d3bb-4b30-8c0c-a26f873bf719
   cloudflare_r2:
     enabled: false
     account_id_env: CF_ACCOUNT_ID

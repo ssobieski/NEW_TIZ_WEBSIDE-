@@ -230,6 +230,46 @@ def default_seed_skills() -> list[ParsingSkill]:
             url_contains=["youtube.com", "linkedin.com", "x.com", "twitter.com", "facebook.com", "instagram.com"],
             taught_by="seed",
         ),
+        ParsingSkill(
+            id="literature-books-articles-videos",
+            name="Literatura: książki, artykuły, wideo",
+            category="media_hub",
+            description=(
+                "Korpus naukowy/branżowy: książki (ISBN/Springer), artykuły (DOI/arXiv/CIRP), "
+                "wideo (wykłady/webinaria), proceedings. Sync z Notion Pozycje (paper→article)."
+            ),
+            preferred_method="bs4",
+            link_keywords=[
+                "book",
+                "isbn",
+                "doi",
+                "arxiv",
+                "proceedings",
+                "webinar",
+                "lecture",
+                "machining",
+                "cutting tools",
+                "chatter",
+                "książka",
+                "artykuł",
+            ],
+            hints=[
+                "list_literature_sources → discover_literature → list_literature",
+                "sync_notion_literature gdy Notion Pozycje dostępne",
+                "register_literature z kind=book|article|video|proceedings|whitepaper",
+                "Tematy: cutting_dynamics, tool_design, parameters, coolant, iso13399",
+            ],
+            applies_to_kinds=["book", "article", "video", "proceedings", "whitepaper", "literature"],
+            url_contains=[
+                "doi.org",
+                "arxiv.org",
+                "springer",
+                "sciencedirect",
+                "youtube.com",
+                "isbn",
+            ],
+            taught_by="seed",
+        ),
 ParsingSkill(
             id="product-tech-schema",
             name="Schemat informacji technicznych produktów",
