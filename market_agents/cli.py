@@ -369,6 +369,56 @@ def literature_cmd(
     console.print(f"Plik: {LiteratureRegistry.path_for(cfg.data_path)}")
 
 
+@app.command("ontology")
+def ontology_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    entity_type: Optional[str] = typer.Option(
+        None, "--type", help="material|machine|coolant|process|tool_family|standard|parameter"
+    ),
+    q: Optional[str] = typer.Option(None, "--q"),
+    node: Optional[str] = typer.Option(None, "--node", help="Pokaż sąsiedztwo (np. process:milling)"),
+    seed: bool = typer.Option(False, "--seed", help="Wgraj seed ontologii jeśli graf pusty/mały"),
+) -> None:
+    """Lokalny knowledge graph: materiały / maszyny / chłodziwo / procesy (zamiast Grok)."""
+    from market_agents.ontology import MachiningOntology
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    graph = MachiningOntology.load(cfg.data_path)
+    if seed or len(graph.nodes) < 5:
+        added = graph.merge_seed("config/machining_ontology.seed.json")
+        graph.save(cfg.data_path)
+        console.print(f"Seed: +{added} (nodes={len(graph.nodes)} edges={len(graph.edges)})")
+    if node:
+        nb = graph.neighborhood(node, depth=1)
+        if not nb.get("ok"):
+            console.print(f"[red]{nb.get('error')}[/red]")
+            raise typer.Exit(code=1)
+        table = Table(title=f"Neighborhood: {node}")
+        table.add_column("Source")
+        table.add_column("Relation")
+        table.add_column("Target")
+        for e in nb.get("edges") or []:
+            table.add_row(e["source"], e["relation"], e["target"])
+        console.print(table)
+        console.print(f"Nodes: {nb['counts']['nodes']}  Edges: {nb['counts']['edges']}")
+        return
+    brief = graph.domain_brief()
+    nodes = graph.list_nodes(entity_type=entity_type, q=q, limit=80)
+    table = Table(title=f"Ontology ({len(nodes)} / {brief['node_count']} nodes, {brief['edge_count']} edges)")
+    table.add_column("Type")
+    table.add_column("ID")
+    table.add_column("Label")
+    for n in nodes:
+        table.add_row(n.type, n.id, n.label[:48])
+    console.print(table)
+    console.print(
+        "Kontekst dla botów lokalnych (Dell/A100) — zero kosztów tokenów Grok. "
+        "Tooli: get_domain_context, extract_domain_context, ontology_neighborhood."
+    )
+    console.print(f"Plik: {MachiningOntology.path_for(cfg.data_path)}")
+
+
 @app.command("product-tech")
 def product_tech_cmd(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),

@@ -52,11 +52,16 @@ class ParsingAgent:
             "(D) nowe firmy spoza known_firms, (E) siatka powiązań, "
             "(F) e-catalogi/PDF/eshopy, (G) targi / czasopisma / portale branżowe, "
             "(H) media społecznościowe (YouTube/LinkedIn/X — publiczne), "
-            "(I) LITERATURA: książki / artykuły / wideo (Notion Pozycje + huby WWW).\n"
+            "(I) LITERATURA: książki / artykuły / wideo (Notion Pozycje + huby WWW), "
+            "(J) ONTOLOGIA / KONTEKST TECH: materiały ISO P/M/K/N/S/H, maszyny, chłodziwo, procesy "
+            "(lokalny knowledge graph — zamiast drogiego Grok).\n"
             "Procedura:\n"
+            "0) get_domain_context — załaduj lokalną ontologię (materiały/maszyny/chłodziwo/procesy); "
+            "przy każdym ważnym tekście: extract_domain_context (ingest=true)\n"
             "1) list_known_firms / get_firm_presentation — Notion przedstawia jakie są firmy "
             "(nie zgaduj profilu marki: bierz presentation z Notion)\n"
-            "2) list_relations / firm_neighborhood — istniejąca siatka powiązań\n"
+            "2) list_relations / firm_neighborhood — istniejąca siatka powiązań firm; "
+            "list_ontology / ontology_neighborhood — graf wiedzy technologicznej\n"
             "3) list_media_sources / discover_media_links / extract_fair_exhibitors — "
             "targi (EMO/AMB/IMTS), czasopisma, portale; wystawcy = kandydaci new_firm\n"
             "3b) SOCIAL: list_social_sources → discover_social_posts → parse_social_post "
@@ -87,11 +92,23 @@ class ParsingAgent:
             "przy problemach crawl_status; ten sam host = sekwencyjnie\n"
             "11) extract_market_intel — signal_type=new_firm | relation | competitor | product_tech | literature\n"
             "12) remember — zapisz wnioski do pamięci\n"
-            "Na końcu briefing po polsku: LITERATURA (book/article/video) → TECH PRODUKTÓW "
+            "Na końcu briefing po polsku: KONTEKST TECH (materiały/maszyny/chłodziwo/procesy z ontologii) → "
+            "LITERATURA (book/article/video) → TECH PRODUKTÓW "
             "(handbook/cutting data/ISO13399 + schemat pól) → CENNIKI (dostępne URL + access) → "
             "SOCIAL (posty/wideo) → NOWE FIRMY (w tym wystawcy targów) → POWIĄZANIA → "
             "ruchy znanych / media. Ignoruj spam i oferty pracy."
         )
+        # Lokalny brief ontologii — tani kontekst zamiast Grok
+        try:
+            from market_agents.ontology import MachiningOntology
+
+            ont = MachiningOntology.load(self.config.data_path)
+            if len(ont.nodes) < 5:
+                ont.merge_seed("config/machining_ontology.seed.json")
+                ont.save(self.config.data_path)
+            domain_brief = ont.domain_brief()
+        except Exception:  # noqa: BLE001
+            domain_brief = {"ok": False}
         user = (
             f"Branża: {industry.name}\n"
             f"Język: {industry.language}\n"
@@ -107,6 +124,11 @@ class ParsingAgent:
             f"Catalog sources: {len(self.config.sources.catalogs)}\n"
             f"Notion enabled: {self.config.sources.notion.enabled}\n"
             f"R2 enabled: {self.config.sources.cloudflare_r2.enabled}\n"
+            f"Ontology nodes/edges: {domain_brief.get('node_count', 0)}/"
+            f"{domain_brief.get('edge_count', 0)}\n"
+            f"Domain materials: {', '.join(domain_brief.get('materials') or [])}\n"
+            f"Domain processes: {', '.join(domain_brief.get('processes') or [])}\n"
+            f"Domain coolants: {', '.join(domain_brief.get('coolants') or [])}\n"
             f"Liczba kandydatów: {len(candidates)}\n"
             f"Limit głębokich parse: {self.config.agents.agentic.max_deep_parses}\n"
             f"Learn parse rules: {self.config.agents.agentic.learn_parse_rules}\n"
@@ -116,12 +138,14 @@ class ParsingAgent:
             f"global_concurrency={self.config.agents.crawl.global_concurrency}, "
             f"robots={self.config.agents.crawl.respect_robots_txt}, "
             f"adaptive={self.config.agents.crawl.adaptive}\n"
-            "Zacznij od list_known_firms (Notion katalog). Dla ważnych marek użyj "
+            "Zacznij od get_domain_context (lokalna ontologia — bez Grok). Potem "
+            "list_known_firms (Notion katalog). Dla ważnych marek użyj "
             "get_firm_presentation. Potem list_parsing_skills + list_media_sources + "
             "list_literature_sources / discover_literature (+ sync_notion_literature jeśli Notion), "
             "list_social_sources / discover_social_posts, "
             "extract_fair_exhibitors (targi), list_relations, discover_new_firms "
-            "i discover_relations. Po udanym parse: rate_parse / rate_parsing_skill "
+            "i discover_relations. Przy tech tekstach: extract_domain_context. "
+            "Po udanym parse: rate_parse / rate_parsing_skill "
             "albo improve_parsing_skill. Bez bulk — używaj crawl_status przy 429/403."
         )
 

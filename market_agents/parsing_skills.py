@@ -17,6 +17,7 @@ SKILL_CATEGORIES = (
     "firm_extract",
     "relation_extract",
     "media_hub",
+    "domain_context",
     "generic",
 )
 
@@ -268,6 +269,44 @@ def default_seed_skills() -> list[ParsingSkill]:
                 "youtube.com",
                 "isbn",
             ],
+            taught_by="seed",
+        ),
+        ParsingSkill(
+            id="machining-ontology-context",
+            name="Ontologia: materiały / maszyny / chłodziwo / procesy",
+            category="domain_context",
+            description=(
+                "Lokalny knowledge graph zamiast drogiego Grok: ISO P/M/K/N/S/H, "
+                "tokarki/frezarki, emulsion/MQL/dry, toczenie/frezowanie/wiercenie."
+            ),
+            preferred_method="bs4",
+            link_keywords=[
+                "ISO P",
+                "stainless",
+                "coolant",
+                "MQL",
+                "milling",
+                "turning",
+                "machining center",
+                "chłodziwo",
+                "frezowanie",
+            ],
+            hints=[
+                "Na start cyklu: get_domain_context",
+                "Po parse handbook/katalog: extract_domain_context (ingest=true)",
+                "ontology_neighborhood process:milling / material:iso-s",
+                "Parametry vc/fz/ap tylko jako schemat — nie kopiuj wartości do CutData",
+            ],
+            applies_to_kinds=[
+                "material",
+                "machine",
+                "coolant",
+                "process",
+                "cutting_data",
+                "handbook",
+                "application_guide",
+            ],
+            url_contains=["cutting-data", "handbook", "application", "technical"],
             taught_by="seed",
         ),
 ParsingSkill(

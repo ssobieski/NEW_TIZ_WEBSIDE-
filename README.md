@@ -1,7 +1,27 @@
 # Lokalni agenci monitoringu rynku (agentic + vLLM / 4x A100)
 
 System lokalnych **agentów ReAct** do zbierania, inteligentnego parsowania i analizowania
-sygnałów rynkowych. Zamiast drogich agentów SaaS — Twój Dell z **2 TB RAM + 4x A100**.
+sygnałów rynkowych. Zamiast drogich agentów SaaS (Grok / xAI / cloud LLM) — Twój Dell z
+**2 TB RAM + 4x A100** + tanie VPS jako workery.
+
+## Zamiast drogiego Grok
+
+| Grok / cloud | Lokalnie (ten repo) |
+|--------------|---------------------|
+| Płatne tokeny za każdy cykl scrapu | vLLM na A100 — **0 $/token** |
+| Sztab agentów w chmurze | Collector na VPS (`worker --skip-llm`) + ReAct tylko na GPU |
+| Brak trwałej ontologii branżowej | `ontology.json` — materiały / maszyny / chłodziwo / procesy |
+| Kontekst „w głowie” modelu (drogi) | `get_domain_context` + Notion + knowledge pack floty |
+
+```bash
+# VPS — tylko zbieranie (bez LLM)
+python -m market_agents worker --every-hours 6
+
+# Dell A100 — rozumienie + ontologia
+bash scripts/run_vllm_a100.sh
+python -m market_agents ontology --seed
+python -m market_agents run --agentic
+```
 
 ## Co jest w środku
 
@@ -10,6 +30,7 @@ sygnałów rynkowych. Zamiast drogich agentów SaaS — Twój Dell z **2 TB RAM 
 | **Collector** | RSS / WWW + filtr keywords + deduplikacja |
 | **IntelligentParser** | Trafilatura + BeautifulSoup — pełny tekst artykułów |
 | **ParsingAgent (ReAct)** | LLM sam wybiera narzędzia: parse, batch_parse, extract_intel, memory |
+| **MachiningOntology** | Knowledge graph: materiały ISO, maszyny, chłodziwo, procesy |
 | **Analyst / Reporter** | Klasyczny pipeline (fallback) + briefing Markdown/JSON |
 | **MarketMemory** | Pamięć między cyklami (JSONL) |
 | **vLLM** | Lokalny inference z tool-calling na 4x A100 |
@@ -154,6 +175,22 @@ python -m market_agents run --agentic
 Rejestr: `data/knowledge/literature.json`  
 Tooli: `list_literature_sources`, `discover_literature`, `list_literature`, `register_literature`, `sync_notion_literature`  
 Config: `sources.literature` + `sources.notion.literature_database`.
+
+## Ontologia / knowledge graph (kontekst technologiczny)
+
+Boty muszą rozumieć **materiały, maszyny, chłodziwo i procesy** — nie tylko nazwy firm.
+Lokalny graf (`data/knowledge/ontology.json`) zastępuje drogi kontekst z Grok.
+
+Encje: `material` (ISO P/M/K/N/S/H) · `machine` · `coolant` · `process` · `tool_family` · `parameter` (schemat) · `standard`
+
+```bash
+python -m market_agents ontology --seed
+python -m market_agents ontology --type material
+python -m market_agents ontology --node process:milling
+```
+
+Tooli: `get_domain_context`, `extract_domain_context`, `list_ontology`, `ontology_neighborhood`, `add_ontology_edge`  
+Seed: `config/machining_ontology.seed.json`
 
 ## Informacje techniczne o produktach
 

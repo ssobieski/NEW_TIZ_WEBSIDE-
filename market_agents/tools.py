@@ -28,6 +28,12 @@ from market_agents.firms import KnownFirmsIndex, extract_candidate_firm_names, f
 from market_agents.literature import LITERATURE_KINDS, LiteratureRegistry, classify_literature_kind
 from market_agents.memory import MarketMemory
 from market_agents.models import MarketItem
+from market_agents.ontology import (
+    EDGE_TYPES,
+    ENTITY_TYPES,
+    MachiningOntology,
+    extract_domain_context,
+)
 from market_agents.parse_rules import PARSE_METHODS, SiteParseRulesStore
 from market_agents.parsing import IntelligentParser, ParsedDocument
 from market_agents.parsing_skills import SKILL_CATEGORIES, ParsingSkillsStore
@@ -105,6 +111,11 @@ class ToolRegistry:
             "list_literature": self.list_literature,
             "register_literature": self.register_literature,
             "sync_notion_literature": self.sync_notion_literature,
+            "get_domain_context": self.get_domain_context,
+            "extract_domain_context": self.extract_domain_context_tool,
+            "list_ontology": self.list_ontology,
+            "ontology_neighborhood": self.ontology_neighborhood,
+            "add_ontology_edge": self.add_ontology_edge,
             "list_known_firms": self.list_known_firms,
             "get_firm_presentation": self.get_firm_presentation,
             "discover_new_firms": self.discover_new_firms,
@@ -132,6 +143,15 @@ class ToolRegistry:
         }
         self._known: KnownFirmsIndex | None = None
         self._relations: FirmRelationsGraph | None = None
+        self._ontology: MachiningOntology | None = None
+
+    def _get_ontology(self) -> MachiningOntology:
+        if self._ontology is None:
+            self._ontology = MachiningOntology.load(self.config.data_path)
+            if len(self._ontology.nodes) < 5:
+                self._ontology.merge_seed("config/machining_ontology.seed.json")
+                self._ontology.save(self.config.data_path)
+        return self._ontology
 
     def _get_notion(self) -> NotionCollector:
         if self._notion is None:
@@ -881,6 +901,100 @@ class ToolRegistry:
                             "limit": {"type": "integer", "default": 200},
                             "save": {"type": "boolean", "default": True},
                         },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_domain_context",
+                    "description": (
+                        "Skrót lokalnej ontologii TIZ: materiały ISO P/M/K/N/S/H, maszyny, "
+                        "chłodziwo, procesy. Tani lokalny kontekst zamiast Grok — "
+                        "boty muszą rozumieć technologię obróbki."
+                    ),
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "extract_domain_context",
+                    "description": (
+                        "Z tekstu/URL wyodrębnij kontekst: materiały, maszyny, chłodziwo, "
+                        "procesy, parametry (tylko schemat vc/fz/ap — bez kopiowania wartości). "
+                        "Opcjonalnie zapisz do knowledge graph ontology.json."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "url": {"type": "string"},
+                            "ingest": {
+                                "type": "boolean",
+                                "default": True,
+                                "description": "Zapisz wykryte encje/krawędzie do ontology.json",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_ontology",
+                    "description": (
+                        "Lista encji knowledge graph (material|machine|coolant|process|"
+                        "tool_family|standard|parameter|firm)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string"},
+                            "q": {"type": "string"},
+                            "limit": {"type": "integer", "default": 50},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "ontology_neighborhood",
+                    "description": (
+                        "Sąsiedztwo w ontologii (np. process:milling → materiały, maszyny, chłodziwo)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "node": {
+                                "type": "string",
+                                "description": "id lub label, np. process:milling / frezowanie",
+                            },
+                            "depth": {"type": "integer", "default": 1},
+                        },
+                        "required": ["node"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "add_ontology_edge",
+                    "description": (
+                        "Dodaj krawędź do knowledge graph "
+                        f"(relations: {', '.join(EDGE_TYPES[:8])}…)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string"},
+                            "target": {"type": "string"},
+                            "relation": {"type": "string"},
+                            "evidence": {"type": "string"},
+                            "confidence": {"type": "number", "default": 0.8},
+                        },
+                        "required": ["source", "target", "relation"],
                     },
                 },
             },
@@ -2352,6 +2466,86 @@ class ToolRegistry:
             "path": path,
             "sample": rows[:5],
         }
+
+    def get_domain_context(self, args: dict[str, Any]) -> dict[str, Any]:
+        graph = self._get_ontology()
+        brief = graph.domain_brief()
+        self.memory.add(
+            "ontology_brief",
+            f"nodes={brief.get('node_count')} edges={brief.get('edge_count')}",
+            meta=brief.get("by_type") or {},
+        )
+        return brief
+
+    def extract_domain_context_tool(self, args: dict[str, Any]) -> dict[str, Any]:
+        text = str(args.get("text") or "").strip()
+        url = str(args.get("url") or "").strip()
+        ingest = args.get("ingest", True)
+        if url and not text:
+            try:
+                doc = self.parser.parse_url(url)
+                text = (doc.text or "") if hasattr(doc, "text") else ""
+                if not text and url in self.parsed_cache:
+                    text = self.parsed_cache[url].text or ""
+                if doc and hasattr(doc, "url"):
+                    self.parsed_cache[url] = doc
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": f"parse failed: {exc}", "url": url}
+        if not text:
+            return {"ok": False, "error": "Podaj text lub url"}
+        ctx = extract_domain_context(text)
+        result: dict[str, Any] = {**ctx, "url": url or None, "chars": len(text)}
+        if ingest:
+            graph = self._get_ontology()
+            ingested = graph.ingest_context(ctx, source_url=url, origin="extracted")
+            path = graph.save(self.config.data_path)
+            result["ingested"] = ingested
+            result["ontology_path"] = str(path)
+        self.memory.add(
+            "domain_context",
+            str(ctx.get("summary") or ""),
+            meta={"url": url, "materials": len(ctx.get("materials") or [])},
+        )
+        return result
+
+    def list_ontology(self, args: dict[str, Any]) -> dict[str, Any]:
+        graph = self._get_ontology()
+        nodes = graph.list_nodes(
+            entity_type=str(args.get("type") or "").strip() or None,
+            q=str(args.get("q") or "").strip() or None,
+            limit=int(args.get("limit") or 50),
+        )
+        return {
+            "ok": True,
+            "count": len(nodes),
+            "total": len(graph.nodes),
+            "entity_types": list(ENTITY_TYPES),
+            "nodes": [n.to_dict() for n in nodes],
+            "path": str(MachiningOntology.path_for(self.config.data_path)),
+        }
+
+    def ontology_neighborhood(self, args: dict[str, Any]) -> dict[str, Any]:
+        node = str(args.get("node") or "").strip()
+        if not node:
+            return {"ok": False, "error": "node jest wymagany"}
+        depth = int(args.get("depth") or 1)
+        return self._get_ontology().neighborhood(node, depth=depth)
+
+    def add_ontology_edge(self, args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            result = self._get_ontology().add_edge(
+                str(args.get("source") or ""),
+                str(args.get("target") or ""),
+                str(args.get("relation") or ""),
+                evidence=str(args.get("evidence") or ""),
+                confidence=float(args.get("confidence") or 0.8),
+                origin="agent",
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        path = self._get_ontology().save(self.config.data_path)
+        result["path"] = str(path)
+        return result
 
     def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:
         query = str(args.get("query") or "").strip().lower()

@@ -1,0 +1,93 @@
+{
+  "description": "Seed ontologii TIZ — materiały / maszyny / chłodziwo / procesy / parametry (schemat). Lokalny kontekst zamiast drogiego Grok.",
+  "nodes": [
+    {"id": "material:iso-p", "type": "material", "label": "ISO P (steels)", "aliases": ["P", "steel", "stal", "P20", "P30"], "props": {"iso_group": "P"}},
+    {"id": "material:iso-m", "type": "material", "label": "ISO M (stainless)", "aliases": ["M", "stainless", "nierdzewna", "M20"], "props": {"iso_group": "M"}},
+    {"id": "material:iso-k", "type": "material", "label": "ISO K (cast iron)", "aliases": ["K", "cast iron", "żeliwo", "K20"], "props": {"iso_group": "K"}},
+    {"id": "material:iso-n", "type": "material", "label": "ISO N (non-ferrous)", "aliases": ["N", "aluminium", "aluminum", "brass"], "props": {"iso_group": "N"}},
+    {"id": "material:iso-s", "type": "material", "label": "ISO S (HRSA / titanium)", "aliases": ["S", "titanium", "inconel", "HRSA"], "props": {"iso_group": "S"}},
+    {"id": "material:iso-h", "type": "material", "label": "ISO H (hardened)", "aliases": ["H", "hardened", "hartowana", "HRC"], "props": {"iso_group": "H"}},
+
+    {"id": "machine:cnc-lathe", "type": "machine", "label": "CNC lathe / tokarka", "aliases": ["lathe", "tokarka", "turning center"]},
+    {"id": "machine:machining-center", "type": "machine", "label": "Machining center / frezarka", "aliases": ["VMC", "HMC", "5-axis", "frezarka"]},
+    {"id": "machine:drill-tap", "type": "machine", "label": "Drill/tap center", "aliases": ["drill-tap", "tapping center"]},
+    {"id": "machine:grinder", "type": "machine", "label": "Grinder / szlifierka", "aliases": ["grinder", "szlifierka"]},
+    {"id": "machine:multi-task", "type": "machine", "label": "Multi-task / mill-turn", "aliases": ["mill-turn", "turn-mill"]},
+
+    {"id": "coolant:emulsion", "type": "coolant", "label": "Emulsion / flood", "aliases": ["emulsion", "flood", "soluble oil"]},
+    {"id": "coolant:mql", "type": "coolant", "label": "MQL", "aliases": ["MQL", "near-dry", "minimal quantity"]},
+    {"id": "coolant:dry", "type": "coolant", "label": "Dry machining", "aliases": ["dry", "trocken", "na sucho"]},
+    {"id": "coolant:oil", "type": "coolant", "label": "Straight / cutting oil", "aliases": ["neat oil", "cutting oil"]},
+    {"id": "coolant:through-tool", "type": "coolant", "label": "Through-tool coolant", "aliases": ["IKS", "internal coolant"]},
+
+    {"id": "process:turning", "type": "process", "label": "Turning / toczenie", "aliases": ["turning", "toczenie", "drehen"]},
+    {"id": "process:milling", "type": "process", "label": "Milling / frezowanie", "aliases": ["milling", "frezowanie", "fräsen"]},
+    {"id": "process:drilling", "type": "process", "label": "Drilling / wiercenie", "aliases": ["drilling", "wiercenie"]},
+    {"id": "process:threading", "type": "process", "label": "Threading / gwintowanie", "aliases": ["threading", "tapping", "gwintowanie"]},
+    {"id": "process:reaming", "type": "process", "label": "Reaming / rozwiertanie", "aliases": ["reaming", "rozwiertanie"]},
+    {"id": "process:boring", "type": "process", "label": "Boring / wytaczanie", "aliases": ["boring", "wytaczanie"]},
+    {"id": "process:parting", "type": "process", "label": "Parting / grooving", "aliases": ["parting", "grooving", "odcinanie"]},
+    {"id": "process:hsm", "type": "process", "label": "High-speed machining", "aliases": ["HSM"]},
+
+    {"id": "tool_family:end-mill", "type": "tool_family", "label": "End mill / frez trzpieniowy", "aliases": ["end mill", "frez"]},
+    {"id": "tool_family:insert", "type": "tool_family", "label": "Indexable insert / płytka", "aliases": ["insert", "płytka", "wendeschneidplatte"]},
+    {"id": "tool_family:drill", "type": "tool_family", "label": "Drill / wiertło", "aliases": ["drill", "wiertło"]},
+    {"id": "tool_family:tap", "type": "tool_family", "label": "Tap / gwintownik", "aliases": ["tap", "gwintownik"]},
+    {"id": "tool_family:turning-tool", "type": "tool_family", "label": "Turning tool / nóż tokarski", "aliases": ["turning tool", "nóż"]},
+
+    {"id": "parameter:vc", "type": "parameter", "label": "vc — cutting speed", "aliases": ["vc", "cutting speed"], "props": {"schema_only": true}},
+    {"id": "parameter:fz", "type": "parameter", "label": "fz — feed per tooth", "aliases": ["fz"], "props": {"schema_only": true}},
+    {"id": "parameter:ap", "type": "parameter", "label": "ap — depth of cut", "aliases": ["ap"], "props": {"schema_only": true}},
+    {"id": "parameter:ae", "type": "parameter", "label": "ae — width of cut", "aliases": ["ae"], "props": {"schema_only": true}},
+    {"id": "parameter:fn", "type": "parameter", "label": "fn — feed per rev", "aliases": ["fn"], "props": {"schema_only": true}},
+
+    {"id": "standard:iso13399", "type": "standard", "label": "ISO 13399", "aliases": ["ISO13399", "DIN 4000", "GTC"]},
+    {"id": "standard:iso-material-groups", "type": "standard", "label": "ISO material groups P/M/K/N/S/H", "aliases": ["ISO 513"]}
+  ],
+  "edges": [
+    {"source": "tool_family:end-mill", "target": "process:milling", "relation": "tool_for_process", "confidence": 0.95},
+    {"source": "tool_family:insert", "target": "process:turning", "relation": "tool_for_process", "confidence": 0.9},
+    {"source": "tool_family:insert", "target": "process:milling", "relation": "tool_for_process", "confidence": 0.85},
+    {"source": "tool_family:drill", "target": "process:drilling", "relation": "tool_for_process", "confidence": 0.95},
+    {"source": "tool_family:tap", "target": "process:threading", "relation": "tool_for_process", "confidence": 0.95},
+    {"source": "tool_family:turning-tool", "target": "process:turning", "relation": "tool_for_process", "confidence": 0.95},
+
+    {"source": "process:turning", "target": "machine:cnc-lathe", "relation": "used_on_machine", "confidence": 0.95},
+    {"source": "process:milling", "target": "machine:machining-center", "relation": "used_on_machine", "confidence": 0.95},
+    {"source": "process:drilling", "target": "machine:machining-center", "relation": "used_on_machine", "confidence": 0.8},
+    {"source": "process:drilling", "target": "machine:drill-tap", "relation": "used_on_machine", "confidence": 0.85},
+    {"source": "process:turning", "target": "machine:multi-task", "relation": "used_on_machine", "confidence": 0.8},
+    {"source": "process:milling", "target": "machine:multi-task", "relation": "used_on_machine", "confidence": 0.8},
+
+    {"source": "process:milling", "target": "coolant:emulsion", "relation": "requires_coolant", "confidence": 0.7},
+    {"source": "process:milling", "target": "coolant:mql", "relation": "requires_coolant", "confidence": 0.65},
+    {"source": "process:drilling", "target": "coolant:through-tool", "relation": "requires_coolant", "confidence": 0.75},
+    {"source": "process:turning", "target": "coolant:emulsion", "relation": "requires_coolant", "confidence": 0.7},
+    {"source": "process:hsm", "target": "coolant:mql", "relation": "requires_coolant", "confidence": 0.6},
+    {"source": "process:hsm", "target": "coolant:dry", "relation": "requires_coolant", "confidence": 0.55},
+
+    {"source": "process:milling", "target": "material:iso-p", "relation": "suitable_for_material", "confidence": 0.8},
+    {"source": "process:milling", "target": "material:iso-m", "relation": "suitable_for_material", "confidence": 0.75},
+    {"source": "process:milling", "target": "material:iso-k", "relation": "suitable_for_material", "confidence": 0.75},
+    {"source": "process:turning", "target": "material:iso-p", "relation": "suitable_for_material", "confidence": 0.8},
+    {"source": "process:turning", "target": "material:iso-s", "relation": "suitable_for_material", "confidence": 0.7},
+    {"source": "process:drilling", "target": "material:iso-p", "relation": "suitable_for_material", "confidence": 0.8},
+
+    {"source": "process:milling", "target": "parameter:vc", "relation": "has_parameter", "confidence": 0.9, "evidence": "schema only"},
+    {"source": "process:milling", "target": "parameter:fz", "relation": "has_parameter", "confidence": 0.9, "evidence": "schema only"},
+    {"source": "process:milling", "target": "parameter:ap", "relation": "has_parameter", "confidence": 0.9, "evidence": "schema only"},
+    {"source": "process:milling", "target": "parameter:ae", "relation": "has_parameter", "confidence": 0.85, "evidence": "schema only"},
+    {"source": "process:turning", "target": "parameter:vc", "relation": "has_parameter", "confidence": 0.9, "evidence": "schema only"},
+    {"source": "process:turning", "target": "parameter:fn", "relation": "has_parameter", "confidence": 0.9, "evidence": "schema only"},
+    {"source": "process:turning", "target": "parameter:ap", "relation": "has_parameter", "confidence": 0.9, "evidence": "schema only"},
+
+    {"source": "material:iso-p", "target": "standard:iso-material-groups", "relation": "governed_by", "confidence": 1.0},
+    {"source": "material:iso-m", "target": "standard:iso-material-groups", "relation": "governed_by", "confidence": 1.0},
+    {"source": "material:iso-k", "target": "standard:iso-material-groups", "relation": "governed_by", "confidence": 1.0},
+    {"source": "material:iso-n", "target": "standard:iso-material-groups", "relation": "governed_by", "confidence": 1.0},
+    {"source": "material:iso-s", "target": "standard:iso-material-groups", "relation": "governed_by", "confidence": 1.0},
+    {"source": "material:iso-h", "target": "standard:iso-material-groups", "relation": "governed_by", "confidence": 1.0},
+    {"source": "tool_family:end-mill", "target": "standard:iso13399", "relation": "governed_by", "confidence": 0.7},
+    {"source": "tool_family:insert", "target": "standard:iso13399", "relation": "governed_by", "confidence": 0.75}
+  ]
+}

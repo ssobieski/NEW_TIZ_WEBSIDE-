@@ -18,6 +18,7 @@ KNOWLEDGE_FILES = (
     "available_pricelists.json",
     "product_tech.json",
     "literature.json",
+    "ontology.json",
 )
 
 FEEDBACK_FILES = (
