@@ -1,6 +1,6 @@
 # Profil TIZ — narzędzia skrawające / machining
 # Fokus: info techniczne produktów (cutting data / handbook / ISO 13399),
-#        cenniki (price list / Preisliste), e-catalog, PDF, publikacje, digital catalogue, e-shop,
+#        social (YouTube/LinkedIn/X), cenniki, e-catalog, PDF, publikacje, digital catalogue, e-shop,
 #        targi branżowe, czasopisma, portale WWW
 # Lista znanych firm = Notion „Katalogi konkurencji — indeks”
 # cp config/tiz_cutting_tools.example.yaml config/industry.yaml
@@ -28,6 +28,9 @@ industry:
   - digital catalogue
   - PDF
   - handbook
+  - social media
+  - YouTube
+  - LinkedIn
   - application guide
   - cutting data
   - webshop
@@ -112,6 +115,7 @@ industry:
   - Jakie standardy danych (ISO 13399 / DIN 4000 / GTC) są w ruchu?
   - Którzy wystawcy pojawiają się na targach (EMO / AMB / IMTS) poza known_firms?
   - Co piszą czasopisma i portale branżowe o nowych markach / katalogach / przejęciach?
+  - Co firmy komunikują w mediach społecznościowych (YouTube/LinkedIn/X) o nowych produktach, katalogach, targach?
 sources:
   rss:
   - name: Google News — cutting data / handbooks
@@ -179,6 +183,56 @@ sources:
     url: https://www.canadianmetalworking.com/
     link_keywords: [news, article, tooling]
     max_links: 25
+  social:
+  # Publiczne profile — bez logowania. YouTube: najlepiej channel_id → RSS.
+  - name: Sandvik Coromant YouTube
+    platform: youtube
+    brand: Sandvik Coromant
+    url: https://www.youtube.com/@SandvikCoromant
+    link_keywords: [catalog, launch, cutting, tooling, EMO, AMB]
+    max_items: 15
+  - name: Seco Tools YouTube
+    platform: youtube
+    brand: Seco Tools
+    url: https://www.youtube.com/@SecoTools
+    link_keywords: [catalog, launch, cutting, tooling]
+    max_items: 15
+  - name: Walter Tools YouTube
+    platform: youtube
+    brand: Walter
+    url: https://www.youtube.com/@WalterTools
+    link_keywords: [catalog, launch, cutting, tooling]
+    max_items: 12
+  - name: Kennametal YouTube
+    platform: youtube
+    brand: Kennametal
+    url: https://www.youtube.com/@Kennametal
+    link_keywords: [catalog, launch, cutting, tooling]
+    max_items: 12
+  - name: Iscar LinkedIn
+    platform: linkedin
+    brand: Iscar
+    url: https://www.linkedin.com/company/iscar/
+    link_keywords: [catalog, launch, product, EMO, AMB]
+    max_items: 12
+  - name: MAPAL LinkedIn
+    platform: linkedin
+    brand: MAPAL
+    url: https://www.linkedin.com/company/mapal/
+    link_keywords: [catalog, launch, product, tooling]
+    max_items: 10
+  - name: Hoffmann Group LinkedIn
+    platform: linkedin
+    brand: Hoffmann Group
+    url: https://www.linkedin.com/company/hoffmann-group/
+    link_keywords: [catalog, launch, product]
+    max_items: 10
+  - name: Sandvik Coromant LinkedIn
+    platform: linkedin
+    brand: Sandvik Coromant
+    url: https://www.linkedin.com/company/sandvik-coromant/
+    link_keywords: [catalog, launch, product, cutting]
+    max_items: 12
   catalogs:
   - name: BIG DAISHOWA downloads
     brand: BIG DAISHOWA

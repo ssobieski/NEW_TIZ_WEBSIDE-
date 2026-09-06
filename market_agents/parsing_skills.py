@@ -201,7 +201,36 @@ def default_seed_skills() -> list[ParsingSkill]:
             url_contains=["download", "catalog", "catalogue"],
             taught_by="seed",
         ),
-                ParsingSkill(
+                        ParsingSkill(
+            id="social-post-signals",
+            name="Sygnały z mediów społecznościowych",
+            category="media_hub",
+            description=(
+                "Publiczne posty/wideo firm (YouTube RSS, LinkedIn/X HTML): "
+                "launch produktów, katalogi, targi, cutting data."
+            ),
+            preferred_method="bs4",
+            link_keywords=[
+                "catalog",
+                "launch",
+                "new product",
+                "EMO",
+                "AMB",
+                "cutting",
+                "tooling",
+                "handbook",
+            ],
+            hints=[
+                "list_social_sources → discover_social_posts → parse_social_post",
+                "YouTube: ustaw channel_id dla RSS (bez logowania)",
+                "LinkedIn/X często za loginem — wtedy hub meta + URL wystarczy",
+                "signal_hints: catalog|new_product|trade_fair|tech|pricing",
+            ],
+            applies_to_kinds=["youtube", "linkedin", "x", "facebook", "instagram", "social"],
+            url_contains=["youtube.com", "linkedin.com", "x.com", "twitter.com", "facebook.com", "instagram.com"],
+            taught_by="seed",
+        ),
+ParsingSkill(
             id="product-tech-schema",
             name="Schemat informacji technicznych produktów",
             category="catalog_hub",

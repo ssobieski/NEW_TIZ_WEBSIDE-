@@ -7,6 +7,7 @@ from market_agents.collectors import (
     CatalogCollector,
     FirmDiscoveryCollector,
     IndustryMediaCollector,
+    SocialMediaCollector,
     RssCollector,
     WebCollector,
 )
@@ -20,7 +21,7 @@ from market_agents.storage import Storage
 
 
 class CollectorAgent:
-    """Zbiera sygnały: RSS/WWW + katalogi + media (targi/czasopisma/portale) + discovery + Notion + R2."""
+    """Zbiera sygnały: RSS/WWW + katalogi + media + social + discovery + Notion + R2."""
 
     def __init__(self, config: AppConfig, storage: Storage) -> None:
         self.config = config
@@ -47,6 +48,17 @@ class CollectorAgent:
                 # IndustryMediaCollector używa shared fetcher; ustaw jawnie jeśli dostępne
                 if collectors and hasattr(collectors[-1], "fetcher"):
                     collectors[-1].fetcher = fetcher  # type: ignore[attr-defined]
+
+        for src in self.config.sources.social:
+            if src.enabled:
+                collectors.append(
+                    SocialMediaCollector(
+                        src,
+                        fetcher=fetcher,
+                        lookback_hours=max(self.config.agents.lookback_hours, 720),
+                    )
+                )
+
         if self.config.sources.firm_discovery.enabled:
             collectors.append(
                 FirmDiscoveryCollector(
@@ -105,6 +117,7 @@ class CollectorAgent:
                 item.source in {"notion", "cloudflare_r2", "firm_discovery"}
                 or src_name.startswith("catalog:")
                 or src_name.startswith("media:")
+                or src_name.startswith("social:")
             )
             if is_priority:
                 score = max(score, float(item.relevance_score or 0.45))

@@ -276,6 +276,41 @@ def run_schedule(
         time.sleep(30)
 
 
+@app.command("social")
+def social_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    platform: Optional[str] = typer.Option(None, "--platform", help="youtube|linkedin|x|facebook|instagram"),
+) -> None:
+    """Pokaż skonfigurowane publiczne źródła social media."""
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    from market_agents.collectors.social import detect_platform
+
+    rows = cfg.sources.social
+    if platform:
+        plat = platform.lower().replace("twitter", "x")
+        rows = [
+            s
+            for s in rows
+            if (s.platform or detect_platform(s.url) or "").lower().replace("twitter", "x") == plat
+        ]
+    table = Table(title=f"Social sources ({len(rows)})")
+    table.add_column("Name")
+    table.add_column("Platform")
+    table.add_column("Brand")
+    table.add_column("URL")
+    table.add_column("RSS")
+    for s in rows:
+        plat = (s.platform or detect_platform(s.url) or "other")
+        rss = "yes" if (s.channel_id or s.feed_url) else "—"
+        table.add_row(s.name, plat, s.brand or "—", s.url[:50], rss)
+    console.print(table)
+    console.print(
+        "Bez logowania. YouTube: ustaw channel_id dla RSS. "
+        "LinkedIn/X często zwracają tylko publiczne meta."
+    )
+
+
 @app.command("product-tech")
 def product_tech_cmd(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),

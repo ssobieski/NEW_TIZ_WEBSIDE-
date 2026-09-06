@@ -8,9 +8,10 @@ from typing import Any, Callable
 from market_agents.collectors.catalog import CatalogCollector
 from market_agents.collectors.firm_discovery import FirmDiscoveryCollector
 from market_agents.collectors.media import IndustryMediaCollector, extract_exhibitors_from_html
+from market_agents.collectors.social import SocialMediaCollector, detect_platform, SOCIAL_PLATFORMS
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import build_r2_collector
-from market_agents.config import AppConfig, CatalogSource, IndustryMediaSource
+from market_agents.config import AppConfig, CatalogSource, IndustryMediaSource, SocialMediaSource
 from market_agents.firm_relations import (
     RELATION_TYPES,
     FirmRelationsGraph,
@@ -88,6 +89,9 @@ class ToolRegistry:
             "discover_media_links": self.discover_media_links,
             "parse_media_page": self.parse_media_page,
             "extract_fair_exhibitors": self.extract_fair_exhibitors,
+            "list_social_sources": self.list_social_sources,
+            "discover_social_posts": self.discover_social_posts,
+            "parse_social_post": self.parse_social_post,
             "list_known_firms": self.list_known_firms,
             "get_firm_presentation": self.get_firm_presentation,
             "discover_new_firms": self.discover_new_firms,
@@ -241,6 +245,7 @@ class ToolRegistry:
                                     "trend",
                                     "pricing",
                                     "product_tech",
+                                    "social",
                                     "noise",
                                 ],
                             },
@@ -690,6 +695,64 @@ class ToolRegistry:
                                 "default": True,
                                 "description": "True = oznacz known vs new vs known_firms",
                             },
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_social_sources",
+                    "description": (
+                        "Lista publicznych profili social (YouTube/LinkedIn/X/Facebook/Instagram). "
+                        "sources.social — bez logowania; YouTube preferuj channel_id/RSS."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "platform": {
+                                "type": "string",
+                                "description": "youtube|linkedin|x|twitter|facebook|instagram|tiktok|other",
+                            },
+                            "enabled_only": {"type": "boolean", "default": True},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discover_social_posts",
+                    "description": (
+                        "Odkryj posty/wideo z publicznego profilu social. "
+                        "YouTube: RSS; inne: publiczny HTML + sygnały katalog/launch/EMO."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source_name": {"type": "string"},
+                            "url": {"type": "string"},
+                            "platform": {"type": "string"},
+                            "max_items": {"type": "integer", "default": 20},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "parse_social_post",
+                    "description": (
+                        "Sparsuj publiczny post/wideo social (meta + tekst). "
+                        "Zwraca signal_hints (catalog/new_product/trade_fair/tech/pricing)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source_name": {"type": "string"},
+                            "url": {"type": "string"},
+                            "platform": {"type": "string"},
+                            "max_chars": {"type": "integer", "default": 8000},
                         },
                     },
                 },
@@ -1903,6 +1966,96 @@ class ToolRegistry:
             "new_count": new_count,
             "exhibitors": rows,
         }
+
+
+    def list_social_sources(self, args: dict[str, Any]) -> dict[str, Any]:
+        platform = str(args.get("platform") or "").strip().lower()
+        if platform == "twitter":
+            platform = "x"
+        enabled_only = args.get("enabled_only", True)
+        rows = []
+        for src in self.config.sources.social:
+            if enabled_only and not src.enabled:
+                continue
+            plat = (src.platform or detect_platform(src.url) or "other").lower()
+            if plat == "twitter":
+                plat = "x"
+            if platform and plat != platform:
+                continue
+            rows.append(
+                {
+                    "name": src.name,
+                    "platform": plat,
+                    "brand": src.brand,
+                    "url": src.url,
+                    "channel_id": src.channel_id,
+                    "feed_url": src.feed_url,
+                    "enabled": src.enabled,
+                }
+            )
+        return {"ok": True, "count": len(rows), "sources": rows}
+
+    def _resolve_social(self, args: dict[str, Any]) -> SocialMediaCollector:
+        source_name = str(args.get("source_name") or "").strip().lower()
+        url = str(args.get("url") or "").strip()
+        platform = str(args.get("platform") or "").strip().lower() or "other"
+        if platform == "twitter":
+            platform = "x"
+        if source_name:
+            for src in self.config.sources.social:
+                if src.name.lower() == source_name or (
+                    src.brand and src.brand.lower() == source_name
+                ):
+                    return SocialMediaCollector(src, fetcher=self._fetcher)
+        if url:
+            plat = platform if platform in SOCIAL_PLATFORMS else detect_platform(url)
+            return SocialMediaCollector(
+                SocialMediaSource(
+                    name="ad-hoc",
+                    url=url,
+                    platform=plat,
+                    brand="unknown",
+                ),
+                fetcher=self._fetcher,
+            )
+        enabled = [s for s in self.config.sources.social if s.enabled]
+        if enabled:
+            return SocialMediaCollector(enabled[0], fetcher=self._fetcher)
+        raise RuntimeError(
+            "Brak sources.social w config — dodaj YouTube/LinkedIn/X publiczne profile"
+        )
+
+    def discover_social_posts(self, args: dict[str, Any]) -> dict[str, Any]:
+        max_items = int(args.get("max_items") or 20)
+        collector = self._resolve_social(args)
+        result = collector.discover_posts(max_items=max_items)
+        self.memory.add(
+            "social_discover",
+            f"{collector.name}: {result.get('count', 0)} posts mode={result.get('mode')}",
+            meta={
+                "source": collector.name,
+                "platform": result.get("platform"),
+                "url": result.get("url"),
+            },
+        )
+        return result
+
+    def parse_social_post(self, args: dict[str, Any]) -> dict[str, Any]:
+        max_chars = int(args.get("max_chars") or 8000)
+        url = str(args.get("url") or "").strip() or None
+        collector = self._resolve_social(args)
+        result = collector.parse_post(url=url, max_chars=max_chars)
+        if result.get("ok"):
+            self.memory.add(
+                "social_parse",
+                f"{result.get('title')}: hints={result.get('signal_hints')}",
+                meta={
+                    "url": result.get("url"),
+                    "platform": result.get("social_platform"),
+                    "hints": result.get("signal_hints") or [],
+                },
+            )
+        return result
 
     def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:
         query = str(args.get("query") or "").strip().lower()

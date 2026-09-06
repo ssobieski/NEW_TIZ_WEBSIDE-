@@ -95,7 +95,7 @@ class IndustryMediaSource(BaseModel):
 
     name: str
     url: str
-    # trade_fair | magazine | portal
+    # trade_fair | magazine | portal (social → sources.social)
     kind: str = "portal"
     brand: str | None = None
     css_selector: str | None = None
@@ -103,6 +103,24 @@ class IndustryMediaSource(BaseModel):
     link_keywords: list[str] = Field(default_factory=list)
     extract_exhibitors: bool = False
     max_links: int = 40
+    enabled: bool = True
+
+
+
+
+class SocialMediaSource(BaseModel):
+    """Publiczne profile / kanały social (bez logowania)."""
+
+    name: str
+    url: str
+    # youtube | linkedin | twitter | x | facebook | instagram | tiktok | other
+    platform: str = "other"
+    brand: str | None = None
+    # YouTube: oficjalny RSS działa bez logowania
+    channel_id: str | None = None
+    feed_url: str | None = None
+    link_keywords: list[str] = Field(default_factory=list)
+    max_items: int = 20
     enabled: bool = True
 
 
@@ -133,6 +151,7 @@ class SourcesConfig(BaseModel):
     web: list[WebSource] = Field(default_factory=list)
     catalogs: list[CatalogSource] = Field(default_factory=list)
     media: list[IndustryMediaSource] = Field(default_factory=list)
+    social: list[SocialMediaSource] = Field(default_factory=list)
     firm_discovery: FirmDiscoveryConfig = Field(default_factory=FirmDiscoveryConfig)
     notion: NotionConfig = Field(default_factory=NotionConfig)
     cloudflare_r2: CloudflareR2Config = Field(default_factory=CloudflareR2Config)

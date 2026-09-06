@@ -126,6 +126,20 @@ oraz **przedstawienie**:
 
 Agent używa `list_known_firms` + `get_firm_presentation` zanim scrapuje WWW znanej marki.
 
+## Media społecznościowe
+
+Parsowanie **publicznych** profili firm (YouTube / LinkedIn / X) — bez logowania.
+YouTube najlepiej z `channel_id` (oficjalny RSS). LinkedIn/X często ograniczają HTML.
+
+```bash
+python -m market_agents social
+python -m market_agents social --platform youtube
+python -m market_agents run --agentic
+```
+
+Tooli: `list_social_sources`, `discover_social_posts`, `parse_social_post`  
+Konfiguracja: `sources.social` w profilu TIZ.
+
 ## Informacje techniczne o produktach
 
 Agenty zbierają **źródła tech** konkurencji (cutting data, handbooki, application guides, ISO 13399)
