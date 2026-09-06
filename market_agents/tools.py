@@ -10,6 +10,11 @@ from market_agents.collectors.firm_discovery import FirmDiscoveryCollector
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import build_r2_collector
 from market_agents.config import AppConfig, CatalogSource
+from market_agents.firm_relations import (
+    RELATION_TYPES,
+    FirmRelationsGraph,
+    extract_relation_candidates,
+)
 from market_agents.firms import KnownFirmsIndex, extract_candidate_firm_names, filter_new_firms
 from market_agents.memory import MarketMemory
 from market_agents.models import MarketItem
@@ -54,8 +59,13 @@ class ToolRegistry:
             "list_known_firms": self.list_known_firms,
             "discover_new_firms": self.discover_new_firms,
             "check_firm_known": self.check_firm_known,
+            "list_relations": self.list_relations,
+            "add_relation": self.add_relation,
+            "discover_relations": self.discover_relations,
+            "firm_neighborhood": self.firm_neighborhood,
         }
         self._known: KnownFirmsIndex | None = None
+        self._relations: FirmRelationsGraph | None = None
 
     def _get_notion(self) -> NotionCollector:
         if self._notion is None:
@@ -138,6 +148,7 @@ class ToolRegistry:
                                     "opportunity",
                                     "competitor",
                                     "new_firm",
+                                    "relation",
                                     "regulation",
                                     "trend",
                                     "pricing",
@@ -415,6 +426,120 @@ class ToolRegistry:
                                 "items": {"type": "string"},
                             },
                         },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_relations",
+                    "description": (
+                        "Lista powiązań firm w siatce (distributor_of, dealer_of, brand_of, "
+                        "subsidiary_of, oem_group, partner_of, rebrand_of). "
+                        "Np. Hoffmann Group distributor_of Sandvik Coromant; "
+                        "GARANT brand_of Hoffmann Group."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "company": {
+                                "type": "string",
+                                "description": "Filtr po nazwie firmy (source lub target)",
+                            },
+                            "relation_type": {
+                                "type": "string",
+                                "enum": list(RELATION_TYPES),
+                            },
+                            "limit": {"type": "integer", "default": 50},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "add_relation",
+                    "description": (
+                        "Dodaj krawędź do siatki powiązań: source relation_type target. "
+                        "Używaj gdy z tekstu wynika np. dystrybucja lub marka własna."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string"},
+                            "target": {"type": "string"},
+                            "relation_type": {
+                                "type": "string",
+                                "enum": list(RELATION_TYPES),
+                            },
+                            "evidence": {"type": "string"},
+                            "url": {"type": "string"},
+                            "confidence": {"type": "number", "default": 0.7},
+                        },
+                        "required": ["source", "target", "relation_type"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discover_relations",
+                    "description": (
+                        "Wyodrębnij kandydatów relacji (dystrybutor / dealer / brand / grupa) "
+                        "z tekstów, kandydatów newsów i opcjonalnie Notion. "
+                        "Może zapisać znalezione krawędzie do lokalnego grafu."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "texts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "text": {"type": "string"},
+                                        "url": {"type": "string"},
+                                    },
+                                },
+                            },
+                            "parse_candidates": {
+                                "type": "boolean",
+                                "default": True,
+                            },
+                            "scan_notion_cache": {
+                                "type": "boolean",
+                                "default": False,
+                            },
+                            "persist": {
+                                "type": "boolean",
+                                "default": True,
+                                "description": "True = dopisz do data/knowledge/firm_relations.json",
+                            },
+                            "limit": {"type": "integer", "default": 30},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "firm_neighborhood",
+                    "description": (
+                        "Sąsiedztwo firmy w siatce powiązań (1–2 hop): dystrybutorzy, "
+                        "marki, spółki w grupie OEM."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "company": {"type": "string"},
+                            "depth": {
+                                "type": "integer",
+                                "default": 1,
+                                "minimum": 1,
+                                "maximum": 2,
+                            },
+                        },
+                        "required": ["company"],
                     },
                 },
             },
@@ -702,6 +827,151 @@ class ToolRegistry:
                 competitors=self.config.industry.competitors,
             )
         return self._known
+
+    def _get_relations(self) -> FirmRelationsGraph:
+        if self._relations is None:
+            self._relations = FirmRelationsGraph.load(data_dir=self.config.data_path)
+        return self._relations
+
+    def list_relations(self, args: dict[str, Any]) -> dict[str, Any]:
+        graph = self._get_relations()
+        company = str(args.get("company") or "").strip() or None
+        relation_type = str(args.get("relation_type") or "").strip() or None
+        limit = int(args.get("limit") or 50)
+        rows = graph.list_relations(
+            company=company, relation_type=relation_type, limit=limit
+        )
+        return {
+            "ok": True,
+            "count": len(rows),
+            "relations": rows,
+            "relation_types": list(RELATION_TYPES),
+        }
+
+    def add_relation(self, args: dict[str, Any]) -> dict[str, Any]:
+        graph = self._get_relations()
+        source = str(args.get("source") or "").strip()
+        target = str(args.get("target") or "").strip()
+        relation_type = str(args.get("relation_type") or "").strip()
+        evidence = str(args.get("evidence") or "")
+        url = str(args.get("url") or "")
+        confidence = float(args.get("confidence") or 0.7)
+        result = graph.add_relation(
+            source,
+            target,
+            relation_type,
+            evidence=evidence,
+            url=url,
+            confidence=confidence,
+            origin="agent",
+        )
+        path = graph.save(self.config.data_path)
+        self.memory.add(
+            "firm_relation",
+            f"{source} --{relation_type}--> {target}",
+            meta={"url": url, "evidence": evidence[:200]},
+        )
+        return {**result, "path": str(path), "total_edges": len(graph.edges)}
+
+    def discover_relations(self, args: dict[str, Any]) -> dict[str, Any]:
+        limit = int(args.get("limit") or 30)
+        parse_candidates = args.get("parse_candidates", True)
+        scan_notion = bool(args.get("scan_notion_cache"))
+        persist = args.get("persist", True)
+        known = self._get_known()
+        graph = self._get_relations()
+        found: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        texts: list[dict[str, Any]] = list(args.get("texts") or [])
+        if parse_candidates:
+            for item in self.candidates:
+                blob = f"{item.title}. {item.summary}. {(item.content or '')[:1200]}"
+                texts.append({"text": blob, "url": item.url})
+
+        if scan_notion:
+            notion_cache = self.config.data_path / "knowledge" / "notion_pages.jsonl"
+            if notion_cache.exists():
+                with notion_cache.open(encoding="utf-8") as fh:
+                    for i, line in enumerate(fh):
+                        if i >= 80:
+                            break
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            row = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        texts.append(
+                            {
+                                "text": " ".join(
+                                    str(row.get(k) or "")
+                                    for k in ("title", "summary", "content")
+                                )[:4000],
+                                "url": str(row.get("url") or ""),
+                            }
+                        )
+
+        for row in texts:
+            if isinstance(row, str):
+                row = {"text": row, "url": ""}
+            if not isinstance(row, dict):
+                continue
+            cands = extract_relation_candidates(
+                str(row.get("text") or ""),
+                url=str(row.get("url") or ""),
+                known=known,
+                max_relations=8,
+            )
+            for cand in cands:
+                key = (
+                    f"{cand.get('normalized_source') or cand.get('source')}|"
+                    f"{cand.get('relation_type')}|"
+                    f"{cand.get('normalized_target') or cand.get('target')}"
+                ).lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                found.append(cand)
+                if len(found) >= limit:
+                    break
+            if len(found) >= limit:
+                break
+
+        added = 0
+        if persist and found:
+            for cand in found:
+                before = len(graph.edges)
+                graph._ingest({**cand, "origin": cand.get("origin") or "extracted"})
+                if len(graph.edges) > before:
+                    added += 1
+            graph.save(self.config.data_path)
+
+        self.memory.add(
+            "discover_relations",
+            f"kandydaci={len(found)} added={added}: "
+            + ", ".join(
+                f"{r.get('source')}→{r.get('target')}" for r in found[:8]
+            ),
+            meta={"count": len(found), "added": added},
+        )
+        return {
+            "ok": True,
+            "count": len(found),
+            "added": added,
+            "relations": found[:limit],
+            "total_edges": len(graph.edges),
+        }
+
+    def firm_neighborhood(self, args: dict[str, Any]) -> dict[str, Any]:
+        company = str(args.get("company") or "").strip()
+        if not company:
+            return {"ok": False, "error": "company required"}
+        depth = int(args.get("depth") or 1)
+        graph = self._get_relations()
+        nb = graph.neighborhood(company, depth=depth)
+        return {"ok": True, **nb}
 
     def discover_new_firms(self, args: dict[str, Any]) -> dict[str, Any]:
         limit = int(args.get("limit") or 25)

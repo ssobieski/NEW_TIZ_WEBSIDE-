@@ -8,6 +8,8 @@ from typing import Any
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import build_r2_collector
 from market_agents.config import AppConfig
+from market_agents.firm_relations import FirmRelationsGraph, extract_relation_candidates
+from market_agents.firms import KnownFirmsIndex
 from market_agents.memory import MarketMemory
 from market_agents.storage import Storage
 
@@ -114,6 +116,10 @@ class KnowledgeSync:
                 results.append(self.sync_known_firms())
             except Exception as exc:  # noqa: BLE001
                 print(f"[sync-firms] pominięto: {exc}")
+            try:
+                results.append(self.sync_relations())
+            except Exception as exc:  # noqa: BLE001
+                print(f"[sync-relations] pominięto: {exc}")
         if self.config.sources.cloudflare_r2.enabled:
             results.append(self.sync_r2())
         return results
@@ -176,4 +182,75 @@ class KnowledgeSync:
                 "catalog_hints": len(catalog_hints),
                 "hints_path": str(hints_path),
             },
+        )
+
+    def sync_relations(self, scan_notion_cache: bool = True) -> SyncResult:
+        """
+        Zbuduj / odśwież siatkę powiązań firm (distributor / brand / OEM group).
+        Merge: seed + istniejący cache + heurystyki z lokalnego cache Notion.
+        """
+        seed_path = Path("config/firm_relations.seed.json")
+        graph = FirmRelationsGraph.load(
+            data_dir=self.config.data_path,
+            seed_path=seed_path,
+        )
+        # zawsze dołącz seed (nawet jeśli cache już istnieje)
+        if seed_path.exists():
+            try:
+                payload = json.loads(seed_path.read_text(encoding="utf-8"))
+                seed_edges = payload.get("edges", [])
+                if isinstance(seed_edges, list):
+                    graph.merge(seed_edges)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[sync-relations] seed: {exc}")
+
+        extracted = 0
+        if scan_notion_cache:
+            known = KnownFirmsIndex.load(
+                data_dir=self.config.data_path,
+                competitors=self.config.industry.competitors,
+            )
+            notion_cache = self.cache_dir / "notion_pages.jsonl"
+            if notion_cache.exists():
+                with notion_cache.open(encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            row = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        blob = " ".join(
+                            str(row.get(k) or "")
+                            for k in ("title", "summary", "content")
+                        )
+                        url = str(row.get("url") or "")
+                        cands = extract_relation_candidates(
+                            blob, url=url, known=known, max_relations=10
+                        )
+                        for cand in cands:
+                            cand["origin"] = "notion_extract"
+                            before = len(graph.edges)
+                            graph._ingest(cand)
+                            if len(graph.edges) > before:
+                                extracted += 1
+
+        out = graph.save(self.config.data_path)
+        by_type: dict[str, int] = {}
+        for e in graph.edges:
+            rt = str(e.get("relation_type") or "")
+            by_type[rt] = by_type.get(rt, 0) + 1
+
+        self.memory.add(
+            "firm_relations",
+            f"Siatka powiązań: {len(graph.edges)} krawędzi "
+            f"(+{extracted} z Notion cache). Typy: {by_type}",
+            meta={"count": len(graph.edges), "extracted": extracted, "by_type": by_type},
+        )
+        return SyncResult(
+            source="firm_relations",
+            items=len(graph.edges),
+            path=out,
+            details={"by_type": by_type, "extracted_from_notion": extracted},
         )

@@ -146,6 +146,28 @@ def sync_firms(config: Optional[Path] = typer.Option(None, "--config", "-c")) ->
         console.print("Firmy: " + ", ".join(companies[:25]) + ("…" if len(companies) > 25 else ""))
 
 
+@app.command("sync-relations")
+def sync_relations(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    no_notion_scan: bool = typer.Option(
+        False,
+        "--no-notion-scan",
+        help="Tylko seed/cache — bez heurystyk z notion_pages.jsonl",
+    ),
+) -> None:
+    """Zbuduj siatkę powiązań firm (dystrybutor / marka / grupa OEM)."""
+    from market_agents.sync import KnowledgeSync
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    result = KnowledgeSync(cfg).sync_relations(scan_notion_cache=not no_notion_scan)
+    by_type = (result.details or {}).get("by_type") or {}
+    console.print(
+        f"[green]Relations sync OK[/green]: {result.items} krawędzi → {result.path}\n"
+        f"Typy: {by_type} | extracted: {(result.details or {}).get('extracted_from_notion')}"
+    )
+
+
 @app.command("sync-r2")
 def sync_r2(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
     """Zsynchronizuj archiwum Cloudflare R2 → lokalny cache."""

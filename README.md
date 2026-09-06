@@ -59,15 +59,16 @@ cp .env.example .env
 # w Notion: Share stron TIZ → zaproszenie Internal Integration
 export NOTION_TOKEN=secret_...
 
-# sync listy znanych firm + stron Notion
+# sync listy znanych firm + siatki powiązań + stron Notion
 python -m market_agents sync-firms
+python -m market_agents sync-relations
 python -m market_agents sync-notion
 # po włączeniu cloudflare_r2.enabled: true w YAML:
 # python -m market_agents sync-r2
 ```
 
 Źródła: `sources.catalogs` + `industry.competitors` z indeksu Notion.
-Seed offline: `config/known_firms.seed.json`.
+Seed offline: `config/known_firms.seed.json`, `config/firm_relations.seed.json`.
 
 ## Uruchomienie na Dellu
 
@@ -82,11 +83,21 @@ python -m market_agents schedule
 ```
 
 Tooli: `list_known_firms`, `discover_new_firms`, `check_firm_known`,
+`list_relations`, `add_relation`, `discover_relations`, `firm_neighborhood`,
 `list_catalog_sources`, `discover_catalog_assets`, `fetch_pdf_text`
 (+ Notion/R2: `search_notion`, `fetch_notion_page`, `search_r2`, `fetch_r2_object`).
 
 Parsing nowych firm: `sources.firm_discovery` (Google News RSS) → ekstrakcja nazw →
 filtr vs known_firms → kandydaci `new_firm` dla agenta.
+
+Siatka powiązań (kto jest dystrybutorem / marką / spółką w grupie OEM):
+```bash
+python -m market_agents sync-relations
+# seed: config/firm_relations.seed.json → data/knowledge/firm_relations.json
+```
+Typy: `distributor_of`, `dealer_of`, `brand_of`, `subsidiary_of`, `oem_group`,
+`partner_of`, `rebrand_of`. Agent buduje graf np. GARANT → brand_of → Hoffmann Group,
+Hoffmann Group → distributor_of → Sandvik Coromant.
 
 Szybki test parsera (bez LLM):
 
@@ -107,11 +118,13 @@ RSS/WWW + catalogs (PDF/ecatalog/eshop) → kandydaci
             │
             ▼
    ParsingAgent (ReAct, max_steps)
+     ├─ list_known_firms / list_relations / firm_neighborhood
+     ├─ discover_new_firms / discover_relations / add_relation
      ├─ list_catalog_sources / discover_catalog_assets / fetch_pdf_text
      ├─ list_candidates
      ├─ search_notion / search_r2 / search_memory
      ├─ batch_parse / fetch_and_parse
-     ├─ extract_market_intel
+     ├─ extract_market_intel  (new_firm | relation | competitor)
      └─ remember
             │
             ▼

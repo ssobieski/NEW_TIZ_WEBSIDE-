@@ -1,0 +1,144 @@
+{
+  "description": "Seed siatki powiązań firm TIZ (dystrybutor / marka / grupa OEM) — z Notion + wiedzy branżowej",
+  "relation_types": [
+    "distributor_of",
+    "dealer_of",
+    "brand_of",
+    "subsidiary_of",
+    "oem_group",
+    "partner_of",
+    "rebrand_of"
+  ],
+  "edges": [
+    {
+      "source": "GARANT",
+      "target": "Hoffmann Group",
+      "relation_type": "brand_of",
+      "evidence": "Notion AMB 2026 / Hoffmann Group: official brands GARANT and HOLEX",
+      "url": "https://www.hoffmann-group.com",
+      "confidence": 0.95,
+      "origin": "notion_seed"
+    },
+    {
+      "source": "HOLEX",
+      "target": "Hoffmann Group",
+      "relation_type": "brand_of",
+      "evidence": "Notion AMB 2026 / Hoffmann Group: official brands GARANT and HOLEX",
+      "url": "https://www.hoffmann-group.com",
+      "confidence": 0.95,
+      "origin": "notion_seed"
+    },
+    {
+      "source": "Hoffmann Group",
+      "target": "Sandvik Coromant",
+      "relation_type": "distributor_of",
+      "evidence": "Big-book dystrybutor (Catalogue 57) — warstwa dystrybucji vs handbooki OEM (Notion Handbooki obróbki)",
+      "url": "https://www.hoffmann-group.com",
+      "confidence": 0.7,
+      "origin": "notion_seed"
+    },
+    {
+      "source": "Perschmann",
+      "target": "Hoffmann Group",
+      "relation_type": "subsidiary_of",
+      "evidence": "Notion Handbooki: Hoffmann Group Perschmann — Poradnik obróbki / Catalogue 57 Band 1–4",
+      "url": "https://www.perschmann.de",
+      "confidence": 0.85,
+      "origin": "notion_seed"
+    },
+    {
+      "source": "WNT",
+      "target": "Ceratizit",
+      "relation_type": "rebrand_of",
+      "evidence": "Notion Handbooki: WNT overlap Ceratizit — ta sama półka download",
+      "url": "https://cuttingtools.ceratizit.com",
+      "confidence": 0.8,
+      "origin": "notion_seed"
+    },
+    {
+      "source": "HAHN+KOLB",
+      "target": "Sandvik Coromant",
+      "relation_type": "distributor_of",
+      "evidence": "Notion Handbooki: big book dystrybutora (Zerspanung + Spanntechnik)",
+      "url": "https://www.hahn-kolb.de",
+      "confidence": 0.65,
+      "origin": "notion_seed"
+    },
+    {
+      "source": "ATORN",
+      "target": "SARTORIUS Werkzeuge",
+      "relation_type": "brand_of",
+      "evidence": "Notion Handbooki: SARTORIUS Werkzeuge (ATORN) catalogue — nie Sartorius AG",
+      "url": "https://wwv.saratools.com",
+      "confidence": 0.75,
+      "origin": "notion_seed"
+    },
+    {
+      "source": "Iscar",
+      "target": "IMC",
+      "relation_type": "subsidiary_of",
+      "evidence": "IMC Group — Iscar / Ingersoll / TaeguTec",
+      "url": "https://www.iscar.com",
+      "confidence": 0.9,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "Ingersoll",
+      "target": "IMC",
+      "relation_type": "subsidiary_of",
+      "evidence": "IMC Group — Iscar / Ingersoll / TaeguTec",
+      "url": "https://www.ingersoll-imc.de",
+      "confidence": 0.9,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "TaeguTec",
+      "target": "IMC",
+      "relation_type": "subsidiary_of",
+      "evidence": "IMC Group — Iscar / Ingersoll / TaeguTec",
+      "url": "https://www.taegutec.com",
+      "confidence": 0.9,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "Iscar",
+      "target": "Ingersoll",
+      "relation_type": "oem_group",
+      "evidence": "IMC sister companies",
+      "confidence": 0.85,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "Walter",
+      "target": "Sandvik Coromant",
+      "relation_type": "oem_group",
+      "evidence": "Sandvik Manufacturing Solutions / cutting tools family",
+      "confidence": 0.8,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "Seco Tools",
+      "target": "Sandvik Coromant",
+      "relation_type": "oem_group",
+      "evidence": "Sandvik Manufacturing Solutions / cutting tools family",
+      "confidence": 0.8,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "Dormer Pramet",
+      "target": "IMC",
+      "relation_type": "subsidiary_of",
+      "evidence": "Dormer Pramet within IMC Group tooling portfolio",
+      "confidence": 0.75,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "Kennametal",
+      "target": "Widia",
+      "relation_type": "oem_group",
+      "evidence": "Kennametal / Widia brand family",
+      "confidence": 0.75,
+      "origin": "industry_seed"
+    }
+  ]
+}

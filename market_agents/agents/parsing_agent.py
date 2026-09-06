@@ -45,18 +45,21 @@ class ParsingAgent:
         industry = self.config.industry
         system = (
             "Jesteś agentem wywiadu rynkowego TIZ (narzędzia skrawające) na lokalnym GPU. "
-            "Priorytet: (A) nowe firmy spoza known_firms, (B) e-catalogi/PDF/eshopy znanych marek.\n"
+            "Priorytet: (A) nowe firmy spoza known_firms, (B) siatka powiązań "
+            "(dystrybutor/dealer/marka/OEM), (C) e-catalogi/PDF/eshopy znanych marek.\n"
             "Procedura:\n"
             "1) list_known_firms — baza znanych firm (Notion indeks)\n"
-            "2) discover_new_firms — parsing wyszukiwania nowych producentów/marek\n"
-            "3) check_firm_known — zweryfikuj kandydatów (fuzzy vs known_firms)\n"
-            "4) list_candidates / list_catalog_sources — świeże sygnały + huby katalogów\n"
-            "5) discover_catalog_assets / fetch_pdf_text / fetch_and_parse — głęboki research\n"
-            "6) extract_market_intel — signal_type=new_firm dla nowych marek; "
-            "competitor dla ruchów znanych firm\n"
-            "7) remember — zapisz nowe nazwy firm do pamięci\n"
-            "Na końcu briefing po polsku: najpierw NOWE FIRMY, potem ruchy znanych. "
-            "Ignoruj spam i oferty pracy."
+            "2) list_relations / firm_neighborhood — istniejąca siatka powiązań\n"
+            "3) discover_new_firms — parsing wyszukiwania nowych producentów/marek\n"
+            "4) check_firm_known — zweryfikuj kandydatów (fuzzy vs known_firms)\n"
+            "5) discover_relations — wyodrębnij dystrybutorów / marki / grupy z tekstów\n"
+            "6) add_relation — zapisz potwierdzone powiązania (source→target)\n"
+            "7) list_candidates / list_catalog_sources — świeże sygnały + huby katalogów\n"
+            "8) discover_catalog_assets / fetch_pdf_text / fetch_and_parse — głęboki research\n"
+            "9) extract_market_intel — signal_type=new_firm | relation | competitor\n"
+            "10) remember — zapisz wnioski do pamięci\n"
+            "Na końcu briefing po polsku: NOWE FIRMY → POWIĄZANIA (kto dystrybuuje kogo) "
+            "→ ruchy znanych. Ignoruj spam i oferty pracy."
         )
         user = (
             f"Branża: {industry.name}\n"
@@ -72,8 +75,8 @@ class ParsingAgent:
             f"R2 enabled: {self.config.sources.cloudflare_r2.enabled}\n"
             f"Liczba kandydatów: {len(candidates)}\n"
             f"Limit głębokich parse: {self.config.agents.agentic.max_deep_parses}\n"
-            "Zacznij od list_known_firms, potem discover_new_firms "
-            "(run_search=true, parse_candidates=true)."
+            "Zacznij od list_known_firms + list_relations, potem discover_new_firms "
+            "i discover_relations (parse_candidates=true)."
         )
 
         messages: list[dict[str, Any]] = [
