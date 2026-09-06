@@ -151,6 +151,50 @@ Tylko zbieranie (RSS + katalogi, bez LLM):
 python -m market_agents run --skip-llm --pipeline
 ```
 
+## Flota: VPS parsują, GPU ulepsza
+
+Kilka lekkich VPS zbiera i parsuje (bez LLM). Centrala (Dell + A100) uczy
+`parsing_skills` / `site_parse_rules` i wypycha ulepszenia z powrotem na edge.
+
+```text
+  VPS-1 / VPS-2 / …          data/fleet (NFS / rsync / R2 mirror)         Dell + 4×A100
+  ─────────────────          ───────────────────────────────────         ──────────────
+  fleet-pull  ←────────────  outbox/knowledge/<pack>/  ←──────────────  fleet-publish
+  worker (skip-llm)                                                        run --agentic
+  fleet-push  ────────────→  inbox/<worker_id>/<pack>/  ──────────────→  fleet-absorb
+                                                                             └─ republish
+```
+
+**Centrala (GPU):**
+
+```bash
+python -m market_agents run --agentic
+python -m market_agents fleet-absorb --republish
+# albo ręcznie: fleet-publish
+python -m market_agents fleet-status
+```
+
+**Każdy VPS:**
+
+```bash
+cp config/tiz_worker.example.yaml config/industry.yaml
+# ustaw agents.fleet.worker_id: vps-1  (unikalny per maszyna)
+# zsynchronizuj katalog data/fleet z centralą (NFS / rsync / mirror)
+
+python -m market_agents fleet-pull
+python -m market_agents worker --every-hours 6
+```
+
+Sync katalogu (przykład rsync z crona na VPS):
+
+```bash
+rsync -az user@gpu-host:/opt/tiz/data/fleet/ ./data/fleet/
+# … worker cycle …
+rsync -az ./data/fleet/inbox/ user@gpu-host:/opt/tiz/data/fleet/inbox/
+```
+
+CLI: `fleet-status`, `fleet-publish`, `fleet-pull`, `fleet-push`, `fleet-absorb`, `worker`.
+
 ## Jak działa agentic parsing
 
 ```text

@@ -519,5 +519,11 @@ agents:
     adaptive: true
     cooldown_on_block_seconds: 900
     timeout_seconds: 35
+  fleet:
+    # central = ten serwer GPU uczy skills/rules i publikuje knowledge dla VPS
+    role: central
+    sync_dir: data/fleet
+    publish_known_firms: true
+    publish_relations: true
 schedule:
   every_hours: 6

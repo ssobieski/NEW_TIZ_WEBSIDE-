@@ -1,0 +1,75 @@
+# Profil WORKER (VPS) — tylko parsing/collect, bez LLM
+# Centrala (Dell A100) uczy skills/rules i publikuje knowledge pack.
+#
+# cp config/tiz_worker.example.yaml config/industry.yaml
+# python -m market_agents fleet-pull
+# python -m market_agents worker
+# # albo cyklicznie:
+# python -m market_agents worker --every-hours 6
+
+industry:
+  name: Narzędzia skrawające / machining (TIZ)
+  language: pl
+  keywords:
+  - cutting tools
+  - narzędzia skrawające
+  - e-catalog
+  - catalog
+  exclude_keywords:
+  - oferta pracy
+  - rekrutacja
+  competitors: []
+  focus_questions: []
+
+sources:
+  rss:
+  - name: Google News — tooling
+    url: https://news.google.com/rss/search?q=%22cutting+tools%22+catalog&hl=en&gl=US&ceid=US:en
+  web: []
+  catalogs: []
+  media: []
+  firm_discovery:
+    enabled: true
+    max_items: 15
+  notion:
+    enabled: false
+  cloudflare_r2:
+    enabled: false
+
+llm:
+  provider: vllm
+  base_url: http://127.0.0.1:8000
+  model: unused-on-worker
+  # worker i tak idzie --skip-llm
+
+agents:
+  max_items_per_source: 15
+  lookback_hours: 168
+  report_dir: reports
+  data_dir: data
+  min_relevance_score: 0.25
+  agentic:
+    enabled: false
+    parallel_fetches: 2
+    learn_parse_rules: true
+    learn_parsing_skills: true
+  crawl:
+    enabled: true
+    min_delay_seconds: 1.5
+    max_delay_seconds: 45
+    jitter_seconds: 0.5
+    per_host_concurrency: 1
+    global_concurrency: 2
+    respect_robots_txt: true
+    adaptive: true
+    cooldown_on_block_seconds: 900
+  fleet:
+    role: worker
+    worker_id: vps-1
+    # Wspólny katalog z centralą (NFS / rsync mirror / skopiowany bucket)
+    sync_dir: data/fleet
+    auto_pull_before_run: true
+    auto_push_after_run: true
+
+schedule:
+  every_hours: 6

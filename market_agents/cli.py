@@ -276,5 +276,171 @@ def run_schedule(
         time.sleep(30)
 
 
+@app.command("fleet-status")
+def fleet_status(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+    """Status floty: centrala (GPU) ↔ workery VPS."""
+    from market_agents.fleet import FleetSync, fleet_config_from_app
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    sync = FleetSync(cfg.data_path, fleet_config_from_app(cfg))
+    st = sync.status()
+    table = Table(title="Fleet (central GPU ↔ VPS parsers)")
+    table.add_column("Pole")
+    table.add_column("Wartość")
+    for key in (
+        "role",
+        "worker_id",
+        "sync_dir",
+        "latest_knowledge",
+        "feedback_total",
+        "feedback_pending",
+        "auto_pull_before_run",
+        "auto_push_after_run",
+    ):
+        table.add_row(key, str(st.get(key)))
+    console.print(table)
+
+
+@app.command("fleet-publish")
+def fleet_publish(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    notes: str = typer.Option("", "--notes", help="Opis knowledge packa"),
+) -> None:
+    """Centrala: opublikuj skills/rules/crawl_health dla VPS."""
+    from market_agents.fleet import FleetSync, fleet_config_from_app
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    sync = FleetSync(cfg.data_path, fleet_config_from_app(cfg))
+    result = sync.publish_knowledge(notes=notes)
+    if not result.get("ok"):
+        console.print(f"[red]{result.get('error')}[/red]")
+        raise typer.Exit(1)
+    console.print(
+        f"[green]Opublikowano knowledge[/green]: {result['pack_id']}\n"
+        f"pliki: {result['files']}\n"
+        f"path: {result['path']}"
+    )
+
+
+@app.command("fleet-pull")
+def fleet_pull(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+    """Worker VPS: pobierz najnowszy knowledge pack z centrali."""
+    from market_agents.fleet import FleetSync, fleet_config_from_app
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    sync = FleetSync(cfg.data_path, fleet_config_from_app(cfg))
+    result = sync.pull_knowledge()
+    if not result.get("ok"):
+        console.print(f"[red]{result.get('error')}[/red]")
+        raise typer.Exit(1)
+    console.print(
+        f"[green]Pobrano knowledge[/green]: {result['pack_id']} → "
+        f"{cfg.data_path}/knowledge ({result['files']})"
+    )
+
+
+@app.command("fleet-push")
+def fleet_push(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    notes: str = typer.Option("", "--notes"),
+) -> None:
+    """Worker VPS: wyślij crawl_health / lokalne reguły do centrali."""
+    from market_agents.fleet import FleetSync, fleet_config_from_app
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    sync = FleetSync(cfg.data_path, fleet_config_from_app(cfg))
+    result = sync.push_feedback(notes=notes)
+    if not result.get("ok"):
+        console.print(f"[red]{result.get('error')}[/red]")
+        raise typer.Exit(1)
+    console.print(
+        f"[green]Wysłano feedback[/green]: {result['worker_id']} / {result['pack_id']}\n"
+        f"pliki: {result['files']}"
+    )
+
+
+@app.command("fleet-absorb")
+def fleet_absorb(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    limit: int = typer.Option(50, "--limit"),
+    republish: bool = typer.Option(
+        True,
+        "--republish/--no-republish",
+        help="Po absorb automatycznie opublikuj ulepszony knowledge pack",
+    ),
+) -> None:
+    """Centrala: wchłłoń feedback z VPS i (opcjonalnie) opublikuj ulepszenia."""
+    from market_agents.fleet import FleetSync, fleet_config_from_app
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    sync = FleetSync(cfg.data_path, fleet_config_from_app(cfg))
+    result = sync.absorb_feedback(limit=limit)
+    if not result.get("ok"):
+        console.print(f"[red]{result.get('error')}[/red]")
+        raise typer.Exit(1)
+    console.print(
+        f"[green]Absorb OK[/green]: packs={result['absorbed_packs']} "
+        f"hosts={result['merged_hosts']} rules={result['merged_rules']}"
+    )
+    if republish:
+        pub = sync.publish_knowledge(notes="auto after absorb")
+        if pub.get("ok"):
+            console.print(f"[green]Republish[/green]: {pub['pack_id']}")
+
+
+@app.command("worker")
+def worker_run(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    every_hours: Optional[float] = typer.Option(
+        None, "--every-hours", help="Jeśli podane — pętla co N godzin"
+    ),
+) -> None:
+    """
+    Tryb VPS: bez LLM — tylko polite parsing/collect.
+    Auto pull knowledge z centrali → collect → push feedback.
+    """
+    from market_agents.fleet import FleetSync, fleet_config_from_app
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    # wymuś worker semantics
+    cfg.agents.fleet.role = "worker"
+    if not cfg.agents.fleet.worker_id:
+        cfg.agents.fleet.worker_id = None  # FleetSync wygeneruje
+    sync = FleetSync(cfg.data_path, fleet_config_from_app(cfg))
+
+    def cycle() -> None:
+        console.print(Panel.fit(f"Worker cycle: [cyan]{sync.worker_id}[/cyan]"))
+        if cfg.agents.fleet.auto_pull_before_run:
+            pulled = sync.pull_knowledge()
+            if pulled.get("ok"):
+                console.print(f"pull: {pulled['pack_id']} files={pulled['files']}")
+            else:
+                console.print(f"[yellow]pull:[/yellow] {pulled.get('error')}")
+        orch = Orchestrator(cfg)
+        result = orch.run(skip_llm=True, agentic=False)
+        console.print(
+            f"[green]collect OK[/green]: items={result.new_items} → {result.md_path}"
+        )
+        if cfg.agents.fleet.auto_push_after_run:
+            pushed = sync.push_feedback(notes="worker cycle")
+            console.print(f"push: {pushed.get('pack_id')} files={pushed.get('files')}")
+
+    if every_hours is None:
+        cycle()
+        return
+    schedule.every(every_hours).hours.do(cycle)
+    console.print(f"Worker schedule co {every_hours}h. Ctrl+C aby przerwać.")
+    cycle()
+    while True:
+        schedule.run_pending()
+        time.sleep(30)
+
+
 if __name__ == "__main__":
     app()

@@ -187,6 +187,21 @@ class AgenticConfig(BaseModel):
     auto_promote_host_skills: bool = True
 
 
+class FleetConfig(BaseModel):
+    """
+    Centrala (GPU) uczy skills/rules; VPS tylko parsują i odsyłają feedback.
+    Sync przez wspólny katalog (NFS/rsync/R2 mirror): data/fleet/
+    """
+
+    role: str = "central"  # central | worker | both
+    worker_id: str | None = None
+    sync_dir: str = "data/fleet"
+    auto_pull_before_run: bool = True
+    auto_push_after_run: bool = True
+    publish_known_firms: bool = True
+    publish_relations: bool = True
+
+
 class AgentsConfig(BaseModel):
     max_items_per_source: int = 20
     lookback_hours: int = 72
@@ -195,6 +210,7 @@ class AgentsConfig(BaseModel):
     min_relevance_score: float = 0.35
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)
+    fleet: FleetConfig = Field(default_factory=FleetConfig)
 
 
 class ScheduleConfig(BaseModel):
