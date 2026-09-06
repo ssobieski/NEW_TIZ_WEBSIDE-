@@ -136,6 +136,8 @@ class AgenticConfig(BaseModel):
     parallel_fetches: int = 6
     require_tool_use: bool = True
     trace_dir: str = "data/agent_traces"
+    learn_parse_rules: bool = True
+    parse_rules_path: str = "data/knowledge/site_parse_rules.json"
 
 
 class AgentsConfig(BaseModel):

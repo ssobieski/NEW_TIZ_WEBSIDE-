@@ -18,6 +18,7 @@ from market_agents.firm_relations import (
 from market_agents.firms import KnownFirmsIndex, extract_candidate_firm_names, filter_new_firms
 from market_agents.memory import MarketMemory
 from market_agents.models import MarketItem
+from market_agents.parse_rules import PARSE_METHODS, SiteParseRulesStore
 from market_agents.parsing import IntelligentParser, ParsedDocument
 
 
@@ -35,7 +36,15 @@ class ToolRegistry:
     ) -> None:
         self.config = config
         self.memory = memory
-        self.parser = IntelligentParser()
+        self._parse_rules = (
+            SiteParseRulesStore.load(data_dir=config.data_path)
+            if config.agents.agentic.learn_parse_rules
+            else SiteParseRulesStore()
+        )
+        self.parser = IntelligentParser(
+            rules=self._parse_rules if config.agents.agentic.learn_parse_rules else None,
+            learn=bool(config.agents.agentic.learn_parse_rules),
+        )
         self.candidates = candidates or []
         self.parsed_cache: dict[str, ParsedDocument] = {}
         self.structured: list[dict[str, Any]] = []
@@ -63,6 +72,9 @@ class ToolRegistry:
             "add_relation": self.add_relation,
             "discover_relations": self.discover_relations,
             "firm_neighborhood": self.firm_neighborhood,
+            "list_parse_rules": self.list_parse_rules,
+            "upsert_parse_rule": self.upsert_parse_rule,
+            "rate_parse": self.rate_parse,
         }
         self._known: KnownFirmsIndex | None = None
         self._relations: FirmRelationsGraph | None = None
@@ -101,12 +113,29 @@ class ToolRegistry:
                 "function": {
                     "name": "fetch_and_parse",
                     "description": (
-                        "Pobierz URL i inteligentnie wyodrębnij pełną treść artykułu "
-                        "(trafilatura + fallback). Używaj do głębokiego parsowania."
+                        "Pobierz URL i inteligentnie wyodrębnij pełną treść. "
+                        "Używa nauczonych reguł per-host (CSS/metoda). "
+                        "Przy słabym wyniku: upsert_parse_rule + ponów fetch_and_parse."
                     ),
                     "parameters": {
                         "type": "object",
-                        "properties": {"url": {"type": "string"}},
+                        "properties": {
+                            "url": {"type": "string"},
+                            "force_method": {
+                                "type": "string",
+                                "enum": ["auto", "trafilatura", "bs4", "css"],
+                                "description": "Wymuś metodę parse (nadpisuje regułę hosta)",
+                            },
+                            "css_selector": {
+                                "type": "string",
+                                "description": "Opcjonalny CSS selector treści (method=css)",
+                            },
+                            "bypass_cache": {
+                                "type": "boolean",
+                                "default": False,
+                                "description": "True = ponów parse mimo cache (po zmianie reguły)",
+                            },
+                        },
                         "required": ["url"],
                     },
                 },
@@ -543,6 +572,77 @@ class ToolRegistry:
                     },
                 },
             },
+
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_parse_rules",
+                    "description": (
+                        "Lista nauczonych reguł parsera per host "
+                        "(preferred_method, css_selector, success/fail)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "limit": {"type": "integer", "default": 50},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "upsert_parse_rule",
+                    "description": (
+                        "Zapisz/aktualizuj regułę parsera dla hosta. "
+                        "Używaj gdy fetch_and_parse dał mało tekstu — podaj CSS lub preferred_method, "
+                        "potem ponów fetch_and_parse z bypass_cache=true."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "host_or_url": {"type": "string"},
+                            "preferred_method": {
+                                "type": "string",
+                                "enum": ["auto", "trafilatura", "bs4", "css"],
+                            },
+                            "css_selector": {"type": "string"},
+                            "drop_selectors": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "min_chars": {"type": "integer", "default": 120},
+                            "notes": {"type": "string"},
+                        },
+                        "required": ["host_or_url"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "rate_parse",
+                    "description": (
+                        "Oceń jakość sparsowanej strony (0–1). "
+                        "Wysoka ocena wzmacnia regułę hosta; niska — sygnalizuje potrzebę upsert_parse_rule."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string"},
+                            "quality_0_to_1": {"type": "number"},
+                            "parse_method": {
+                                "type": "string",
+                                "enum": ["trafilatura", "bs4", "css", "auto"],
+                            },
+                            "css_selector": {"type": "string"},
+                            "notes": {"type": "string"},
+                        },
+                        "required": ["url", "quality_0_to_1"],
+                    },
+                },
+            },
         ]
 
     def call(self, name: str, arguments: dict[str, Any] | str) -> dict[str, Any]:
@@ -574,14 +674,22 @@ class ToolRegistry:
         ]
         return {"ok": True, "count": len(rows), "candidates": rows}
 
+
     def fetch_and_parse(self, args: dict[str, Any]) -> dict[str, Any]:
         url = str(args.get("url") or "").strip()
         if not url:
             return {"ok": False, "error": "url required"}
-        if url in self.parsed_cache:
+        force_method = str(args.get("force_method") or "").strip() or None
+        css_selector = args.get("css_selector")
+        if css_selector is not None:
+            css_selector = str(css_selector).strip() or None
+        bypass_cache = bool(args.get("bypass_cache"))
+        if url in self.parsed_cache and not bypass_cache and not force_method and css_selector is None:
             doc = self.parsed_cache[url]
         else:
-            doc = self.parser.parse_url(url)
+            doc = self.parser.parse_url(
+                url, force_method=force_method, css_selector=css_selector
+            )
             self.parsed_cache[url] = doc
             for item in self.candidates:
                 if item.url == url and doc.ok:
@@ -590,6 +698,14 @@ class ToolRegistry:
                         item.title = doc.title
                     if doc.published_at:
                         item.published_at = doc.published_at
+            if self.config.agents.agentic.learn_parse_rules:
+                self._parse_rules.save(self.config.data_path)
+        hint = None
+        if (not doc.ok) or len(doc.text) < 200:
+            hint = (
+                "Słaby parse — zaproponuj upsert_parse_rule "
+                "(preferred_method/css_selector), potem fetch_and_parse z bypass_cache=true."
+            )
         return {
             "ok": doc.ok,
             "url": url,
@@ -599,7 +715,11 @@ class ToolRegistry:
             "excerpt": doc.excerpt,
             "links": doc.links[:10],
             "error": doc.error,
+            "meta": doc.meta,
+            "hint": hint,
+            "learn_parse_rules": bool(self.config.agents.agentic.learn_parse_rules),
         }
+
 
     def batch_parse(self, args: dict[str, Any]) -> dict[str, Any]:
         urls = [u for u in (args.get("urls") or []) if isinstance(u, str)]
@@ -832,6 +952,68 @@ class ToolRegistry:
         if self._relations is None:
             self._relations = FirmRelationsGraph.load(data_dir=self.config.data_path)
         return self._relations
+
+
+    def list_parse_rules(self, args: dict[str, Any]) -> dict[str, Any]:
+        query = str(args.get("query") or "").strip() or None
+        limit = int(args.get("limit") or 50)
+        rows = self._parse_rules.list_rules(query=query, limit=limit)
+        return {
+            "ok": True,
+            "count": len(rows),
+            "rules": rows,
+            "methods": list(PARSE_METHODS),
+            "learn_enabled": bool(self.config.agents.agentic.learn_parse_rules),
+        }
+
+    def upsert_parse_rule(self, args: dict[str, Any]) -> dict[str, Any]:
+        host_or_url = str(args.get("host_or_url") or "").strip()
+        if not host_or_url:
+            return {"ok": False, "error": "host_or_url required"}
+        try:
+            result = self._parse_rules.upsert(
+                host_or_url,
+                preferred_method=str(args.get("preferred_method") or "auto"),
+                css_selector=str(args.get("css_selector") or ""),
+                drop_selectors=list(args.get("drop_selectors") or []) or None,
+                min_chars=int(args.get("min_chars") or 120),
+                notes=str(args.get("notes") or ""),
+                origin="agent",
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        path = self._parse_rules.save(self.config.data_path)
+        # refresh parser rules reference
+        self.parser.rules = self._parse_rules
+        self.memory.add(
+            "parse_rule",
+            f"upsert {result['rule']['host']} method={result['rule']['preferred_method']} "
+            f"css={result['rule'].get('css_selector') or '-'}",
+            meta=result["rule"],
+        )
+        return {**result, "path": str(path)}
+
+    def rate_parse(self, args: dict[str, Any]) -> dict[str, Any]:
+        url = str(args.get("url") or "").strip()
+        if not url:
+            return {"ok": False, "error": "url required"}
+        quality = float(args.get("quality_0_to_1") or 0)
+        result = self._parse_rules.rate(
+            url,
+            quality_0_to_1=quality,
+            parse_method=str(args.get("parse_method") or "") or None,
+            css_selector=str(args.get("css_selector") or "") or None,
+            notes=str(args.get("notes") or ""),
+        )
+        path = self._parse_rules.save(self.config.data_path)
+        self.parser.rules = self._parse_rules
+        self.memory.add(
+            "parse_rate",
+            f"rate {url} q={quality:.2f}",
+            meta=result.get("rule") or {},
+        )
+        return {**result, "path": str(path)}
+
 
     def list_relations(self, args: dict[str, Any]) -> dict[str, Any]:
         graph = self._get_relations()

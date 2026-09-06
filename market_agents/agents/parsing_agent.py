@@ -56,6 +56,9 @@ class ParsingAgent:
             "6) add_relation — zapisz potwierdzone powiązania (source→target)\n"
             "7) list_candidates / list_catalog_sources — świeże sygnały + huby katalogów\n"
             "8) discover_catalog_assets / fetch_pdf_text / fetch_and_parse — głęboki research\n"
+            "8b) ROZWIJAJ PARSER: gdy chars niskie / ok=false → list_parse_rules, "
+            "upsert_parse_rule (preferred_method/css_selector), rate_parse, "
+            "potem fetch_and_parse z bypass_cache=true\n"
             "9) extract_market_intel — signal_type=new_firm | relation | competitor\n"
             "10) remember — zapisz wnioski do pamięci\n"
             "Na końcu briefing po polsku: NOWE FIRMY → POWIĄZANIA (kto dystrybuuje kogo) "
@@ -75,6 +78,7 @@ class ParsingAgent:
             f"R2 enabled: {self.config.sources.cloudflare_r2.enabled}\n"
             f"Liczba kandydatów: {len(candidates)}\n"
             f"Limit głębokich parse: {self.config.agents.agentic.max_deep_parses}\n"
+            f"Learn parse rules: {self.config.agents.agentic.learn_parse_rules}\n"
             "Zacznij od list_known_firms + list_relations, potem discover_new_firms "
             "i discover_relations (parse_candidates=true)."
         )

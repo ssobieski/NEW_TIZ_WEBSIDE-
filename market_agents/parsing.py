@@ -8,6 +8,8 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from market_agents.parse_rules import SiteParseRulesStore, host_from_url
+
 try:
     import trafilatura
 except ImportError:  # pragma: no cover
@@ -43,40 +45,174 @@ class ParsedDocument:
 
 class IntelligentParser:
     """
-    Inteligentny parsing stron:
-    1) trafilatura (article extraction)
-    2) fallback BeautifulSoup + heurystyki
-    3) czyszczenie boilerplate / nawigacji
+    Inteligentny parsing stron — agent może go rozwijać przez SiteParseRulesStore:
+    1) reguła hosta (preferred_method / css_selector)
+    2) trafilatura
+    3) fallback BeautifulSoup
     """
 
-    def __init__(self, timeout: int = 30) -> None:
+    def __init__(
+        self,
+        timeout: int = 30,
+        rules: SiteParseRulesStore | None = None,
+        learn: bool = True,
+    ) -> None:
         self.timeout = timeout
+        self.rules = rules
+        self.learn = learn
 
     def fetch_html(self, url: str) -> str:
         headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
-        with httpx.Client(timeout=self.timeout, follow_redirects=True, headers=headers) as client:
+        with httpx.Client(
+            timeout=self.timeout, follow_redirects=True, headers=headers
+        ) as client:
             response = client.get(url)
             response.raise_for_status()
             return response.text
 
-    def parse_url(self, url: str) -> ParsedDocument:
+    def parse_url(
+        self,
+        url: str,
+        *,
+        force_method: str | None = None,
+        css_selector: str | None = None,
+    ) -> ParsedDocument:
         try:
             html = self.fetch_html(url)
-            return self.parse_html(url, html)
+            return self.parse_html(
+                url, html, force_method=force_method, css_selector=css_selector
+            )
         except Exception as exc:  # noqa: BLE001
             return ParsedDocument(url=url, ok=False, error=str(exc))
 
-    def parse_html(self, url: str, html: str) -> ParsedDocument:
+    def parse_html(
+        self,
+        url: str,
+        html: str,
+        *,
+        force_method: str | None = None,
+        css_selector: str | None = None,
+    ) -> ParsedDocument:
+        rule = self.rules.get(url) if self.rules else None
+        method = (force_method or (rule.preferred_method if rule else "auto") or "auto")
+        method = method.strip().lower()
+        selector = (
+            css_selector
+            if css_selector is not None
+            else (rule.css_selector if rule else "")
+        ) or ""
+        drop = list(rule.drop_selectors) if rule else []
+        min_chars = int(rule.min_chars) if rule else 120
+
+        def _finish(doc: ParsedDocument) -> ParsedDocument:
+            doc.links = self._extract_links(url, html)
+            doc.meta = {
+                **(doc.meta or {}),
+                "rule_host": host_from_url(url),
+                "requested_method": method,
+                "applied_selector": selector or None,
+            }
+            if self.learn and self.rules is not None and doc.ok and len(doc.text) >= 120:
+                self._auto_learn(url, doc)
+            return doc
+
+        if method == "css" and selector:
+            css_doc = self._css(
+                url, html, selector, drop_selectors=drop, min_chars=min_chars
+            )
+            if css_doc.ok:
+                return _finish(css_doc)
+
+        if method == "trafilatura":
+            doc = self._trafilatura(url, html)
+            if doc.ok and len(doc.text) >= max(min_chars, 120):
+                return _finish(doc)
+        elif method == "bs4":
+            doc = self._beautifulsoup(
+                url, html, drop_selectors=drop, min_chars=min_chars
+            )
+            if doc.ok:
+                return _finish(doc)
+
+        if method == "auto" and selector:
+            css_doc = self._css(
+                url, html, selector, drop_selectors=drop, min_chars=min_chars
+            )
+            if css_doc.ok:
+                return _finish(css_doc)
+
         doc = self._trafilatura(url, html)
-        if doc.ok and len(doc.text) >= 280:
-            doc.links = self._extract_links(url, html)
-            return doc
-        fallback = self._beautifulsoup(url, html)
+        if doc.ok and len(doc.text) >= max(280, min_chars):
+            return _finish(doc)
+
+        fallback = self._beautifulsoup(
+            url, html, drop_selectors=drop, min_chars=min_chars
+        )
         if not fallback.ok and doc.ok:
-            doc.links = self._extract_links(url, html)
-            return doc
-        fallback.links = self._extract_links(url, html)
-        return fallback
+            return _finish(doc)
+        return _finish(fallback)
+
+    def _auto_learn(self, url: str, doc: ParsedDocument) -> None:
+        if self.rules is None:
+            return
+        host = host_from_url(url)
+        if not host:
+            return
+        existing = self.rules.get(host)
+        if existing and existing.origin == "manual" and existing.css_selector:
+            self.rules.rate(
+                url,
+                quality_0_to_1=0.8,
+                parse_method=None,
+                notes="auto-ok",
+            )
+            return
+        method = doc.parse_method if doc.parse_method in {"trafilatura", "bs4", "css"} else None
+        self.rules.rate(
+            url,
+            quality_0_to_1=0.85 if len(doc.text) >= 280 else 0.65,
+            parse_method=method,
+            notes="auto-learn from successful parse",
+        )
+
+    def _css(
+        self,
+        url: str,
+        html: str,
+        selector: str,
+        *,
+        drop_selectors: list[str] | None = None,
+        min_chars: int = 120,
+    ) -> ParsedDocument:
+        try:
+            soup = BeautifulSoup(html, "lxml")
+            for sel in drop_selectors or []:
+                for tag in soup.select(sel):
+                    tag.decompose()
+            for tag in soup(["script", "style", "noscript"]):
+                tag.decompose()
+            nodes = soup.select(selector)
+            if not nodes:
+                return ParsedDocument(
+                    url=url,
+                    ok=False,
+                    error=f"css selector empty: {selector}",
+                    parse_method="css",
+                )
+            chunks = [n.get_text(" ", strip=True) for n in nodes if n.get_text(strip=True)]
+            text = _normalize_whitespace("\n".join(chunks))
+            text = _drop_short_noise(text)
+            title = _title_from_html(html) or url
+            return ParsedDocument(
+                url=url,
+                title=title,
+                text=text,
+                parse_method="css",
+                ok=len(text) >= min_chars,
+                meta={"chars": len(text), "selector": selector, "nodes": len(nodes)},
+            )
+        except Exception as exc:  # noqa: BLE001
+            return ParsedDocument(url=url, ok=False, error=str(exc), parse_method="css")
 
     def _trafilatura(self, url: str, html: str) -> ParsedDocument:
         if trafilatura is None:
@@ -122,8 +258,18 @@ class IntelligentParser:
                 url=url, ok=False, error=str(exc), parse_method="trafilatura"
             )
 
-    def _beautifulsoup(self, url: str, html: str) -> ParsedDocument:
+    def _beautifulsoup(
+        self,
+        url: str,
+        html: str,
+        *,
+        drop_selectors: list[str] | None = None,
+        min_chars: int = 120,
+    ) -> ParsedDocument:
         soup = BeautifulSoup(html, "lxml")
+        for sel in drop_selectors or []:
+            for tag in soup.select(sel):
+                tag.decompose()
         for tag in soup(["script", "style", "noscript", "nav", "footer", "aside", "form"]):
             tag.decompose()
         title = _title_from_html(html) or (
@@ -146,7 +292,7 @@ class IntelligentParser:
             title=title,
             text=text,
             parse_method="bs4",
-            ok=len(text) >= 120,
+            ok=len(text) >= min_chars,
             meta={"chars": len(text), "paragraphs": len(paragraphs)},
         )
 

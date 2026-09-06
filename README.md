@@ -84,6 +84,7 @@ python -m market_agents schedule
 
 Tooli: `list_known_firms`, `discover_new_firms`, `check_firm_known`,
 `list_relations`, `add_relation`, `discover_relations`, `firm_neighborhood`,
+`list_parse_rules`, `upsert_parse_rule`, `rate_parse`,
 `list_catalog_sources`, `discover_catalog_assets`, `fetch_pdf_text`
 (+ Notion/R2: `search_notion`, `fetch_notion_page`, `search_r2`, `fetch_r2_object`).
 
@@ -98,6 +99,16 @@ python -m market_agents sync-relations
 Typy: `distributor_of`, `dealer_of`, `brand_of`, `subsidiary_of`, `oem_group`,
 `partner_of`, `rebrand_of`. Agent buduje graf np. GARANT → brand_of → Hoffmann Group,
 Hoffmann Group → distributor_of → Sandvik Coromant.
+
+
+## Samorozwijający się parser
+
+Agent nie ma sztywnego jednego sposobu czytania stron — uczy się per host:
+
+1. `fetch_and_parse` (trafilatura → bs4, potem reguła hosta)
+2. przy słabym wyniku → `upsert_parse_rule` (CSS / preferred_method)
+3. `rate_parse` wzmacnia albo osłabia regułę
+4. reguły w `data/knowledge/site_parse_rules.json` (`agents.agentic.learn_parse_rules`)
 
 Szybki test parsera (bez LLM):
 
