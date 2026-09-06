@@ -126,24 +126,22 @@ oraz **przedstawienie**:
 
 Agent używa `list_known_firms` + `get_firm_presentation` zanim scrapuje WWW znanej marki.
 
-## Samorozwijający się parser + wspólne skills
+## Samorozwijający się parser + wspólne skills + anty-ban crawl
 
-Dwie warstwy uczenia (wszystkie agenty dzielą tę samą wiedzę):
+Dwie warstwy uczenia + adaptacyjny fetcher (bez bulk / bez banów):
 
 1. **Reguły per-host** (`data/knowledge/site_parse_rules.json`)
-   - `fetch_and_parse` → przy słabym wyniku `upsert_parse_rule` / `rate_parse`
 2. **Wspólne skills** (`data/knowledge/parsing_skills.json`)
-   - przepisy wielokrotnego użytku: targi, artykuły, katalogi, ekstrakcja firm/powiązań
-   - `list_parsing_skills` / `match_parsing_skills` → dobór skillu do URL
-   - `learn_parsing_skill` / `improve_parsing_skill` / `rate_parsing_skill` → wspólna ewolucja
-   - `promote_host_skill` — udaną regułę hosta wypromuj do skillu dla innych agentów
-   - przy `rate_parse` ≥ 0.75 automatyczna promocja (`auto_promote_host_skills`)
+3. **Polite adaptive crawl** (`data/knowledge/crawl_health.json`)
+   - 1 request naraz na host, global concurrency ≤ 2
+   - delay 1.5–45s z jitterem; rośnie po wolnych odpowiedziach
+   - 429/503 → Retry-After + cooldown; 403 → dłuższy cooldown
+   - opcjonalnie `robots.txt`
+   - `batch_parse` nie robi bulk: ten sam host = sekwencyjnie
+   - tool `crawl_status` pokazuje zdrowie hostów
 
 ```bash
-# w config (domyślnie włączone):
-# agents.agentic.learn_parse_rules: true
-# agents.agentic.learn_parsing_skills: true
-# agents.agentic.auto_promote_host_skills: true
+# agents.crawl.* + agents.agentic.parallel_fetches: 2 (domyślnie)
 python -m market_agents parse "https://example.com/news/article"
 ```
 

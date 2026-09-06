@@ -5,12 +5,12 @@ import re
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 
 from market_agents.collectors.base import BaseCollector
 from market_agents.config import CatalogSource
 from market_agents.models import MarketItem
+from market_agents.polite_http import AdaptivePoliteFetcher
 
 # Wzorce URL / tekstu wskazujące na katalogi, PDF, e-shop, publikacje
 _ASSET_HINTS = re.compile(
@@ -21,7 +21,6 @@ _ASSET_HINTS = re.compile(
     re.I,
 )
 _PDF_EXT = re.compile(r"\.pdf(\?|#|$)", re.I)
-_USER_AGENT = "MarketAgentsLocal/0.3 (+catalog research; polite crawl)"
 
 
 class CatalogCollector(BaseCollector):
@@ -32,9 +31,10 @@ class CatalogCollector(BaseCollector):
     - Strona HTML → discovery linków PDF / catalog / shop
     """
 
-    def __init__(self, source: CatalogSource) -> None:
+    def __init__(self, source: CatalogSource, fetcher: AdaptivePoliteFetcher | None = None) -> None:
         self.source = source
         self.name = source.name
+        self.fetcher = fetcher or AdaptivePoliteFetcher.shared()
 
     def collect(self, max_items: int = 15) -> list[MarketItem]:
         kind = (self.source.kind or "ecatalog").lower()
@@ -142,12 +142,8 @@ class CatalogCollector(BaseCollector):
         return items
 
     def _discover_from_html(self, url: str, max_links: int = 40) -> list[dict[str, Any]]:
-        headers = {"User-Agent": _USER_AGENT}
         try:
-            with httpx.Client(timeout=35, follow_redirects=True, headers=headers) as client:
-                resp = client.get(url)
-                resp.raise_for_status()
-                html = resp.text
+            html = self.fetcher.get_text(url, timeout=35)
         except Exception as exc:  # noqa: BLE001
             return [{"ok": False, "url": url, "error": str(exc)}]
 
@@ -186,31 +182,22 @@ class CatalogCollector(BaseCollector):
         return found
 
     def _pdf_meta(self, url: str) -> dict[str, Any]:
-        headers = {"User-Agent": _USER_AGENT}
         try:
-            with httpx.Client(timeout=40, follow_redirects=True, headers=headers) as client:
-                # Najpierw HEAD; jeśli zablokowane — GET z Range
-                try:
-                    head = client.head(url)
-                    if head.status_code >= 400:
-                        raise httpx.HTTPStatusError("head failed", request=head.request, response=head)
-                    ctype = head.headers.get("content-type", "")
-                    clen = head.headers.get("content-length")
-                except Exception:  # noqa: BLE001
-                    head = client.get(url, headers={**headers, "Range": "bytes=0-1023"})
-                    ctype = head.headers.get("content-type", "")
-                    clen = head.headers.get("content-length") or head.headers.get("content-range")
-                filename = _filename_from_url(url)
-                return {
-                    "ok": True,
-                    "url": str(head.url),
-                    "content_type": ctype,
-                    "content_length": clen,
-                    "filename": filename,
-                    "status_code": head.status_code,
-                    "asset_type": "pdf",
-                    "brand": self.source.brand or self.source.name,
-                }
+            # Pełny GET przez polite fetcher (HEAD bywa blokowane; unikamy second burst)
+            response = self.fetcher.get(url, timeout=40)
+            ctype = response.headers.get("content-type", "")
+            clen = response.headers.get("content-length")
+            filename = _filename_from_url(url)
+            return {
+                "ok": True,
+                "url": str(response.url),
+                "content_type": ctype,
+                "content_length": clen,
+                "filename": filename,
+                "status_code": response.status_code,
+                "asset_type": "pdf",
+                "brand": self.source.brand or self.source.name,
+            }
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "url": url, "error": str(exc), "asset_type": "pdf"}
 
@@ -220,12 +207,8 @@ class CatalogCollector(BaseCollector):
         except ImportError:
             return "[pypdf niedostępny — pip install pypdf]"
 
-        headers = {"User-Agent": _USER_AGENT}
         try:
-            with httpx.Client(timeout=90, follow_redirects=True, headers=headers) as client:
-                resp = client.get(url)
-                resp.raise_for_status()
-                data = resp.content
+            data = self.fetcher.get_bytes(url, timeout=90)
         except Exception as exc:  # noqa: BLE001
             return f"[błąd pobierania PDF: {exc}]"
 

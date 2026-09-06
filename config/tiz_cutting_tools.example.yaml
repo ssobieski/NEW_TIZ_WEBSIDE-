@@ -498,7 +498,7 @@ agents:
     enabled: true
     max_steps: 14
     max_deep_parses: 10
-    parallel_fetches: 6
+    parallel_fetches: 2
     require_tool_use: true
     trace_dir: data/agent_traces
     learn_parse_rules: true
@@ -506,5 +506,18 @@ agents:
     learn_parsing_skills: true
     parsing_skills_path: data/knowledge/parsing_skills.json
     auto_promote_host_skills: true
+  crawl:
+    enabled: true
+    min_delay_seconds: 1.5
+    max_delay_seconds: 45
+    jitter_seconds: 0.5
+    per_host_concurrency: 1
+    global_concurrency: 2
+    max_retries: 3
+    backoff_factor: 2.0
+    respect_robots_txt: true
+    adaptive: true
+    cooldown_on_block_seconds: 900
+    timeout_seconds: 35
 schedule:
   every_hours: 6

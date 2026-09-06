@@ -3,30 +3,28 @@ from __future__ import annotations
 import re
 from urllib.parse import urljoin
 
-import httpx
 from bs4 import BeautifulSoup
 
 from market_agents.collectors.base import BaseCollector
 from market_agents.config import WebSource
 from market_agents.models import MarketItem
+from market_agents.polite_http import AdaptivePoliteFetcher
 
 
 class WebCollector(BaseCollector):
-    """Prosty scraper publicznych stron — bez JS/paywall."""
+    """Prosty scraper publicznych stron — polite/adaptive, bez JS/paywall."""
 
-    def __init__(self, source: WebSource) -> None:
+    def __init__(
+        self,
+        source: WebSource,
+        fetcher: AdaptivePoliteFetcher | None = None,
+    ) -> None:
         self.source = source
         self.name = source.name
+        self.fetcher = fetcher or AdaptivePoliteFetcher.shared()
 
     def collect(self, max_items: int = 15) -> list[MarketItem]:
-        headers = {
-            "User-Agent": "MarketAgentsLocal/0.2 (+local research bot; polite crawl)"
-        }
-        with httpx.Client(timeout=30, follow_redirects=True, headers=headers) as client:
-            response = client.get(self.source.url)
-            response.raise_for_status()
-            html = response.text
-
+        html = self.fetcher.get_text(self.source.url)
         soup = BeautifulSoup(html, "lxml")
         nodes = (
             soup.select(self.source.css_selector)

@@ -151,11 +151,32 @@ class LlmConfig(BaseModel):
     max_model_len: int = 32768
 
 
+class CrawlConfig(BaseModel):
+    """Adaptacyjny polite crawl — anty-bulk / anty-ban."""
+
+    enabled: bool = True
+    min_delay_seconds: float = 1.5
+    max_delay_seconds: float = 45.0
+    jitter_seconds: float = 0.5
+    per_host_concurrency: int = 1
+    global_concurrency: int = 2
+    max_retries: int = 3
+    backoff_factor: float = 2.0
+    respect_robots_txt: bool = True
+    adaptive: bool = True
+    cooldown_on_block_seconds: float = 900.0
+    timeout_seconds: float = 35.0
+    user_agent: str = (
+        "MarketAgentsLocal/0.3 (+local research; polite adaptive crawler; contact: local-only)"
+    )
+
+
 class AgenticConfig(BaseModel):
     enabled: bool = True
     max_steps: int = 12
     max_deep_parses: int = 8
-    parallel_fetches: int = 6
+    # Niski default — bulk = ban; polite fetcher i tak serializuje per host
+    parallel_fetches: int = 2
     require_tool_use: bool = True
     trace_dir: str = "data/agent_traces"
     learn_parse_rules: bool = True
@@ -173,6 +194,7 @@ class AgentsConfig(BaseModel):
     data_dir: str = "data"
     min_relevance_score: float = 0.35
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
+    crawl: CrawlConfig = Field(default_factory=CrawlConfig)
 
 
 class ScheduleConfig(BaseModel):

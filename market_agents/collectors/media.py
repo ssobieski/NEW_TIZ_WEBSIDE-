@@ -3,15 +3,13 @@ from __future__ import annotations
 import re
 from urllib.parse import urljoin, urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 
 from market_agents.collectors.base import BaseCollector
 from market_agents.config import IndustryMediaSource
 from market_agents.firms import extract_candidate_firm_names, normalize_firm_name
 from market_agents.models import MarketItem
-
-USER_AGENT = "MarketAgentsLocal/0.3 (+local research bot; polite crawl)"
+from market_agents.polite_http import AdaptivePoliteFetcher
 
 _KIND_DEFAULT_KEYWORDS: dict[str, list[str]] = {
     "trade_fair": [
@@ -61,6 +59,7 @@ class IndustryMediaCollector(BaseCollector):
     def __init__(self, source: IndustryMediaSource) -> None:
         self.source = source
         self.name = f"media:{source.kind}:{source.name}"
+        self.fetcher = AdaptivePoliteFetcher.shared()
 
     def collect(self, max_items: int = 20) -> list[MarketItem]:
         if not self.source.enabled:
@@ -213,11 +212,7 @@ class IndustryMediaCollector(BaseCollector):
         }
 
     def _fetch(self, url: str) -> str:
-        headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
-        with httpx.Client(timeout=35, follow_redirects=True, headers=headers) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            return response.text
+        return self.fetcher.get_text(url)
 
 
 def extract_exhibitors_from_html(html: str, limit: int = 60) -> list[str]:

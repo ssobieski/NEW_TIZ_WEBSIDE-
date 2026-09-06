@@ -15,6 +15,7 @@ from market_agents.collectors.r2 import build_r2_collector
 from market_agents.config import AppConfig
 from market_agents.firms import KnownFirmsIndex
 from market_agents.models import MarketItem
+from market_agents.polite_http import build_fetcher_from_config
 from market_agents.storage import Storage
 
 
@@ -30,18 +31,22 @@ class CollectorAgent:
             data_dir=self.config.data_path,
             competitors=self.config.industry.competitors,
         )
+        fetcher = build_fetcher_from_config(self.config)
         collectors: list[object] = []
         for src in self.config.sources.rss:
             collectors.append(
                 RssCollector(src, lookback_hours=self.config.agents.lookback_hours)
             )
         for src in self.config.sources.web:
-            collectors.append(WebCollector(src))
+            collectors.append(WebCollector(src, fetcher=fetcher))
         for src in self.config.sources.catalogs:
-            collectors.append(CatalogCollector(src))
+            collectors.append(CatalogCollector(src, fetcher=fetcher))
         for src in self.config.sources.media:
             if src.enabled:
                 collectors.append(IndustryMediaCollector(src))
+                # IndustryMediaCollector używa shared fetcher; ustaw jawnie jeśli dostępne
+                if collectors and hasattr(collectors[-1], "fetcher"):
+                    collectors[-1].fetcher = fetcher  # type: ignore[attr-defined]
         if self.config.sources.firm_discovery.enabled:
             collectors.append(
                 FirmDiscoveryCollector(

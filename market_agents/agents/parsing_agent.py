@@ -68,6 +68,9 @@ class ParsingAgent:
             "10c) ROZWIJAJ PARSER PER-HOST: gdy chars niskie / ok=false → list_parse_rules, "
             "upsert_parse_rule (preferred_method/css_selector), rate_parse, "
             "potem fetch_and_parse z bypass_cache=true\n"
+            "10d) ANTY-BAN / BEZ BULK: crawl jest adaptacyjny (delay per host, robots.txt, "
+            "cooldown po 429/403). Nie spamuj — batch_parse max kilka URL; "
+            "przy problemach crawl_status; ten sam host = sekwencyjnie\n"
             "11) extract_market_intel — signal_type=new_firm | relation | competitor\n"
             "12) remember — zapisz wnioski do pamięci\n"
             "Na końcu briefing po polsku: NOWE FIRMY (w tym wystawcy targów) → "
@@ -90,11 +93,16 @@ class ParsingAgent:
             f"Limit głębokich parse: {self.config.agents.agentic.max_deep_parses}\n"
             f"Learn parse rules: {self.config.agents.agentic.learn_parse_rules}\n"
             f"Learn parsing skills (shared): {self.config.agents.agentic.learn_parsing_skills}\n"
+            f"Polite crawl: delay={self.config.agents.crawl.min_delay_seconds}s–"
+            f"{self.config.agents.crawl.max_delay_seconds}s, "
+            f"global_concurrency={self.config.agents.crawl.global_concurrency}, "
+            f"robots={self.config.agents.crawl.respect_robots_txt}, "
+            f"adaptive={self.config.agents.crawl.adaptive}\n"
             "Zacznij od list_known_firms (Notion katalog). Dla ważnych marek użyj "
             "get_firm_presentation. Potem list_parsing_skills + list_media_sources + "
             "extract_fair_exhibitors (targi), list_relations, discover_new_firms "
             "i discover_relations. Po udanym parse: rate_parse / rate_parsing_skill "
-            "albo improve_parsing_skill."
+            "albo improve_parsing_skill. Bez bulk — używaj crawl_status przy 429/403."
         )
 
         messages: list[dict[str, Any]] = [

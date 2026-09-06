@@ -5,10 +5,10 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 
 from market_agents.parse_rules import SiteParseRulesStore, host_from_url
+from market_agents.polite_http import AdaptivePoliteFetcher, DEFAULT_USER_AGENT
 
 try:
     import trafilatura
@@ -16,9 +16,7 @@ except ImportError:  # pragma: no cover
     trafilatura = None  # type: ignore
 
 
-USER_AGENT = (
-    "MarketAgentsLocal/0.2 (+local intelligence agent; respectful research crawler)"
-)
+USER_AGENT = DEFAULT_USER_AGENT
 
 
 @dataclass
@@ -56,19 +54,23 @@ class IntelligentParser:
         timeout: int = 30,
         rules: SiteParseRulesStore | None = None,
         learn: bool = True,
+        fetcher: AdaptivePoliteFetcher | None = None,
     ) -> None:
         self.timeout = timeout
         self.rules = rules
         self.learn = learn
+        self.fetcher = fetcher
 
     def fetch_html(self, url: str) -> str:
-        headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
-        with httpx.Client(
-            timeout=self.timeout, follow_redirects=True, headers=headers
-        ) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            return response.text
+        headers = {"Accept": "text/html,application/xhtml+xml"}
+        if self.fetcher is not None:
+            return self.fetcher.get_text(
+                url, headers=headers, timeout=float(self.timeout)
+            )
+        # fallback (testy / ad-hoc) — nadal przez shared polite fetcher
+        return AdaptivePoliteFetcher.shared().get_text(
+            url, headers=headers, timeout=float(self.timeout)
+        )
 
     def parse_url(
         self,

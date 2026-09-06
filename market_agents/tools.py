@@ -22,6 +22,7 @@ from market_agents.models import MarketItem
 from market_agents.parse_rules import PARSE_METHODS, SiteParseRulesStore
 from market_agents.parsing import IntelligentParser, ParsedDocument
 from market_agents.parsing_skills import SKILL_CATEGORIES, ParsingSkillsStore
+from market_agents.polite_http import build_fetcher_from_config
 
 
 ToolFn = Callable[[dict[str, Any]], dict[str, Any]]
@@ -38,6 +39,7 @@ class ToolRegistry:
     ) -> None:
         self.config = config
         self.memory = memory
+        self._fetcher = build_fetcher_from_config(config)
         self._parse_rules = (
             SiteParseRulesStore.load(data_dir=config.data_path)
             if config.agents.agentic.learn_parse_rules
@@ -52,6 +54,7 @@ class ToolRegistry:
         self.parser = IntelligentParser(
             rules=self._parse_rules if config.agents.agentic.learn_parse_rules else None,
             learn=bool(config.agents.agentic.learn_parse_rules),
+            fetcher=self._fetcher,
         )
         self.candidates = candidates or []
         self.parsed_cache: dict[str, ParsedDocument] = {}
@@ -62,6 +65,7 @@ class ToolRegistry:
             "list_candidates": self.list_candidates,
             "fetch_and_parse": self.fetch_and_parse,
             "batch_parse": self.batch_parse,
+            "crawl_status": self.crawl_status,
             "extract_market_intel": self.extract_market_intel,
             "search_memory": self.search_memory,
             "remember": self.remember,
@@ -163,7 +167,10 @@ class ToolRegistry:
                 "type": "function",
                 "function": {
                     "name": "batch_parse",
-                    "description": "Równolegle sparsuj wiele URL-i (głęboki research).",
+                    "description": (
+                        "Sparsuj kilka URL polite/adaptive (niski concurrency, delay per host). "
+                        "NIE do bulk scrapingu — max kilka adresów. Ten sam host = sekwencyjnie."
+                    ),
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -174,6 +181,25 @@ class ToolRegistry:
                             }
                         },
                         "required": ["urls"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "crawl_status",
+                    "description": (
+                        "Status adaptacyjnego crawlera anty-ban: delay/cooldown per host, "
+                        "polityka robots/concurrency. Sprawdź przed kolejnymi fetchami."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "host_or_url": {
+                                "type": "string",
+                                "description": "Opcjonalny host/URL; puste = cała mapa zdrowia",
+                            }
+                        },
                     },
                 },
             },
@@ -1067,7 +1093,17 @@ class ToolRegistry:
     def batch_parse(self, args: dict[str, Any]) -> dict[str, Any]:
         urls = [u for u in (args.get("urls") or []) if isinstance(u, str)]
         urls = urls[: self.config.agents.agentic.max_deep_parses]
-        workers = min(self.config.agents.agentic.parallel_fetches, max(len(urls), 1))
+        # Anty-bulk: nigdy nie przekraczaj global_concurrency z crawl policy
+        crawl_cap = int(getattr(self.config.agents.crawl, "global_concurrency", 2) or 2)
+        workers = min(
+            self.config.agents.agentic.parallel_fetches,
+            crawl_cap,
+            max(len(urls), 1),
+        )
+        # Przy adaptive crawl i wielu URL z tego samego hosta — sekwencyjnie bezpieczniej
+        hosts = {self._fetcher.host_of(u) for u in urls}
+        if len(hosts) <= 1:
+            workers = 1
         results: list[dict[str, Any]] = []
 
         def _one(u: str) -> dict[str, Any]:
@@ -1077,7 +1113,22 @@ class ToolRegistry:
             futs = {pool.submit(_one, u): u for u in urls}
             for fut in as_completed(futs):
                 results.append(fut.result())
-        return {"ok": True, "results": results}
+        return {
+            "ok": True,
+            "results": results,
+            "workers": workers,
+            "polite": True,
+            "crawl_cap": crawl_cap,
+        }
+
+    def crawl_status(self, args: dict[str, Any]) -> dict[str, Any]:
+        host_or_url = str(args.get("host_or_url") or "").strip() or None
+        status = self._fetcher.status(host_or_url)
+        status["hint"] = (
+            "Przy in_cooldown=true poczekaj / zmień źródło. "
+            "Nie spamuj hosta — delay rośnie adaptacyjnie po 429/403/wolnych odpowiedziach."
+        )
+        return status
 
     def extract_market_intel(self, args: dict[str, Any]) -> dict[str, Any]:
         url = str(args.get("url") or "")
