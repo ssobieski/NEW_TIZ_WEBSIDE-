@@ -1,0 +1,47 @@
+# Skopiuj do config/industry.yaml i dostosuj do swojej branży.
+# Lokalni agenci czytają ten plik przy każdym uruchomieniu.
+
+industry:
+  name: "Twoja branża"
+  language: "pl"
+  keywords:
+    - "słowo kluczowe 1"
+    - "słowo kluczowe 2"
+    - "konkurent"
+  exclude_keywords:
+    - "reklama"
+    - "oferta pracy"
+    - "rekrutacja"
+
+# Źródła RSS — darmowe, bez API keys
+sources:
+  rss:
+    - name: "Google News (branża)"
+      url: "https://news.google.com/rss/search?q=TWOJA+BRANZA&hl=pl&gl=PL&ceid=PL:pl"
+    - name: "Google News (konkurencja)"
+      url: "https://news.google.com/rss/search?q=KONKURENT&hl=pl&gl=PL&ceid=PL:pl"
+  # Opcjonalne strony do zeskrapowania (tylko publiczne treści)
+  web:
+    - name: "Przykładowy portal"
+      url: "https://example.com/news"
+      css_selector: "article"  # opcjonalnie
+
+# Lokalny model (Ollama) — zero kosztów tokenów
+llm:
+  provider: "ollama"           # ollama | openai_compatible
+  base_url: "http://127.0.0.1:11434"
+  model: "llama3.2"            # np. llama3.2, mistral, qwen2.5, gemma2
+  temperature: 0.2
+  timeout_seconds: 120
+
+# Zachowanie agentów
+agents:
+  max_items_per_source: 15
+  lookback_hours: 48
+  report_dir: "reports"
+  data_dir: "data"
+  min_relevance_score: 0.35
+
+# Harmonogram (gdy uruchamiasz: python -m market_agents schedule)
+schedule:
+  every_hours: 6

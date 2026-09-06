@@ -1,0 +1,49 @@
+# Branża meblarska / wyposażenie wnętrz — przykład PL
+# Skopiuj: cp config/furniture.pl.example.yaml config/industry.yaml
+
+industry:
+  name: "Meble i wyposażenie wnętrz"
+  language: "pl"
+  keywords:
+    - "meble"
+    - "wyposażenie wnętrz"
+    - "IKEA"
+    - "Black Red White"
+    - "Agata Meble"
+    - "design wnętrz"
+    - "meble biurowe"
+    - "e-commerce meble"
+  exclude_keywords:
+    - "oferta pracy"
+    - "rekrutacja"
+    - "ogłoszenie"
+    - "OLX"
+    - "za darmo"
+    - "Kupię"
+
+sources:
+  rss:
+    - name: "Google News — meble"
+      url: "https://news.google.com/rss/search?q=meble+OR+%22wyposa%C5%BCenie+wn%C4%99trz%22&hl=pl&gl=PL&ceid=PL:pl"
+    - name: "Google News — IKEA PL"
+      url: "https://news.google.com/rss/search?q=IKEA+Polska&hl=pl&gl=PL&ceid=PL:pl"
+    - name: "Google News — Black Red White"
+      url: "https://news.google.com/rss/search?q=%22Black+Red+White%22+OR+BRW&hl=pl&gl=PL&ceid=PL:pl"
+  web: []
+
+llm:
+  provider: "ollama"
+  base_url: "http://127.0.0.1:11434"
+  model: "llama3.2"
+  temperature: 0.2
+  timeout_seconds: 120
+
+agents:
+  max_items_per_source: 12
+  lookback_hours: 72
+  report_dir: "reports"
+  data_dir: "data"
+  min_relevance_score: 0.3
+
+schedule:
+  every_hours: 6
