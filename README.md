@@ -41,11 +41,11 @@ pip install -e .
 # pip install vllm
 ```
 
-## Konfiguracja (TIZ + e-catalog / PDF / e-shop + Notion)
+## Konfiguracja (TIZ + znane firmy + e-catalog / PDF / e-shop + Notion)
 
-Fokus monitoringu: **e-catalogi, PDF katalogi, digital catalogues, publikacje, e-shopy**.
-Masz też bazę w Notion (Katalogi konkurencji, handbooki, ISO 13399) i archiwum na Cloudflare.
-Agenci **nie zaczynają od zera** — sync Notion/R2 + discovery z hubów katalogowych.
+Fokus: **e-catalogi, PDF, publikacje, digital catalogues, e-shopy** — wg listy **znanych firm**
+z Notion (`Katalogi konkurencji — indeks`, ~37 marek: Sandvik, Iscar, Kennametal, MAPAL,
+FRAISA, YG-1, OSG, Paul Horn, HAIMER…).
 
 ```bash
 # profil pod narzędzia skrawające + katalogi konkurencji
@@ -59,15 +59,15 @@ cp .env.example .env
 # w Notion: Share stron TIZ → zaproszenie Internal Integration
 export NOTION_TOKEN=secret_...
 
-# jednorazowy import istniejącej wiedzy
+# sync listy znanych firm + stron Notion
+python -m market_agents sync-firms
 python -m market_agents sync-notion
 # po włączeniu cloudflare_r2.enabled: true w YAML:
 # python -m market_agents sync-r2
 ```
 
-Źródła katalogowe są w `sources.catalogs` (`config/tiz_cutting_tools.example.yaml`):
-Iscar eCatalog, Sandvik downloads, Kennametal, Walter, Seco, Hoffmann, Guehring webshop,
-Fraisa, Ceratizit, Tungaloy, Horn, Mapal, Mitsubishi…
+Źródła: `sources.catalogs` + `industry.competitors` z indeksu Notion.
+Seed offline: `config/known_firms.seed.json`.
 
 ## Uruchomienie na Dellu
 
@@ -81,7 +81,7 @@ python -m market_agents run --agentic
 python -m market_agents schedule
 ```
 
-Tooli katalogowe: `list_catalog_sources`, `discover_catalog_assets`, `fetch_pdf_text`
+Tooli: `list_known_firms`, `list_catalog_sources`, `discover_catalog_assets`, `fetch_pdf_text`
 (+ Notion/R2: `search_notion`, `fetch_notion_page`, `search_r2`, `fetch_r2_object`).
 
 Szybki test parsera (bez LLM):
