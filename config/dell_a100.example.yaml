@@ -1,0 +1,57 @@
+# Profil Dell: 2TB RAM + 4x NVIDIA A100 — agentic parsing przez vLLM
+# cp config/dell_a100.example.yaml config/industry.yaml
+
+industry:
+  name: "Twoja branża"
+  language: "pl"
+  keywords:
+    - "słowo kluczowe 1"
+    - "słowo kluczowe 2"
+  competitors:
+    - "Konkurent A"
+    - "Konkurent B"
+  exclude_keywords:
+    - "oferta pracy"
+    - "rekrutacja"
+    - "OLX"
+  focus_questions:
+    - "Jakie ruchy robi konkurencja (ceny, ekspansja, M&A)?"
+    - "Jakie regulacje / trendy wpływają na marże?"
+    - "Gdzie są luki rynkowe do wejścia?"
+
+sources:
+  rss:
+    - name: "Google News (branża)"
+      url: "https://news.google.com/rss/search?q=TWOJA+BRANZA&hl=pl&gl=PL&ceid=PL:pl"
+    - name: "Google News (konkurent)"
+      url: "https://news.google.com/rss/search?q=KONKURENT&hl=pl&gl=PL&ceid=PL:pl"
+  web: []
+
+llm:
+  provider: "vllm"
+  base_url: "http://127.0.0.1:8000"
+  model: "Qwen/Qwen2.5-72B-Instruct-AWQ"
+  temperature: 0.1
+  timeout_seconds: 300
+  api_key: "EMPTY"
+  max_tokens: 4096
+  tensor_parallel_size: 4
+  gpu_memory_utilization: 0.90
+  max_model_len: 32768
+
+agents:
+  max_items_per_source: 20
+  lookback_hours: 72
+  report_dir: "reports"
+  data_dir: "data"
+  min_relevance_score: 0.3
+  agentic:
+    enabled: true
+    max_steps: 12
+    max_deep_parses: 8
+    parallel_fetches: 6
+    require_tool_use: true
+    trace_dir: "data/agent_traces"
+
+schedule:
+  every_hours: 4

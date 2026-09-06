@@ -10,26 +10,74 @@ from market_agents.config import LlmConfig
 
 
 class LocalLLM:
-    """Klient LLM działający lokalnie przez Ollamę (lub kompatybilne API)."""
+    """Klient lokalnego LLM z tool-calling (vLLM / Ollama / OpenAI-compatible)."""
 
     def __init__(self, config: LlmConfig) -> None:
         self.config = config
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
-    def chat(self, system: str, user: str) -> str:
-        if self.config.provider == "ollama":
-            return self._ollama_chat(system, user)
-        return self._openai_compatible_chat(system, user)
+    @property
+    def _is_ollama(self) -> bool:
+        return self.config.provider == "ollama"
 
-    def _ollama_chat(self, system: str, user: str) -> str:
+    @property
+    def _openai_base(self) -> str:
+        base = self.config.base_url.rstrip("/")
+        if self._is_ollama:
+            return f"{base}/v1"
+        if base.endswith("/v1"):
+            return base
+        return f"{base}/v1"
+
+    def chat(self, system: str, user: str) -> str:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        result = self.chat_messages(messages)
+        return str(result.get("content") or "").strip()
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
+    def chat_messages(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if self._is_ollama and not tools:
+            return {"role": "assistant", "content": self._ollama_native(messages)}
+
+        url = f"{self._openai_base}/chat/completions"
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+
+        payload: dict[str, Any] = {
+            "model": self.config.model,
+            "temperature": self.config.temperature,
+            "max_tokens": self.config.max_tokens,
+            "messages": messages,
+        }
+        if tools:
+            payload["tools"] = tools
+            if tool_choice is not None:
+                payload["tool_choice"] = tool_choice
+
+        with httpx.Client(timeout=self.config.timeout_seconds) as client:
+            response = client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            data = response.json()
+        return data["choices"][0]["message"]
+
+    def _ollama_native(self, messages: list[dict[str, Any]]) -> str:
         url = f"{self.config.base_url.rstrip('/')}/api/chat"
         payload = {
             "model": self.config.model,
             "stream": False,
             "options": {"temperature": self.config.temperature},
             "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": m["role"], "content": m.get("content") or ""}
+                for m in messages
+                if m.get("role") in {"system", "user", "assistant"}
             ],
         }
         with httpx.Client(timeout=self.config.timeout_seconds) as client:
@@ -38,49 +86,59 @@ class LocalLLM:
             data = response.json()
         return str(data.get("message", {}).get("content", "")).strip()
 
-    def _openai_compatible_chat(self, system: str, user: str) -> str:
-        url = f"{self.config.base_url.rstrip('/')}/v1/chat/completions"
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if self.config.api_key:
-            headers["Authorization"] = f"Bearer {self.config.api_key}"
-        payload = {
-            "model": self.config.model,
-            "temperature": self.config.temperature,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        }
-        with httpx.Client(timeout=self.config.timeout_seconds) as client:
-            response = client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
-        return str(data["choices"][0]["message"]["content"]).strip()
-
     def healthcheck(self) -> dict[str, Any]:
         try:
-            if self.config.provider == "ollama":
+            if self._is_ollama:
                 with httpx.Client(timeout=5) as client:
                     r = client.get(f"{self.config.base_url.rstrip('/')}/api/tags")
                     r.raise_for_status()
                     models = [m.get("name") for m in r.json().get("models", [])]
-                return {"ok": True, "provider": "ollama", "models": models}
-            return {"ok": True, "provider": self.config.provider, "models": [self.config.model]}
+                return {
+                    "ok": True,
+                    "provider": "ollama",
+                    "models": models,
+                    "hint": "Dla 4x A100 lepiej vLLM — bash scripts/run_vllm_a100.sh",
+                }
+
+            with httpx.Client(timeout=8) as client:
+                r = client.get(f"{self._openai_base}/models")
+                r.raise_for_status()
+                models = [m.get("id") for m in r.json().get("data", [])]
+            return {
+                "ok": True,
+                "provider": self.config.provider,
+                "models": models,
+                "tensor_parallel_size": self.config.tensor_parallel_size,
+            }
         except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "error": str(exc)}
+            return {
+                "ok": False,
+                "error": str(exc),
+                "hint": (
+                    "Uruchom vLLM na Dellu: bash scripts/run_vllm_a100.sh "
+                    f"(TP={self.config.tensor_parallel_size})"
+                ),
+            }
 
     def analyze_json(self, system: str, user: str) -> dict[str, Any]:
         raw = self.chat(system, user + "\n\nOdpowiedz TYLKO poprawnym JSON bez markdown.")
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.strip("`")
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:].strip()
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            start = cleaned.find("{")
-            end = cleaned.rfind("}")
-            if start >= 0 and end > start:
+        return _parse_json_loose(raw)
+
+
+def _parse_json_loose(raw: str) -> dict[str, Any]:
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:].strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start >= 0 and end > start:
+            try:
                 return json.loads(cleaned[start : end + 1])
-            return {"raw": raw, "parse_error": True}
+            except json.JSONDecodeError:
+                pass
+        return {"raw": raw, "parse_error": True}

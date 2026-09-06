@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -19,9 +20,7 @@ class WebCollector(BaseCollector):
 
     def collect(self, max_items: int = 15) -> list[MarketItem]:
         headers = {
-            "User-Agent": (
-                "MarketAgentsLocal/0.1 (+local research bot; polite crawl)"
-            )
+            "User-Agent": "MarketAgentsLocal/0.2 (+local research bot; polite crawl)"
         }
         with httpx.Client(timeout=30, follow_redirects=True, headers=headers) as client:
             response = client.get(self.source.url)
@@ -42,11 +41,13 @@ class WebCollector(BaseCollector):
             if link_tag is None and getattr(node, "name", None) == "a":
                 link_tag = node
             href = (link_tag.get("href") if link_tag else None) or self.source.url
-            title = (link_tag.get_text(" ", strip=True) if link_tag else node.get_text(" ", strip=True))
+            title = (
+                link_tag.get_text(" ", strip=True)
+                if link_tag
+                else node.get_text(" ", strip=True)
+            )
             title = re.sub(r"\s+", " ", title).strip()
-            if not title or len(title) < 12:
-                continue
-            if title in seen:
+            if not title or len(title) < 12 or title in seen:
                 continue
             seen.add(title)
             summary = node.get_text(" ", strip=True)[:500]
@@ -64,10 +65,8 @@ class WebCollector(BaseCollector):
 
 
 def _absolutize(base: str, href: str) -> str:
-    if href.startswith("http://") or href.startswith("https://"):
+    if href.startswith(("http://", "https://")):
         return href
     if href.startswith("//"):
         return "https:" + href
-    from urllib.parse import urljoin
-
     return urljoin(base, href)

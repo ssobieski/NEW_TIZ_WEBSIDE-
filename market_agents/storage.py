@@ -44,8 +44,9 @@ class Storage:
             encoding="utf-8",
         )
         md_path.write_text(report.summary_markdown, encoding="utf-8")
-        latest = self.report_dir / "latest.md"
-        latest.write_text(report.summary_markdown, encoding="utf-8")
+        (self.report_dir / "latest.md").write_text(
+            report.summary_markdown, encoding="utf-8"
+        )
         return json_path, md_path
 
     def export_snapshot(self, payload: dict[str, Any]) -> Path:

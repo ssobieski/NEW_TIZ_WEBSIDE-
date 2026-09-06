@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
@@ -20,7 +21,6 @@ class RssCollector(BaseCollector):
         feed = feedparser.parse(self.source.url)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=self.lookback_hours)
         items: list[MarketItem] = []
-
         for entry in feed.entries[: max_items * 2]:
             published = self._parse_date(entry)
             if published and published < cutoff:
@@ -29,11 +29,7 @@ class RssCollector(BaseCollector):
             link = (getattr(entry, "link", "") or "").strip()
             if not title or not link:
                 continue
-            summary = (
-                getattr(entry, "summary", None)
-                or getattr(entry, "description", None)
-                or ""
-            )
+            summary = getattr(entry, "summary", None) or getattr(entry, "description", None) or ""
             items.append(
                 MarketItem(
                     title=title,
@@ -64,7 +60,5 @@ class RssCollector(BaseCollector):
 
 
 def _strip_html(text: str) -> str:
-    import re
-
     cleaned = re.sub(r"<[^>]+>", " ", text)
     return re.sub(r"\s+", " ", cleaned).strip()

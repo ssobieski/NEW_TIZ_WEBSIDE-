@@ -3,14 +3,14 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from market_agents.config import AppConfig
 from market_agents.collectors import RssCollector, WebCollector
+from market_agents.config import AppConfig
 from market_agents.models import MarketItem
 from market_agents.storage import Storage
 
 
 class CollectorAgent:
-    """Zbiera sygnały rynkowe z RSS i stron WWW, filtruje po słowach kluczowych."""
+    """Zbiera sygnały rynkowe z RSS/WWW i filtruje po słowach kluczowych."""
 
     def __init__(self, config: AppConfig, storage: Storage) -> None:
         self.config = config
@@ -67,11 +67,9 @@ class CollectorAgent:
         for bad in self.config.industry.exclude_keywords:
             if bad.lower() in text:
                 return 0.0
-
         keywords = [kw.lower() for kw in self.config.industry.keywords]
         if not keywords:
             return 0.5
-
         hits = sum(1 for kw in keywords if kw in text)
         fuzzy = 0.0
         tokens = re.findall(r"[\wąćęłńóśźż-]{4,}", text)
@@ -82,6 +80,5 @@ class CollectorAgent:
                     break
         score = min(1.0, (hits / max(len(keywords), 1)) * 0.85 + fuzzy)
         if hits == 0 and fuzzy == 0:
-            # bez słów kluczowych — niska, ale niezerowa (przydatne przy szerokich feedach)
             return 0.2
         return max(score, 0.35 if hits else score)

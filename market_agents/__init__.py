@@ -1,3 +1,3 @@
-"""Lokalni agenci do monitoringu rynku — bez drogich API zewnętrznych."""
+"""Lokalni agenci monitoringu rynku — agentic parsing na vLLM/A100."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -25,7 +25,12 @@ class ReporterAgent:
 
         for item in items:
             analysis = item.analysis or {}
-            line = f"{item.title} — {analysis.get('why_it_matters', item.summary[:160])}"
+            why = (
+                analysis.get("why_it_matters")
+                or analysis.get("summary")
+                or (item.summary[:160] if item.summary else "")
+            )
+            line = f"{item.title} — {why}"
             signal = str(analysis.get("signal_type", "")).lower()
             if signal == "threat":
                 threats.append(line)
@@ -78,7 +83,9 @@ class ReporterAgent:
     def _llm_digest(self, items: list[MarketItem]) -> str:
         bullets = []
         for item in items[:15]:
-            why = (item.analysis or {}).get("why_it_matters", item.summary[:180])
+            why = (item.analysis or {}).get("why_it_matters") or (
+                item.analysis or {}
+            ).get("summary") or item.summary[:180]
             bullets.append(f"- {item.title}: {why}")
         prompt = (
             f"Branża: {self.config.industry.name}\n"

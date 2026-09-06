@@ -1,110 +1,108 @@
-# Lokalni agenci monitoringu rynku
+# Lokalni agenci monitoringu rynku (agentic + vLLM / 4x A100)
 
-System lokalnych agentów do zbierania i analizowania sygnałów rynkowych z Twojej branży.
-Działa na **Ollama** (darmowy lokalny LLM) + darmowych źródłach RSS — bez abonamentów typu Perplexity Agents / zewnętrzni agenci SaaS.
+System lokalnych **agentów ReAct** do zbierania, inteligentnego parsowania i analizowania
+sygnałów rynkowych. Zamiast drogich agentów SaaS — Twój Dell z **2 TB RAM + 4x A100**.
 
-## Co dostajesz
+## Co jest w środku
 
-| Agent | Rola |
-|-------|------|
-| **Collector** | Zbiera newsy z RSS i prostych stron WWW, filtruje po słowach kluczowych |
-| **Analyst** | Lokalny LLM ocenia typ sygnału (zagrożenie / szansa / konkurencja / trend) |
-| **Reporter** | Składa briefing Markdown + JSON w katalogu `reports/` |
-| **Orchestrator** | Uruchamia cały cykl na żądanie lub co N godzin |
+| Element | Rola |
+|---------|------|
+| **Collector** | RSS / WWW + filtr keywords + deduplikacja |
+| **IntelligentParser** | Trafilatura + BeautifulSoup — pełny tekst artykułów |
+| **ParsingAgent (ReAct)** | LLM sam wybiera narzędzia: parse, batch_parse, extract_intel, memory |
+| **Analyst / Reporter** | Klasyczny pipeline (fallback) + briefing Markdown/JSON |
+| **MarketMemory** | Pamięć między cyklami (JSONL) |
+| **vLLM** | Lokalny inference z tool-calling na 4x A100 |
 
-Koszt operacyjny: prąd + Twój komputer. Zero opłat za tokeny (przy Ollama).
+## Hardware (Twój serwer)
 
-## Wymagania
-
-1. Python 3.10+
-2. [Ollama](https://ollama.com) (opcjonalnie — możesz też `--skip-llm` tylko zbierać źródła)
-3. Model, np.:
-
-```bash
-ollama pull llama3.2
-# albo: mistral / qwen2.5 / gemma2
+```text
+Dell + 2TB RAM + 4x A100
+        │
+        ▼
+ scripts/run_vllm_a100.sh   (tensor_parallel_size=4)
+        │  OpenAI API :8000
+        ▼
+ market_agents run --agentic
 ```
+
+Rekomendowane modele (lokalnie, zero kosztów tokenów):
+
+- `Qwen/Qwen2.5-72B-Instruct-AWQ` — mocny tool-calling, mieści się przy TP=4
+- `Qwen/Qwen2.5-32B-Instruct` — szybszy, też bardzo dobry
+- `meta-llama/Llama-3.3-70B-Instruct` — FP16/AWQ przy TP=4
 
 ## Instalacja
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+# na Dellu z GPU osobno:
+# pip install vllm
 ```
 
-## Konfiguracja branży
+## Konfiguracja
 
 ```bash
-python -m market_agents init
-# edytuj config/industry.yaml — branża, keywords, feedy RSS
+python -m market_agents init --profile dell
+# edytuj config/industry.yaml — branża, keywords, konkurenci, feedy
 ```
 
-Gotowy przykład PL (meble):
+## Uruchomienie na Dellu
 
 ```bash
-cp config/furniture.pl.example.yaml config/industry.yaml
-```
+# terminal 1 — vLLM na 4x A100
+bash scripts/run_vllm_a100.sh
 
-Feedy Google News (darmowe):
-
-```text
-https://news.google.com/rss/search?q=TWOJE+SLOWA&hl=pl&gl=PL&ceid=PL:pl
-```
-
-## Uruchomienie
-
-```bash
-# diagnostyka Ollama + config
+# terminal 2 — agenci
 python -m market_agents doctor
-
-# jeden cykl monitoringu
-python -m market_agents run
-
-# tylko zbieranie (bez LLM)
-python -m market_agents run --skip-llm
-
-# cyklicznie (co N godzin z YAML)
+python -m market_agents run --agentic
 python -m market_agents schedule
 ```
 
-Raporty trafiają do `reports/latest.md` oraz `reports/report_YYYYMMDD_HHMMSS.md`.
+Szybki test parsera (bez LLM):
 
-## Architektura
-
-```text
-config/industry.yaml
-        │
-        ▼
- ┌─────────────┐    RSS/WWW     ┌──────────────┐
- │  Collector  │ ─────────────► │   Storage    │
- └─────────────┘                │ data/*.jsonl │
-        │                       └──────────────┘
-        ▼
- ┌─────────────┐   Ollama       ┌──────────────┐
- │   Analyst   │ ◄────────────► │ Local LLM    │
- └─────────────┘                └──────────────┘
-        │
-        ▼
- ┌─────────────┐
- │  Reporter   │ ──► reports/*.md + *.json
- └─────────────┘
+```bash
+python -m market_agents parse "https://example.com/news/article"
 ```
 
-## Dlaczego lokalnie zamiast zewnętrznych agentów?
+Tylko zbieranie RSS:
 
-- **Koszt**: zewnętrzni agenci (autonomous SaaS) łatwo zjadają $50–500+/mies. przy codziennym monitoringu
-- **Dane**: newsy i briefy nie wychodzą do chmury (poza publicznymi URL, które sam pobierasz)
-- **Kontrola**: Ty dobierasz źródła, słowa kluczowe, próg relevancji i model
+```bash
+python -m market_agents run --skip-llm --pipeline
+```
+
+## Jak działa agentic parsing
+
+```text
+RSS/WWW → kandydaci
+            │
+            ▼
+   ParsingAgent (ReAct, max_steps)
+     ├─ list_candidates
+     ├─ search_memory
+     ├─ batch_parse / fetch_and_parse   ← pełny tekst (trafilatura)
+     ├─ extract_market_intel            ← threat/opportunity/competitor/...
+     └─ remember
+            │
+            ▼
+   reports/latest.md + data/agent_traces/trace_*.json
+```
+
+## Dlaczego nie zewnętrzni agenci?
+
+- **Koszt**: SaaS agentic łatwo zjada setki $/mies. przy ciągłym monitoringu
+- **GPU**: masz 4x A100 — wykorzystaj je lokalnie
+- **Dane**: briefy i treść zostają na serwerze (poza publicznymi URL, które sam pobierasz)
+- **Kontrola**: Ty ustawiasz źródła, pytania fokusowe, próg relevancji i model
 
 ## Rozszerzanie
 
-- Dodaj własne feedy RSS / strony w `sources`
-- Podmień model w `llm.model` (większy = lepsza analiza, wolniejszy)
-- `provider: openai_compatible` + `base_url` działa z LM Studio, LocalAI, vLLM
-- Możesz dopisać kolektor (API branżowe, newsletter IMAP) w `market_agents/collectors/`
+- Dodaj feedy / strony w `sources`
+- Dopisz narzędzie w `market_agents/tools.py` (np. PDF, IMAP, API branżowe)
+- Zwiększ `agents.agentic.max_steps` / `max_deep_parses` przy mocniejszym modelu
 
 ## Uwagi prawne
 
-Scrapuj tylko treści publiczne, respektuj `robots.txt` i regulaminy serwisów.
-RSS Google News jest wygodnym punktem startu; do produkcji warto dodać własne, wiarygodne źródła branżowe.
+Scrapuj tylko treści publiczne, respektuj `robots.txt` i regulaminy.
+RSS Google News to wygodny start; do produkcji dodaj własne źródła branżowe.

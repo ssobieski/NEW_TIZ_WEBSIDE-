@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from market_agents.collectors.rss import RssCollector
 from market_agents.collectors.web import WebCollector
 

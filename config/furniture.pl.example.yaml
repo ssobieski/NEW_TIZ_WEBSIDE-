@@ -1,5 +1,5 @@
-# Branża meblarska / wyposażenie wnętrz — przykład PL
-# Skopiuj: cp config/furniture.pl.example.yaml config/industry.yaml
+# Branża meblarska — przykład PL pod Dell 4x A100
+# cp config/furniture.pl.example.yaml config/industry.yaml
 
 industry:
   name: "Meble i wyposażenie wnętrz"
@@ -20,6 +20,13 @@ industry:
     - "OLX"
     - "za darmo"
     - "Kupię"
+  competitors:
+    - "IKEA"
+    - "Black Red White"
+    - "Agata Meble"
+  focus_questions:
+    - "Jakie ruchy cenowe i ekspansyjne robi konkurencja?"
+    - "Co dzieje się w e-commerce meblowym?"
 
 sources:
   rss:
@@ -32,18 +39,30 @@ sources:
   web: []
 
 llm:
-  provider: "ollama"
-  base_url: "http://127.0.0.1:11434"
-  model: "llama3.2"
-  temperature: 0.2
-  timeout_seconds: 120
+  provider: "vllm"
+  base_url: "http://127.0.0.1:8000"
+  model: "Qwen/Qwen2.5-72B-Instruct-AWQ"
+  temperature: 0.1
+  timeout_seconds: 300
+  api_key: "EMPTY"
+  max_tokens: 4096
+  tensor_parallel_size: 4
+  gpu_memory_utilization: 0.90
+  max_model_len: 32768
 
 agents:
   max_items_per_source: 12
-  lookback_hours: 72
+  lookback_hours: 168
   report_dir: "reports"
   data_dir: "data"
-  min_relevance_score: 0.3
+  min_relevance_score: 0.25
+  agentic:
+    enabled: true
+    max_steps: 12
+    max_deep_parses: 8
+    parallel_fetches: 6
+    require_tool_use: true
+    trace_dir: "data/agent_traces"
 
 schedule:
   every_hours: 6

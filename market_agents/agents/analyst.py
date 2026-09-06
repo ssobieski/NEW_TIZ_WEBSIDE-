@@ -26,7 +26,7 @@ class AnalystAgent:
                 f"Tytuł: {item.title}\n"
                 f"Źródło: {item.source}\n"
                 f"URL: {item.url}\n"
-                f"Treść: {item.summary or item.content}\n\n"
+                f"Treść: {item.content or item.summary}\n\n"
                 "Zwróć JSON o polach:\n"
                 "{\n"
                 '  "signal_type": "threat|opportunity|competitor|regulation|trend|noise",\n'
@@ -54,7 +54,5 @@ class AnalystAgent:
                     "action": None,
                 }
             analyzed.append(item)
-        # pozycje bez LLM (gdy limit) — zostaw z heurystyką
-        for item in items[limit:]:
-            analyzed.append(item)
+        analyzed.extend(items[limit:])
         return analyzed
