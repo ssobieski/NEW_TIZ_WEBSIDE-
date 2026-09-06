@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from market_agents.collectors.catalog import CatalogCollector
+from market_agents.collectors.firm_discovery import FirmDiscoveryCollector
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import build_r2_collector
 from market_agents.config import AppConfig, CatalogSource
+from market_agents.firms import KnownFirmsIndex, extract_candidate_firm_names, filter_new_firms
 from market_agents.memory import MarketMemory
 from market_agents.models import MarketItem
 from market_agents.parsing import IntelligentParser, ParsedDocument
@@ -50,7 +52,10 @@ class ToolRegistry:
             "discover_catalog_assets": self.discover_catalog_assets,
             "fetch_pdf_text": self.fetch_pdf_text,
             "list_known_firms": self.list_known_firms,
+            "discover_new_firms": self.discover_new_firms,
+            "check_firm_known": self.check_firm_known,
         }
+        self._known: KnownFirmsIndex | None = None
 
     def _get_notion(self) -> NotionCollector:
         if self._notion is None:
@@ -132,6 +137,7 @@ class ToolRegistry:
                                     "threat",
                                     "opportunity",
                                     "competitor",
+                                    "new_firm",
                                     "regulation",
                                     "trend",
                                     "pricing",
@@ -349,6 +355,64 @@ class ToolRegistry:
                                 "type": "boolean",
                                 "default": False,
                                 "description": "True = odśwież z Notion API; False = lokalny cache",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discover_new_firms",
+                    "description": (
+                        "Parsuj wyszukiwanie / kandydatów i wyodrębnij NOWYCH producentów "
+                        "spoza listy known_firms. Używa Google News discovery + heurystyk "
+                        "nazw firm. Zwraca kandydatów new_firm z evidence URL."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "run_search": {
+                                "type": "boolean",
+                                "default": True,
+                                "description": "True = odpal FirmDiscoveryCollector (RSS search)",
+                            },
+                            "parse_candidates": {
+                                "type": "boolean",
+                                "default": True,
+                                "description": "True = wyodrębnij firmy z list_candidates",
+                            },
+                            "texts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "text": {"type": "string"},
+                                        "url": {"type": "string"},
+                                    },
+                                },
+                                "description": "Opcjonalne dodatkowe teksty do parsowania",
+                            },
+                            "limit": {"type": "integer", "default": 25},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "check_firm_known",
+                    "description": (
+                        "Sprawdź czy nazwa firmy jest już na liście known_firms "
+                        "(fuzzy match). Zwraca known=true/false + dopasowanie."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "names": {
+                                "type": "array",
+                                "items": {"type": "string"},
                             },
                         },
                     },
@@ -630,3 +694,95 @@ class ToolRegistry:
             "source": source,
             "cache": str(cache_path),
         }
+
+    def _get_known(self) -> KnownFirmsIndex:
+        if self._known is None:
+            self._known = KnownFirmsIndex.load(
+                data_dir=self.config.data_path,
+                competitors=self.config.industry.competitors,
+            )
+        return self._known
+
+    def discover_new_firms(self, args: dict[str, Any]) -> dict[str, Any]:
+        limit = int(args.get("limit") or 25)
+        run_search = args.get("run_search", True)
+        parse_candidates = args.get("parse_candidates", True)
+        extra_texts = args.get("texts") or []
+        known = self._get_known()
+        found: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def _add(rows: list[dict[str, Any]]) -> None:
+            for row in rows:
+                key = str(row.get("normalized") or row.get("company") or "").lower()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                found.append(row)
+
+        if run_search and self.config.sources.firm_discovery.enabled:
+            collector = FirmDiscoveryCollector(
+                self.config.sources.firm_discovery,
+                known,
+                lookback_hours=max(self.config.agents.lookback_hours, 168),
+            )
+            for item in collector.collect(max_items=limit):
+                firms = (item.analysis or {}).get("new_firms") or []
+                if isinstance(firms, list):
+                    _add([f for f in firms if isinstance(f, dict)])
+                # dopisz też do candidates cyklu
+                if item.url not in {c.url for c in self.candidates}:
+                    self.candidates.append(item)
+
+        texts: list[dict[str, Any]] = []
+        if parse_candidates:
+            for item in self.candidates:
+                blob = f"{item.title}. {item.summary}. {(item.content or '')[:800]}"
+                texts.append({"text": blob, "url": item.url})
+        for row in extra_texts:
+            if isinstance(row, dict):
+                texts.append(row)
+            elif isinstance(row, str):
+                texts.append({"text": row, "url": ""})
+
+        for row in texts:
+            names = extract_candidate_firm_names(str(row.get("text") or ""), max_names=10)
+            _add(
+                filter_new_firms(
+                    names,
+                    known,
+                    evidence=str(row.get("text") or "")[:400],
+                    url=str(row.get("url") or ""),
+                )
+            )
+
+        found = found[:limit]
+        self.memory.add(
+            "new_firms",
+            f"odkryto {len(found)} kandydatów: "
+            + ", ".join(str(f.get("company")) for f in found[:12]),
+            meta={"count": len(found)},
+        )
+        return {"ok": True, "count": len(found), "new_firms": found}
+
+    def check_firm_known(self, args: dict[str, Any]) -> dict[str, Any]:
+        known = self._get_known()
+        names: list[str] = []
+        if args.get("name"):
+            names.append(str(args["name"]))
+        for n in args.get("names") or []:
+            if isinstance(n, str) and n.strip():
+                names.append(n.strip())
+        if not names:
+            return {"ok": False, "error": "podaj name lub names[]"}
+        rows = []
+        for name in names:
+            match = known.match(name)
+            rows.append(
+                {
+                    "name": name,
+                    "known": known.is_known(name),
+                    "match": match,
+                }
+            )
+        return {"ok": True, "results": rows}

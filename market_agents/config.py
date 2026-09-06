@@ -85,10 +85,33 @@ class CloudflareR2Config(BaseModel):
     )
 
 
+class FirmDiscoveryConfig(BaseModel):
+    """Parsing wyszukiwania nowych firm (spoza known_firms)."""
+
+    enabled: bool = True
+    language: str = "en"
+    region: str = "US"
+    max_items: int = 20
+    # Zapytania Google News RSS — nowe marki / producenci / debiuty
+    search_queries: list[str] = Field(
+        default_factory=lambda: [
+            '"cutting tools" (startup OR "new manufacturer" OR "new brand" OR debut)',
+            '"carbide tools" ("enters the market" OR "new company" OR exhibitor)',
+            '"tooling manufacturer" (launch OR unveils OR introduces) catalog',
+            '"narzędzia skrawające" (nowy OR debiut OR producent)',
+        ]
+    )
+    # Opcjonalne dodatkowe feedy RSS
+    feed_urls: list[str] = Field(default_factory=list)
+    # Próg fuzzy match do known_firms (0–1)
+    known_match_threshold: float = 0.88
+
+
 class SourcesConfig(BaseModel):
     rss: list[RssSource] = Field(default_factory=list)
     web: list[WebSource] = Field(default_factory=list)
     catalogs: list[CatalogSource] = Field(default_factory=list)
+    firm_discovery: FirmDiscoveryConfig = Field(default_factory=FirmDiscoveryConfig)
     notion: NotionConfig = Field(default_factory=NotionConfig)
     cloudflare_r2: CloudflareR2Config = Field(default_factory=CloudflareR2Config)
 

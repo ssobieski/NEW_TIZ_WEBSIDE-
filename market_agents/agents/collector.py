@@ -3,22 +3,27 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from market_agents.collectors import CatalogCollector, RssCollector, WebCollector
+from market_agents.collectors import CatalogCollector, FirmDiscoveryCollector, RssCollector, WebCollector
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import build_r2_collector
 from market_agents.config import AppConfig
+from market_agents.firms import KnownFirmsIndex
 from market_agents.models import MarketItem
 from market_agents.storage import Storage
 
 
 class CollectorAgent:
-    """Zbiera sygnały: RSS/WWW + e-katalogi/PDF/eshop + Notion + Cloudflare R2."""
+    """Zbiera sygnały: RSS/WWW + katalogi + discovery nowych firm + Notion + R2."""
 
     def __init__(self, config: AppConfig, storage: Storage) -> None:
         self.config = config
         self.storage = storage
 
     def run(self) -> list[MarketItem]:
+        known = KnownFirmsIndex.load(
+            data_dir=self.config.data_path,
+            competitors=self.config.industry.competitors,
+        )
         collectors: list[object] = []
         for src in self.config.sources.rss:
             collectors.append(
@@ -28,11 +33,22 @@ class CollectorAgent:
             collectors.append(WebCollector(src))
         for src in self.config.sources.catalogs:
             collectors.append(CatalogCollector(src))
+        if self.config.sources.firm_discovery.enabled:
+            collectors.append(
+                FirmDiscoveryCollector(
+                    self.config.sources.firm_discovery,
+                    known,
+                    lookback_hours=max(self.config.agents.lookback_hours, 168),
+                )
+            )
 
         raw: list[MarketItem] = []
         for collector in collectors:
             try:
-                raw.extend(collector.collect(self.config.agents.max_items_per_source))  # type: ignore[attr-defined]
+                limit = self.config.agents.max_items_per_source
+                if getattr(collector, "name", "") == "firm_discovery":
+                    limit = self.config.sources.firm_discovery.max_items
+                raw.extend(collector.collect(limit))  # type: ignore[attr-defined]
             except Exception as exc:  # noqa: BLE001
                 print(f"[collector:{getattr(collector, 'name', '?')}] pominięto: {exc}")
 
@@ -69,14 +85,15 @@ class CollectorAgent:
             if item.url in seen:
                 continue
             score = self._relevance(item)
-            # Notion/R2/katalogi — wysoka wartość nawet bez keyword match
-            if item.source in {"notion", "cloudflare_r2"} or str(item.source).startswith(
-                "catalog:"
-            ):
+            # Notion/R2/katalogi/discovery — wysoka wartość nawet bez keyword match
+            if item.source in {"notion", "cloudflare_r2", "firm_discovery"} or str(
+                item.source
+            ).startswith("catalog:"):
                 score = max(score, float(item.relevance_score or 0.45))
             if score < self.config.agents.min_relevance_score and item.source not in {
                 "notion",
                 "cloudflare_r2",
+                "firm_discovery",
             } and not str(item.source).startswith("catalog:"):
                 continue
             title_key = self._normalize_title(item.title)

@@ -81,8 +81,12 @@ python -m market_agents run --agentic
 python -m market_agents schedule
 ```
 
-Tooli: `list_known_firms`, `list_catalog_sources`, `discover_catalog_assets`, `fetch_pdf_text`
+Tooli: `list_known_firms`, `discover_new_firms`, `check_firm_known`,
+`list_catalog_sources`, `discover_catalog_assets`, `fetch_pdf_text`
 (+ Notion/R2: `search_notion`, `fetch_notion_page`, `search_r2`, `fetch_r2_object`).
+
+Parsing nowych firm: `sources.firm_discovery` (Google News RSS) → ekstrakcja nazw →
+filtr vs known_firms → kandydaci `new_firm` dla agenta.
 
 Szybki test parsera (bez LLM):
 
