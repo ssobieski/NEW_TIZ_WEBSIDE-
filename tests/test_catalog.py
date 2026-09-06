@@ -32,6 +32,8 @@ def test_classify_asset_kinds():
     assert _classify_asset("https://x.com/webshop", "Buy online") == "eshop"
     assert _classify_asset("https://x.com/handbook", "Machining handbook") == "publication"
     assert _classify_asset("https://x.com/downloads/catalogues", "Catalogues") == "digital_catalogue"
+    assert _classify_asset("https://x.com/preisliste.pdf", "Preisliste") == "pricelist"
+    assert _classify_asset("https://x.com/cennik", "Cennik 2025") == "pricelist"
 
 
 def test_catalog_collector_builds_pdf_item_on_error():

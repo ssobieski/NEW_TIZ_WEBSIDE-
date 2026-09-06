@@ -276,6 +276,31 @@ def run_schedule(
         time.sleep(30)
 
 
+@app.command("pricelists")
+def list_pricelists_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    brand: Optional[str] = typer.Option(None, "--brand"),
+    access: Optional[str] = typer.Option(None, "--access", help="public|login|request|unknown"),
+    q: Optional[str] = typer.Option(None, "--q", help="Filtr tekstowy"),
+) -> None:
+    """Pokaż zarejestrowane / odkryte dostępne cenniki konkurencji."""
+    from market_agents.pricelists import PricelistRegistry
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    registry = PricelistRegistry.load(cfg.data_path)
+    items = registry.list(brand=brand, access=access, q=q, limit=100)
+    table = Table(title=f"Dostępne cenniki ({len(items)} / {len(registry.items)})")
+    table.add_column("Marka")
+    table.add_column("Tytuł")
+    table.add_column("Access")
+    table.add_column("URL")
+    for item in items:
+        table.add_row(item.brand or "—", item.title[:40], item.access, item.url[:60])
+    console.print(table)
+    console.print(f"Plik: {PricelistRegistry.path_for(cfg.data_path)}")
+
+
 @app.command("fleet-status")
 def fleet_status(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
     """Status floty: centrala (GPU) ↔ workery VPS."""

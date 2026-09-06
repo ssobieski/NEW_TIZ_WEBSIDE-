@@ -34,7 +34,7 @@ class CatalogSource(BaseModel):
     name: str
     url: str
     brand: str | None = None
-    # ecatalog | pdf | eshop | publication | digital_catalogue
+    # ecatalog | pdf | eshop | publication | digital_catalogue | pricelist
     kind: str = "ecatalog"
     extract_text: bool = True
     max_pdf_pages: int = 8

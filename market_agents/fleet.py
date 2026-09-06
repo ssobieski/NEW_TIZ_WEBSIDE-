@@ -15,6 +15,7 @@ KNOWLEDGE_FILES = (
     "known_firms.json",
     "firm_relations.json",
     "crawl_health.json",
+    "available_pricelists.json",
 )
 
 FEEDBACK_FILES = (

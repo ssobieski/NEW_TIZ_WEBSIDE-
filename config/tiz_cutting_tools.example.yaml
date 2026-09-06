@@ -1,5 +1,5 @@
 # Profil TIZ — narzędzia skrawające / machining
-# Fokus: e-catalog, PDF, publikacje, digital catalogue, e-shop,
+# Fokus: cenniki (price list / Preisliste), e-catalog, PDF, publikacje, digital catalogue, e-shop,
 #        targi branżowe, czasopisma, portale WWW
 # Lista znanych firm = Notion „Katalogi konkurencji — indeks”
 # cp config/tiz_cutting_tools.example.yaml config/industry.yaml
@@ -14,6 +14,12 @@ industry:
   - e-catalog
   - ecatalog
   - katalog
+  - cennik
+  - cenniki
+  - price list
+  - pricelist
+  - Preisliste
+  - Preise
   - catalogue
   - digital catalogue
   - PDF
@@ -91,6 +97,7 @@ industry:
   - Która firma jest dystrybutorem / dealerem innej (siatka powiązań distributor_of / dealer_of)?
   - Jakie marki własne (brand_of) i grupy OEM (oem_group / subsidiary_of) widać u konkurencji?
   - Jakie nowe e-katalogi / PDF / digital catalogues wypuszczają znane firmy z indeksu?
+  - Jakie DOSTĘPNE CENNIKI (price list / Preisliste / cennik PDF) publikują znane firmy — publiczne vs za loginem?
   - Co zmienia się w e-shopach (asortyment, ceny, selektory)?
   - Jakie publikacje / handbooki / application guides są nowe?
   - Które firmy z listy znanych firm mają nowe Downloads / Site URL?
@@ -100,6 +107,8 @@ industry:
   - Co piszą czasopisma i portale branżowe o nowych markach / katalogach / przejęciach?
 sources:
   rss:
+  - name: Google News — cutting tools price lists
+    url: https://news.google.com/rss/search?q=%22cutting+tools%22+(%22price+list%22+OR+pricelist+OR+Preisliste+OR+cennik)&hl=pl&gl=PL&ceid=PL:pl
   - name: Google News — tooling catalogs
     url: https://news.google.com/rss/search?q=%22cutting+tools%22+catalog+OR+ecatalog+OR+%22digital+catalogue%22&hl=pl&gl=PL&ceid=PL:pl
   - name: Google News — ISO 13399

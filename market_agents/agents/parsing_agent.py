@@ -46,8 +46,9 @@ class ParsingAgent:
         system = (
             "Jesteś agentem wywiadu rynkowego TIZ (narzędzia skrawające) na lokalnym GPU. "
             "Priorytet: (A) Notion = katalog/przedstawienie znanych firm, "
-            "(B) nowe firmy spoza known_firms, (C) siatka powiązań, "
-            "(D) e-catalogi/PDF/eshopy, (E) targi / czasopisma / portale branżowe.\n"
+            "(B) DOSTĘPNE CENNIKI (price list / Preisliste / cennik), "
+            "(C) nowe firmy spoza known_firms, (D) siatka powiązań, "
+            "(E) e-catalogi/PDF/eshopy, (F) targi / czasopisma / portale branżowe.\n"
             "Procedura:\n"
             "1) list_known_firms / get_firm_presentation — Notion przedstawia jakie są firmy "
             "(nie zgaduj profilu marki: bierz presentation z Notion)\n"
@@ -60,6 +61,7 @@ class ParsingAgent:
             "7) discover_relations — wyodrębnij dystrybutorów / marki / grupy z tekstów\n"
             "8) add_relation — zapisz potwierdzone powiązania (source→target)\n"
             "9) list_candidates / list_catalog_sources — świeże sygnały + huby katalogów\n"
+            "9b) CENNIKI: discover_pricelists → list_available_pricelists → register_pricelist; fetch_pdf_text tylko dla public\n"
             "10) discover_catalog_assets / fetch_pdf_text / fetch_and_parse — głęboki research\n"
             "10b) WSPÓLNE SKILLS PARSOWANIA (agenty uczą się razem): "
             "list_parsing_skills / match_parsing_skills przed trudnym URL; "
@@ -73,8 +75,9 @@ class ParsingAgent:
             "przy problemach crawl_status; ten sam host = sekwencyjnie\n"
             "11) extract_market_intel — signal_type=new_firm | relation | competitor\n"
             "12) remember — zapisz wnioski do pamięci\n"
-            "Na końcu briefing po polsku: NOWE FIRMY (w tym wystawcy targów) → "
-            "POWIĄZANIA → ruchy znanych / media. Ignoruj spam i oferty pracy."
+            "Na końcu briefing po polsku: CENNIKI (dostępne URL + access) → "
+            "NOWE FIRMY (w tym wystawcy targów) → POWIĄZANIA → ruchy znanych / media. "
+            "Ignoruj spam i oferty pracy."
         )
         user = (
             f"Branża: {industry.name}\n"

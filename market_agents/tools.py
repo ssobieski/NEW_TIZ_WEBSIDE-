@@ -22,6 +22,7 @@ from market_agents.models import MarketItem
 from market_agents.parse_rules import PARSE_METHODS, SiteParseRulesStore
 from market_agents.parsing import IntelligentParser, ParsedDocument
 from market_agents.parsing_skills import SKILL_CATEGORIES, ParsingSkillsStore
+from market_agents.pricelists import PricelistRegistry
 from market_agents.polite_http import build_fetcher_from_config
 
 
@@ -98,6 +99,9 @@ class ToolRegistry:
             "improve_parsing_skill": self.improve_parsing_skill,
             "rate_parsing_skill": self.rate_parsing_skill,
             "promote_host_skill": self.promote_host_skill,
+            "discover_pricelists": self.discover_pricelists,
+            "list_available_pricelists": self.list_available_pricelists,
+            "register_pricelist": self.register_pricelist,
         }
         self._known: KnownFirmsIndex | None = None
         self._relations: FirmRelationsGraph | None = None
@@ -377,7 +381,7 @@ class ToolRegistry:
                         "properties": {
                             "kind": {
                                 "type": "string",
-                                "description": "Opcjonalny filtr: ecatalog|pdf|eshop|publication|digital_catalogue",
+                                "description": "Opcjonalny filtr: pricelist|ecatalog|pdf|eshop|publication|digital_catalogue",
                             }
                         },
                     },
@@ -397,6 +401,10 @@ class ToolRegistry:
                             "source_name": {"type": "string"},
                             "url": {"type": "string"},
                             "max_links": {"type": "integer", "default": 30},
+                            "asset_type": {
+                                "type": "string",
+                                "description": "Filtr: pricelist|pdf|ecatalog|eshop|publication|digital_catalogue",
+                            },
                         },
                     },
                 },
@@ -417,6 +425,83 @@ class ToolRegistry:
                             "max_pages": {"type": "integer", "default": 8},
                             "max_chars": {"type": "integer", "default": 12000},
                         },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discover_pricelists",
+                    "description": (
+                        "Priorytet TIZ: odkryj DOSTĘPNE CENNIKI (pricelist / Preisliste / cennik) "
+                        "z hubów katalogów znanych firm. Zapisuje trafienia do rejestru."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source_name": {
+                                "type": "string",
+                                "description": "Opcjonalnie jedna firma/źródło; puste = skan wszystkich catalogs",
+                            },
+                            "url": {"type": "string"},
+                            "max_sources": {"type": "integer", "default": 12},
+                            "max_links_per_source": {"type": "integer", "default": 40},
+                            "register": {
+                                "type": "boolean",
+                                "default": True,
+                                "description": "Zapisz znalezione cenniki do available_pricelists.json",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_available_pricelists",
+                    "description": (
+                        "Lista już znalezionych / zarejestrowanych dostępnych cenników konkurencji "
+                        "(data/knowledge/available_pricelists.json)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "brand": {"type": "string"},
+                            "access": {
+                                "type": "string",
+                                "description": "public|login|request|unknown",
+                            },
+                            "q": {"type": "string", "description": "Filtr tekstowy"},
+                            "limit": {"type": "integer", "default": 50},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "register_pricelist",
+                    "description": (
+                        "Dodaj lub zaktualizuj dostępny cennik w lokalnym rejestrze "
+                        "(URL + marka + dostępność public/login)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string"},
+                            "title": {"type": "string"},
+                            "brand": {"type": "string"},
+                            "access": {
+                                "type": "string",
+                                "description": "public|login|request|unknown",
+                                "default": "public",
+                            },
+                            "currency": {"type": "string"},
+                            "year": {"type": "string"},
+                            "notes": {"type": "string"},
+                            "confirmed": {"type": "boolean", "default": True},
+                        },
+                        "required": ["url"],
                     },
                 },
             },
@@ -1249,14 +1334,28 @@ class ToolRegistry:
 
     def discover_catalog_assets(self, args: dict[str, Any]) -> dict[str, Any]:
         max_links = int(args.get("max_links") or 30)
+        asset_type = str(args.get("asset_type") or "").strip().lower()
         collector = self._resolve_catalog(args)
         assets = collector.discover_assets(max_links=max_links)
+        if asset_type:
+            assets = [
+                a
+                for a in assets
+                if str(a.get("asset_type") or "").lower() == asset_type
+            ]
         self.memory.add(
             "catalog_discover",
             f"{collector.name}: {len(assets)} assets",
-            meta={"source": collector.name, "count": len(assets)},
+            meta={"source": collector.name, "count": len(assets), "asset_type": asset_type or None},
         )
-        return {"ok": True, "source": collector.name, "count": len(assets), "assets": assets}
+        return {
+            "ok": True,
+            "source": collector.name,
+            "count": len(assets),
+            "asset_type": asset_type or None,
+            "assets": assets,
+        }
+
 
     def fetch_pdf_text(self, args: dict[str, Any]) -> dict[str, Any]:
         max_pages = int(args.get("max_pages") or 8)
@@ -1271,6 +1370,123 @@ class ToolRegistry:
                 meta={"url": result.get("url")},
             )
         return result
+
+    def discover_pricelists(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Skan hubów katalogów pod kątem dostępnych cenników."""
+        max_sources = int(args.get("max_sources") or 12)
+        max_links = int(args.get("max_links_per_source") or 40)
+        register = bool(args.get("register", True))
+        source_name = str(args.get("source_name") or "").strip()
+        url = str(args.get("url") or "").strip()
+
+        targets: list[CatalogSource] = []
+        if source_name or url:
+            collector = self._resolve_catalog(args)
+            # odtwórz CatalogSource z collectora
+            for src in self.config.sources.catalogs:
+                if src.name == collector.name or (src.brand and src.brand == getattr(collector.source, "brand", None)):
+                    targets.append(src)
+                    break
+            else:
+                targets.append(
+                    CatalogSource(
+                        name=collector.name,
+                        url=url or collector.source.url,
+                        brand=getattr(collector.source, "brand", None),
+                        kind="pricelist",
+                    )
+                )
+        else:
+            targets = list(self.config.sources.catalogs)[:max_sources]
+
+        registry = PricelistRegistry.load(self.config.data_path)
+        found: list[dict[str, Any]] = []
+        per_source: list[dict[str, Any]] = []
+        for src in targets:
+            collector = CatalogCollector(src)
+            assets = collector.discover_assets(max_links=max_links)
+            prices = [
+                a
+                for a in assets
+                if isinstance(a, dict) and str(a.get("asset_type") or "").lower() == "pricelist"
+            ]
+            per_source.append(
+                {
+                    "source": src.name,
+                    "brand": src.brand,
+                    "hub": src.url,
+                    "pricelists": len(prices),
+                    "assets_scanned": len(assets),
+                }
+            )
+            for row in prices:
+                row = dict(row)
+                row["brand"] = row.get("brand") or src.brand or src.name
+                row["source_name"] = src.name
+                found.append(row)
+            if register and prices:
+                registry.ingest_discovered(
+                    prices,
+                    brand=src.brand or src.name,
+                    source=src.name,
+                )
+
+        if register:
+            registry.save(self.config.data_path)
+
+        self.memory.add(
+            "pricelist_discover",
+            f"Znaleziono {len(found)} cenników w {len(targets)} źródłach",
+            meta={"count": len(found), "sources": len(targets)},
+        )
+        return {
+            "ok": True,
+            "count": len(found),
+            "sources_scanned": len(targets),
+            "per_source": per_source,
+            "pricelists": found[:80],
+            "registered_total": len(registry.items) if register else None,
+        }
+
+    def list_available_pricelists(self, args: dict[str, Any]) -> dict[str, Any]:
+        registry = PricelistRegistry.load(self.config.data_path)
+        items = registry.list(
+            brand=str(args.get("brand") or "") or None,
+            access=str(args.get("access") or "") or None,
+            q=str(args.get("q") or "") or None,
+            limit=int(args.get("limit") or 50),
+        )
+        return {
+            "ok": True,
+            "count": len(items),
+            "total_registered": len(registry.items),
+            "pricelists": [i.to_dict() for i in items],
+        }
+
+    def register_pricelist(self, args: dict[str, Any]) -> dict[str, Any]:
+        url = str(args.get("url") or "").strip()
+        if not url:
+            return {"ok": False, "error": "url jest wymagany"}
+        registry = PricelistRegistry.load(self.config.data_path)
+        item = registry.upsert(
+            url=url,
+            title=str(args.get("title") or "") or None,
+            brand=str(args.get("brand") or "") or None,
+            source="agent",
+            access=str(args.get("access") or "public") or "public",
+            currency=str(args.get("currency") or "") or None,
+            year=str(args.get("year") or "") or None,
+            notes=str(args.get("notes") or ""),
+            confirmed=bool(args.get("confirmed", True)),
+        )
+        path = registry.save(self.config.data_path)
+        self.memory.add(
+            "pricelist_register",
+            f"{item.brand or '?'}: {item.title} → {item.url}",
+            meta={"id": item.id, "url": item.url},
+        )
+        return {"ok": True, "pricelist": item.to_dict(), "path": str(path)}
+
 
     def list_media_sources(self, args: dict[str, Any]) -> dict[str, Any]:
         kind_filter = str(args.get("kind") or "").strip().lower()

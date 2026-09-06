@@ -202,6 +202,35 @@ def default_seed_skills() -> list[ParsingSkill]:
             taught_by="seed",
         ),
         ParsingSkill(
+            id="pricelist-discovery",
+            name="Odkrywanie dostępnych cenników",
+            category="catalog_hub",
+            description=(
+                "Wykrywanie publicznych / semi-publicznych cenników (cennik, price list, "
+                "Preisliste, listino prezzi) na hubach downloads producentów."
+            ),
+            preferred_method="bs4",
+            link_keywords=[
+                "cennik",
+                "price list",
+                "pricelist",
+                "preisliste",
+                "preis liste",
+                "price sheet",
+                "listino",
+                "tarif",
+            ],
+            hints=[
+                "Priorytet TIZ: discover_pricelists → list_available_pricelists",
+                "Traffiony URL → register_pricelist (access=public|login|request)",
+                "Potem fetch_pdf_text tylko gdy access=public",
+                "Nie myl katalogu produktów z cennikiem — szukaj słów Preis/price/cennik",
+            ],
+            applies_to_kinds=["pricelist", "ecatalog", "digital_catalogue", "publication"],
+            url_contains=["price", "preis", "cennik", "download", "pricelist"],
+            taught_by="seed",
+        ),
+        ParsingSkill(
             id="firm-name-extract",
             name="Ekstrakcja nazw firm z tekstu",
             category="firm_extract",

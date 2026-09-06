@@ -126,6 +126,21 @@ oraz **przedstawienie**:
 
 Agent używa `list_known_firms` + `get_firm_presentation` zanim scrapuje WWW znanej marki.
 
+## Dostępne cenniki
+
+Agenty szukają **publicznych / semi-publicznych cenników** konkurencji
+(price list / Preisliste / cennik PDF) osobno od katalogów produktowych.
+
+```bash
+# skan hubów downloads (agent lub CLI po cyklu)
+python -m market_agents run --agentic
+python -m market_agents pricelists
+python -m market_agents pricelists --brand Sandvik --access public
+```
+
+Rejestr: `data/knowledge/available_pricelists.json`  
+Tooli: `discover_pricelists`, `list_available_pricelists`, `register_pricelist`.
+
 ## Samorozwijający się parser + wspólne skills + anty-ban crawl
 
 Dwie warstwy uczenia + adaptacyjny fetcher (bez bulk / bez banów):

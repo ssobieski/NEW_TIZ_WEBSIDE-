@@ -12,15 +12,25 @@ from market_agents.config import CatalogSource
 from market_agents.models import MarketItem
 from market_agents.polite_http import AdaptivePoliteFetcher
 
-# Wzorce URL / tekstu wskazujące na katalogi, PDF, e-shop, publikacje
+# Wzorce URL / tekstu wskazujące na katalogi, PDF, e-shop, publikacje, cenniki
 _ASSET_HINTS = re.compile(
     r"(ecatalog|e-catalog|e_catalog|digital.?catalog|online.?catalog|"
     r"katalog|catalogue|catalog|webshop|e-?shop|shop|store|"
     r"download|publication|handbook|brochure|flyer|pdf|"
-    r"flip.?catalog|online.?catalogue)",
+    r"flip.?catalog|online.?catalogue|"
+    r"cennik|pricelist|price.?list|preisliste|preis.?liste|listino)",
     re.I,
 )
 _PDF_EXT = re.compile(r"\.pdf(\?|#|$)", re.I)
+_PRICELIST_HINTS = re.compile(
+    r"(cennik|cenniki|cennika|"
+    r"price[\s_-]?list|pricelist|price[\s_-]?sheet|pricing[\s_-]?sheet|"
+    r"net[\s_-]?price|list[\s_-]?price|"
+    r"preis[\s_-]?liste|preisliste|preisblatt|brutto[\s_-]?preis|"
+    r"listino[\s_-]?prezzi|tarif(s)?|"
+    r"msrp|rrp)",
+    re.I,
+)
 
 
 class CatalogCollector(BaseCollector):
@@ -134,7 +144,7 @@ class CatalogCollector(BaseCollector):
                     source=f"catalog:{self.source.name}",
                     summary=f"Odkryty asset ({atype}) z hubu {url}",
                     tags=[atype, "discovered", brand],
-                    relevance_score=0.65 if atype == "pdf" else 0.5,
+                    relevance_score=0.8 if atype == "pricelist" else (0.65 if atype == "pdf" else 0.5),
                 )
             )
             if len(items) >= max_items:
@@ -177,7 +187,7 @@ class CatalogCollector(BaseCollector):
                 break
 
         # Preferuj PDF / catalog / shop
-        priority = {"pdf": 0, "ecatalog": 1, "digital_catalogue": 2, "eshop": 3, "publication": 4, "link": 9}
+        priority = {"pricelist": 0, "pdf": 1, "ecatalog": 2, "digital_catalogue": 3, "eshop": 4, "publication": 5, "link": 9}
         found.sort(key=lambda x: priority.get(str(x.get("asset_type")), 8))
         return found
 
@@ -195,7 +205,11 @@ class CatalogCollector(BaseCollector):
                 "content_length": clen,
                 "filename": filename,
                 "status_code": response.status_code,
-                "asset_type": "pdf",
+                "asset_type": (
+                    "pricelist"
+                    if _PRICELIST_HINTS.search(f"{url} {filename}")
+                    else "pdf"
+                ),
                 "brand": self.source.brand or self.source.name,
             }
         except Exception as exc:  # noqa: BLE001
@@ -230,6 +244,9 @@ class CatalogCollector(BaseCollector):
 
 def _classify_asset(url: str, text: str) -> str | None:
     blob = f"{url} {text}".lower()
+    # Cennik ma pierwszeństwo nawet gdy to PDF / downloads
+    if _PRICELIST_HINTS.search(blob):
+        return "pricelist"
     if _PDF_EXT.search(url) or "application/pdf" in blob:
         return "pdf"
     if re.search(r"e-?shop|webshop|/shop|/store|buy.?online", blob):
