@@ -41,6 +41,15 @@ EDGE_TYPES = (
     "related_to",  # generic
     "has_parameter",  # process/tool → parameter (schema only)
     "applies_to_group",  # material subclass → ISO group
+    # firm network (z firm_relations)
+    "distributor_of",
+    "dealer_of",
+    "brand_of",
+    "subsidiary_of",
+    "oem_group",
+    "partner_of",
+    "rebrand_of",
+    "focuses_on",  # firm → process/tool_family/material
 )
 
 _VALID_ENTITIES = set(ENTITY_TYPES)
@@ -226,8 +235,27 @@ def _context_summary(
     return "; ".join(parts) if parts else "brak wykrytego kontekstu technologicznego"
 
 
+def firm_node_id(company: str) -> str:
+    return _slug(company, "firm:")
+
+
+_FOCUS_MAP: list[tuple[re.Pattern[str], str, str]] = [
+    (re.compile(r"drill|wiert", re.I), "tool_family:drill", "makes_tool"),
+    (re.compile(r"tap|gwint|thread", re.I), "tool_family:tap", "makes_tool"),
+    (re.compile(r"end\s*mill|frez", re.I), "tool_family:end-mill", "makes_tool"),
+    (re.compile(r"insert|płytk|wendeschneid", re.I), "tool_family:insert", "makes_tool"),
+    (re.compile(r"turning|toczen|lathe", re.I), "tool_family:turning-tool", "makes_tool"),
+    (re.compile(r"holder|oprawk", re.I), "tool_family:tool-holder", "makes_tool"),
+    (re.compile(r"deep[\s-]?hole", re.I), "process:drilling", "focuses_on"),
+    (re.compile(r"milling|frezowan", re.I), "process:milling", "focuses_on"),
+    (re.compile(r"turning|toczen", re.I), "process:turning", "focuses_on"),
+    (re.compile(r"diamond|cbn|pkd|pcd", re.I), "material:iso-h", "focuses_on"),
+    (re.compile(r"carbide|węglik", re.I), "material:iso-p", "focuses_on"),
+]
+
+
 class MachiningOntology:
-    """Lokalny knowledge graph (data/knowledge/ontology.json)."""
+    """Lokalny knowledge graph database (data/knowledge/ontology.json)."""
 
     FILENAME = "ontology.json"
 
@@ -281,12 +309,356 @@ class MachiningOntology:
                 node = OntologyNode.from_dict({**row, "origin": row.get("origin") or "seed"})
                 if node.id not in self.nodes:
                     self.nodes[node.id] = node
+                else:
+                    # uzupełnij aliasy / props z seeda
+                    existing = self.nodes[node.id]
+                    existing.aliases = list(dict.fromkeys([*existing.aliases, *node.aliases]))
+                    for k, v in node.props.items():
+                        existing.props.setdefault(k, v)
         for row in raw.get("edges") or []:
             if isinstance(row, dict):
                 edge = OntologyEdge.from_dict({**row, "origin": row.get("origin") or "seed"})
                 if edge:
                     self._add_edge_obj(edge)
         return (len(self.nodes) - before_n) + (len(self.edges) - before_e)
+
+    def build_from_knowledge(
+        self,
+        data_dir: Path | str,
+        *,
+        seed_path: str | Path = "config/machining_ontology.seed.json",
+        firms_seed: str | Path = "config/known_firms.seed.json",
+        relations_seed: str | Path = "config/firm_relations.seed.json",
+    ) -> dict[str, Any]:
+        """
+        Zbuduj / odśwież knowledge graph z:
+        seed ontologii + known_firms + firm_relations + literature + product_tech.
+        """
+        data_dir = Path(data_dir)
+        stats = {
+            "seed": 0,
+            "firms": 0,
+            "firm_edges": 0,
+            "focus_edges": 0,
+            "literature": 0,
+            "product_tech": 0,
+        }
+        stats["seed"] = self.merge_seed(seed_path)
+
+        # Known firms → firm nodes + focuses_on / makes_tool z product_focus
+        firms_path = data_dir / "knowledge" / "known_firms.json"
+        firms_rows: list[dict[str, Any]] = []
+        for candidate in (firms_path, Path(firms_seed)):
+            if candidate.exists():
+                try:
+                    raw = json.loads(candidate.read_text(encoding="utf-8"))
+                    if isinstance(raw, list):
+                        firms_rows = raw
+                    elif isinstance(raw, dict):
+                        firms_rows = list(raw.get("firms") or raw.get("items") or [])
+                    break
+                except Exception:  # noqa: BLE001
+                    continue
+        for row in firms_rows:
+            if not isinstance(row, dict):
+                continue
+            company = str(row.get("company") or row.get("name") or "").strip()
+            if not company:
+                continue
+            nid = firm_node_id(company)
+            before = nid in self.nodes
+            self.upsert_node(
+                entity_type="firm",
+                label=company,
+                node_id=nid,
+                origin="known_firms",
+                props={
+                    k: row.get(k)
+                    for k in ("country", "site_url", "downloads", "product_focus", "notion_url")
+                    if row.get(k)
+                },
+            )
+            if not before:
+                stats["firms"] += 1
+            focus = str(row.get("product_focus") or "")
+            for pat, target, rel in _FOCUS_MAP:
+                if pat.search(focus) and target in self.nodes:
+                    if self.add_edge(
+                        nid, target, rel,
+                        evidence=f"product_focus: {focus}",
+                        confidence=0.7,
+                        origin="known_firms",
+                    ).get("added"):
+                        stats["focus_edges"] += 1
+
+        # Firm relations → ontology edges
+        from market_agents.firm_relations import FirmRelationsGraph, RELATION_TYPES
+
+        rel_graph = FirmRelationsGraph.load(data_dir=data_dir, seed_path=relations_seed)
+        for edge in rel_graph.edges:
+            src = firm_node_id(str(edge.get("source") or ""))
+            tgt = firm_node_id(str(edge.get("target") or ""))
+            rtype = str(edge.get("relation_type") or "")
+            if not src or not tgt or rtype not in RELATION_TYPES:
+                continue
+            self.upsert_node(
+                entity_type="firm",
+                label=str(edge.get("source")),
+                node_id=src,
+                origin="firm_relations",
+            )
+            self.upsert_node(
+                entity_type="firm",
+                label=str(edge.get("target")),
+                node_id=tgt,
+                origin="firm_relations",
+            )
+            mapped = rtype if rtype in _VALID_EDGES else "related_to"
+            if self.add_edge(
+                src,
+                tgt,
+                mapped,
+                evidence=str(edge.get("evidence") or ""),
+                confidence=float(edge.get("confidence") or 0.7),
+                origin="firm_relations",
+            ).get("added"):
+                stats["firm_edges"] += 1
+
+        # Literature → mentions topics as concepts / processes
+        lit_path = data_dir / "knowledge" / "literature.json"
+        if lit_path.exists():
+            try:
+                lit = json.loads(lit_path.read_text(encoding="utf-8"))
+                for item in lit.get("items") or []:
+                    if not isinstance(item, dict) or not item.get("url"):
+                        continue
+                    lid = _slug(str(item.get("id") or item.get("url")), "literature:")
+                    self.upsert_node(
+                        entity_type="literature",
+                        label=str(item.get("title") or lid)[:200],
+                        node_id=lid,
+                        origin="literature",
+                        props={"url": item.get("url"), "kind": item.get("kind")},
+                    )
+                    stats["literature"] += 1
+                    for topic in item.get("topics") or []:
+                        topic_id = {
+                            "cutting_dynamics": "process:hsm",
+                            "tool_design": "tool_family:end-mill",
+                            "parameters": "parameter:vc",
+                            "coolant": "coolant:emulsion",
+                            "iso13399": "standard:iso13399",
+                            "cam": "concept:cam",
+                            "surface": "concept:surface-integrity",
+                            "ai": "concept:ai-machining",
+                        }.get(str(topic))
+                        if topic_id:
+                            if topic_id.startswith("concept:") and topic_id not in self.nodes:
+                                self.upsert_node(
+                                    entity_type="concept",
+                                    label=str(topic),
+                                    node_id=topic_id,
+                                    origin="literature",
+                                )
+                            self.add_edge(
+                                lid, topic_id, "mentions",
+                                evidence=str(topic),
+                                confidence=0.6,
+                                origin="literature",
+                            )
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Product tech brands → firm + focuses_on process/cutting_data concept
+        tech_path = data_dir / "knowledge" / "product_tech.json"
+        if tech_path.exists():
+            try:
+                tech = json.loads(tech_path.read_text(encoding="utf-8"))
+                for item in tech.get("items") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    brand = str(item.get("brand") or "").strip()
+                    if not brand:
+                        continue
+                    fid = firm_node_id(brand)
+                    self.upsert_node(
+                        entity_type="firm",
+                        label=brand,
+                        node_id=fid,
+                        origin="product_tech",
+                    )
+                    kind = str(item.get("kind") or "")
+                    target = {
+                        "cutting_data": "parameter:vc",
+                        "handbook": "concept:handbook",
+                        "iso13399": "standard:iso13399",
+                        "application_guide": "concept:application-guide",
+                    }.get(kind)
+                    if target:
+                        if target.startswith("concept:") and target not in self.nodes:
+                            self.upsert_node(
+                                entity_type="concept",
+                                label=kind,
+                                node_id=target,
+                                origin="product_tech",
+                            )
+                        if self.add_edge(
+                            fid, target, "focuses_on",
+                            evidence=str(item.get("url") or kind),
+                            confidence=0.65,
+                            origin="product_tech",
+                        ).get("added"):
+                            stats["product_tech"] += 1
+            except Exception:  # noqa: BLE001
+                pass
+
+        path = self.save(data_dir)
+        return {
+            "ok": True,
+            "path": str(path),
+            "node_count": len(self.nodes),
+            "edge_count": len(self.edges),
+            "stats": stats,
+            "by_type": self.domain_brief().get("by_type"),
+        }
+
+    def find_path(
+        self,
+        source: str,
+        target: str,
+        *,
+        max_depth: int = 5,
+    ) -> dict[str, Any]:
+        """Najkrótsza ścieżka w grafie (BFS, nieskierowany do eksploracji kontekstu)."""
+        src = self._resolve_id(source)
+        tgt = self._resolve_id(target)
+        if not src or not tgt:
+            return {
+                "ok": False,
+                "error": f"Nie znaleziono: source={source!r} target={target!r}",
+            }
+        if src == tgt:
+            return {"ok": True, "path": [src], "edges": [], "length": 0, "readable": src}
+
+        adj: dict[str, list[tuple[str, OntologyEdge]]] = {}
+        for edge in self.edges:
+            adj.setdefault(edge.source, []).append((edge.target, edge))
+            adj.setdefault(edge.target, []).append((edge.source, edge))
+
+        from collections import deque
+
+        queue: deque[tuple[str, int]] = deque([(src, 0)])
+        prev: dict[str, tuple[str, OntologyEdge] | None] = {src: None}
+        found = False
+        while queue:
+            cur, depth = queue.popleft()
+            if cur == tgt:
+                found = True
+                break
+            if depth >= max_depth:
+                continue
+            for nxt, edge in adj.get(cur, []):
+                if nxt not in prev:
+                    prev[nxt] = (cur, edge)
+                    queue.append((nxt, depth + 1))
+
+        if not found or tgt not in prev:
+            return {"ok": False, "error": "Brak ścieżki", "source": src, "target": tgt}
+
+        nodes_path = [tgt]
+        edges_path: list[dict[str, Any]] = []
+        cur = tgt
+        while cur != src:
+            pair = prev[cur]
+            assert pair is not None
+            parent, edge = pair
+            edges_path.append(edge.to_dict())
+            nodes_path.append(parent)
+            cur = parent
+        nodes_path.reverse()
+        edges_path.reverse()
+        labels = [
+            self.nodes[n].label if n in self.nodes else n for n in nodes_path
+        ]
+        return {
+            "ok": True,
+            "source": src,
+            "target": tgt,
+            "path": nodes_path,
+            "labels": labels,
+            "edges": edges_path,
+            "length": len(edges_path),
+            "readable": " → ".join(labels),
+        }
+
+    def export_graphml(self, path: Path | str) -> Path:
+        """Eksport GraphML (Gephi / yEd / Neo4j tools)."""
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        lines = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">',
+            '<key id="label" for="node" attr.name="label" attr.type="string"/>',
+            '<key id="type" for="node" attr.name="type" attr.type="string"/>',
+            '<key id="relation" for="edge" attr.name="relation" attr.type="string"/>',
+            '<graph id="TIZ" edgedefault="directed">',
+        ]
+        for node in self.nodes.values():
+            safe_id = node.id.replace('"', "")
+            safe_label = node.label.replace("&", "&amp;").replace("<", "&lt;").replace('"', "'")
+            lines.append(
+                f'<node id="{safe_id}">'
+                f'<data key="label">{safe_label}</data>'
+                f'<data key="type">{node.type}</data>'
+                f"</node>"
+            )
+        for i, edge in enumerate(self.edges):
+            lines.append(
+                f'<edge id="e{i}" source="{edge.source}" target="{edge.target}">'
+                f'<data key="relation">{edge.relation}</data>'
+                f"</edge>"
+            )
+        lines.append("</graph>")
+        lines.append("</graphml>")
+        out.write_text("\n".join(lines), encoding="utf-8")
+        return out
+
+    def export_jsonld(self, path: Path | str) -> Path:
+        """Eksport JSON-LD (lekka ontologia Linked Data)."""
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        graph = []
+        for node in self.nodes.values():
+            graph.append(
+                {
+                    "@id": f"tiz:{node.id}",
+                    "@type": f"tiz:{node.type}",
+                    "name": node.label,
+                    "alternateName": node.aliases,
+                    **{k: v for k, v in node.props.items() if v is not None},
+                }
+            )
+        for edge in self.edges:
+            graph.append(
+                {
+                    "@id": f"tiz:edge:{edge.key()}",
+                    "@type": f"tiz:{edge.relation}",
+                    "source": f"tiz:{edge.source}",
+                    "target": f"tiz:{edge.target}",
+                    "confidence": edge.confidence,
+                    "evidence": edge.evidence,
+                }
+            )
+        payload = {
+            "@context": {
+                "tiz": "https://tiz.local/ontology/",
+                "name": "http://schema.org/name",
+                "alternateName": "http://schema.org/alternateName",
+            },
+            "@graph": graph,
+        }
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return out
 
     def save(self, data_dir: Path | str) -> Path:
         path = self.path_for(data_dir)

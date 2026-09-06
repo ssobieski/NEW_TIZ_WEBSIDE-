@@ -34,6 +34,16 @@
     {"id": "tool_family:drill", "type": "tool_family", "label": "Drill / wiertło", "aliases": ["drill", "wiertło"]},
     {"id": "tool_family:tap", "type": "tool_family", "label": "Tap / gwintownik", "aliases": ["tap", "gwintownik"]},
     {"id": "tool_family:turning-tool", "type": "tool_family", "label": "Turning tool / nóż tokarski", "aliases": ["turning tool", "nóż"]},
+    {"id": "tool_family:tool-holder", "type": "tool_family", "label": "Tool holder / oprawka", "aliases": ["holder", "oprawka", "chuck", "collet"]},
+    {"id": "tool_family:reamer", "type": "tool_family", "label": "Reamer / rozwiertak", "aliases": ["reamer", "rozwiertak"]},
+
+    {"id": "concept:coating-pvd", "type": "concept", "label": "PVD coating", "aliases": ["PVD", "TiAlN", "AlTiN"]},
+    {"id": "concept:coating-cvd", "type": "concept", "label": "CVD coating", "aliases": ["CVD"]},
+    {"id": "concept:handbook", "type": "concept", "label": "Cutting handbook", "aliases": ["handbook"]},
+    {"id": "concept:application-guide", "type": "concept", "label": "Application guide", "aliases": ["application guide"]},
+    {"id": "concept:surface-integrity", "type": "concept", "label": "Surface integrity", "aliases": ["roughness", "chropowatość"]},
+    {"id": "concept:cam", "type": "concept", "label": "CAM / toolpath", "aliases": ["CAM", "toolpath"]},
+    {"id": "concept:ai-machining", "type": "concept", "label": "AI in machining", "aliases": ["AI", "ML"]},
 
     {"id": "parameter:vc", "type": "parameter", "label": "vc — cutting speed", "aliases": ["vc", "cutting speed"], "props": {"schema_only": true}},
     {"id": "parameter:fz", "type": "parameter", "label": "fz — feed per tooth", "aliases": ["fz"], "props": {"schema_only": true}},
@@ -51,6 +61,12 @@
     {"source": "tool_family:drill", "target": "process:drilling", "relation": "tool_for_process", "confidence": 0.95},
     {"source": "tool_family:tap", "target": "process:threading", "relation": "tool_for_process", "confidence": 0.95},
     {"source": "tool_family:turning-tool", "target": "process:turning", "relation": "tool_for_process", "confidence": 0.95},
+
+    {"source": "tool_family:reamer", "target": "process:reaming", "relation": "tool_for_process", "confidence": 0.95},
+    {"source": "tool_family:tool-holder", "target": "process:milling", "relation": "tool_for_process", "confidence": 0.7},
+    {"source": "tool_family:tool-holder", "target": "process:drilling", "relation": "tool_for_process", "confidence": 0.65},
+    {"source": "concept:coating-pvd", "target": "tool_family:end-mill", "relation": "related_to", "confidence": 0.7},
+    {"source": "concept:coating-cvd", "target": "tool_family:insert", "relation": "related_to", "confidence": 0.7},
 
     {"source": "process:turning", "target": "machine:cnc-lathe", "relation": "used_on_machine", "confidence": 0.95},
     {"source": "process:milling", "target": "machine:machining-center", "relation": "used_on_machine", "confidence": 0.95},

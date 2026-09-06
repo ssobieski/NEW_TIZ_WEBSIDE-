@@ -373,22 +373,48 @@ def literature_cmd(
 def ontology_cmd(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     entity_type: Optional[str] = typer.Option(
-        None, "--type", help="material|machine|coolant|process|tool_family|standard|parameter"
+        None, "--type", help="material|machine|coolant|process|tool_family|firm|standard|parameter"
     ),
     q: Optional[str] = typer.Option(None, "--q"),
     node: Optional[str] = typer.Option(None, "--node", help="Pokaż sąsiedztwo (np. process:milling)"),
-    seed: bool = typer.Option(False, "--seed", help="Wgraj seed ontologii jeśli graf pusty/mały"),
+    path_from: Optional[str] = typer.Option(None, "--from", help="Początek ścieżki (find_path)"),
+    path_to: Optional[str] = typer.Option(None, "--to", help="Koniec ścieżki"),
+    seed: bool = typer.Option(False, "--seed", help="Wgraj seed ontologii"),
+    build: bool = typer.Option(
+        False, "--build", help="Zbuduj graf z seed + known_firms + relations + literature"
+    ),
+    export: Optional[Path] = typer.Option(
+        None, "--export", help="Eksport GraphML lub JSON-LD (wg rozszerzenia)"
+    ),
 ) -> None:
-    """Lokalny knowledge graph: materiały / maszyny / chłodziwo / procesy (zamiast Grok)."""
+    """Lokalny knowledge graph database: materiały / maszyny / chłodziwo / procesy / firmy."""
     from market_agents.ontology import MachiningOntology
 
     path = _resolve_config(config)
     cfg = load_config(path)
     graph = MachiningOntology.load(cfg.data_path)
+    if build:
+        result = graph.build_from_knowledge(cfg.data_path)
+        console.print(
+            f"[green]Built knowledge graph[/green]: "
+            f"{result['node_count']} nodes / {result['edge_count']} edges\n"
+            f"stats={result['stats']}\nby_type={result['by_type']}\n"
+            f"Plik: {result['path']}"
+        )
+        if export:
+            _export_ontology(graph, export)
+        return
     if seed or len(graph.nodes) < 5:
         added = graph.merge_seed("config/machining_ontology.seed.json")
         graph.save(cfg.data_path)
         console.print(f"Seed: +{added} (nodes={len(graph.nodes)} edges={len(graph.edges)})")
+    if path_from and path_to:
+        found = graph.find_path(path_from, path_to)
+        if not found.get("ok"):
+            console.print(f"[red]{found.get('error')}[/red]")
+            raise typer.Exit(code=1)
+        console.print(f"[cyan]{found['readable']}[/cyan]  (len={found['length']})")
+        return
     if node:
         nb = graph.neighborhood(node, depth=1)
         if not nb.get("ok"):
@@ -402,6 +428,8 @@ def ontology_cmd(
             table.add_row(e["source"], e["relation"], e["target"])
         console.print(table)
         console.print(f"Nodes: {nb['counts']['nodes']}  Edges: {nb['counts']['edges']}")
+        if export:
+            _export_ontology(graph, export)
         return
     brief = graph.domain_brief()
     nodes = graph.list_nodes(entity_type=entity_type, q=q, limit=80)
@@ -413,10 +441,48 @@ def ontology_cmd(
         table.add_row(n.type, n.id, n.label[:48])
     console.print(table)
     console.print(
-        "Kontekst dla botów lokalnych (Dell/A100) — zero kosztów tokenów Grok. "
-        "Tooli: get_domain_context, extract_domain_context, ontology_neighborhood."
+        "Knowledge DB: get_domain_context / extract_domain_context / "
+        "ontology_neighborhood / find_ontology_path / build_ontology."
     )
     console.print(f"Plik: {MachiningOntology.path_for(cfg.data_path)}")
+    if export:
+        _export_ontology(graph, export)
+
+
+def _export_ontology(graph: object, export: Path) -> None:
+    from market_agents.ontology import MachiningOntology
+
+    assert isinstance(graph, MachiningOntology)
+    suffix = export.suffix.lower()
+    if suffix in {".jsonld", ".json"}:
+        out = graph.export_jsonld(export)
+    else:
+        out = graph.export_graphml(export if suffix else Path(str(export) + ".graphml"))
+    console.print(f"[green]Export[/green]: {out}")
+
+
+@app.command("sync-ontology")
+def sync_ontology_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    export_graphml: Optional[Path] = typer.Option(None, "--graphml"),
+) -> None:
+    """Zbuduj knowledge graph z known_firms + relations + literature + seed tech."""
+    from market_agents.ontology import MachiningOntology
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    graph = MachiningOntology.load(cfg.data_path)
+    result = graph.build_from_knowledge(cfg.data_path)
+    console.print(
+        Panel.fit(
+            f"Ontology DB: [cyan]{result['node_count']}[/cyan] nodes / "
+            f"[cyan]{result['edge_count']}[/cyan] edges\n"
+            f"{result['stats']}\n{result['path']}"
+        )
+    )
+    if export_graphml:
+        out = graph.export_graphml(export_graphml)
+        console.print(f"GraphML: {out}")
 
 
 @app.command("product-tech")

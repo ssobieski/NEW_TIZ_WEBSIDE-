@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import tempfile
 
 from market_agents.config import AgentsConfig, AppConfig, IndustryConfig, SourcesConfig
@@ -8,6 +9,7 @@ from market_agents.memory import MarketMemory
 from market_agents.ontology import (
     MachiningOntology,
     extract_domain_context,
+    firm_node_id,
 )
 from market_agents.tools import ToolRegistry
 
@@ -68,6 +70,45 @@ def test_ingest_context_builds_edges():
         assert "materials" in brief
 
 
+def test_build_from_knowledge_includes_firms():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        (tmp_path / "knowledge").mkdir(parents=True)
+        firms = [
+            {
+                "company": "Sandvik Coromant",
+                "country": "SE",
+                "product_focus": "carbide inserts / milling / turning",
+            },
+            {
+                "company": "botek",
+                "country": "DE",
+                "product_focus": "deep-hole drills",
+            },
+        ]
+        (tmp_path / "knowledge" / "known_firms.json").write_text(
+            json.dumps(firms), encoding="utf-8"
+        )
+        graph = MachiningOntology()
+        result = graph.build_from_knowledge(
+            tmp_path,
+            seed_path="config/machining_ontology.seed.json",
+            firms_seed="config/known_firms.seed.json",
+            relations_seed="config/firm_relations.seed.json",
+        )
+        assert result["ok"] is True
+        assert result["node_count"] > 40
+        assert firm_node_id("Sandvik Coromant") in graph.nodes
+        assert firm_node_id("botek") in graph.nodes
+        path = graph.find_path("process:milling", "material:iso-p")
+        assert path["ok"] is True
+        assert path["length"] >= 1
+        gml = graph.export_graphml(tmp_path / "ontology.graphml")
+        assert gml.exists() and "graphml" in gml.read_text(encoding="utf-8")
+        jld = graph.export_jsonld(tmp_path / "ontology.jsonld")
+        assert jld.exists()
+
+
 def test_ontology_tools():
     with tempfile.TemporaryDirectory() as tmp:
         cfg = AppConfig(
@@ -75,7 +116,6 @@ def test_ontology_tools():
             sources=SourcesConfig(),
             agents=AgentsConfig(data_dir=tmp),
         )
-        # seed into data dir
         g = MachiningOntology.load(tmp)
         g.merge_seed("config/machining_ontology.seed.json")
         g.save(tmp)
@@ -85,6 +125,8 @@ def test_ontology_tools():
         assert "extract_domain_context" in names
         assert "list_ontology" in names
         assert "ontology_neighborhood" in names
+        assert "build_ontology" in names
+        assert "find_ontology_path" in names
         brief = tools.get_domain_context({})
         assert brief["ok"] is True
         assert brief["node_count"] >= 10
@@ -95,3 +137,9 @@ def test_ontology_tools():
         assert listed["count"] >= 4
         nb = tools.ontology_neighborhood({"node": "process:milling"})
         assert nb["ok"] is True
+        built = tools.build_ontology({})
+        assert built["ok"] is True
+        found = tools.find_ontology_path(
+            {"source": "process:milling", "target": "coolant:emulsion"}
+        )
+        assert found["ok"] is True

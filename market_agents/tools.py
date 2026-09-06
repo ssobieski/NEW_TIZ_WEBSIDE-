@@ -116,6 +116,8 @@ class ToolRegistry:
             "list_ontology": self.list_ontology,
             "ontology_neighborhood": self.ontology_neighborhood,
             "add_ontology_edge": self.add_ontology_edge,
+            "build_ontology": self.build_ontology,
+            "find_ontology_path": self.find_ontology_path,
             "list_known_firms": self.list_known_firms,
             "get_firm_presentation": self.get_firm_presentation,
             "discover_new_firms": self.discover_new_firms,
@@ -995,6 +997,37 @@ class ToolRegistry:
                             "confidence": {"type": "number", "default": 0.8},
                         },
                         "required": ["source", "target", "relation"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "build_ontology",
+                    "description": (
+                        "Zbuduj / odśwież knowledge graph database z seed + known_firms + "
+                        "firm_relations + literature + product_tech. "
+                        "To jest lokalna ontology DB (zamiast Grok)."
+                    ),
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "find_ontology_path",
+                    "description": (
+                        "Znajdź ścieżkę w knowledge graph "
+                        "(np. firm:sandvik-coromant → material:iso-s / process:milling)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source": {"type": "string"},
+                            "target": {"type": "string"},
+                            "max_depth": {"type": "integer", "default": 5},
+                        },
+                        "required": ["source", "target"],
                     },
                 },
             },
@@ -2545,6 +2578,33 @@ class ToolRegistry:
             return {"ok": False, "error": str(exc)}
         path = self._get_ontology().save(self.config.data_path)
         result["path"] = str(path)
+        return result
+
+    def build_ontology(self, args: dict[str, Any]) -> dict[str, Any]:
+        graph = self._get_ontology()
+        result = graph.build_from_knowledge(self.config.data_path)
+        self._ontology = graph
+        self.memory.add(
+            "ontology_build",
+            f"nodes={result.get('node_count')} edges={result.get('edge_count')}",
+            meta=result.get("stats") or {},
+        )
+        return result
+
+    def find_ontology_path(self, args: dict[str, Any]) -> dict[str, Any]:
+        source = str(args.get("source") or "").strip()
+        target = str(args.get("target") or "").strip()
+        if not source or not target:
+            return {"ok": False, "error": "source i target są wymagane"}
+        result = self._get_ontology().find_path(
+            source, target, max_depth=int(args.get("max_depth") or 5)
+        )
+        if result.get("ok"):
+            self.memory.add(
+                "ontology_path",
+                str(result.get("readable") or ""),
+                meta={"length": result.get("length")},
+            )
         return result
 
     def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:

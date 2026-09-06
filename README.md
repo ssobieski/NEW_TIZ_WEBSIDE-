@@ -176,21 +176,27 @@ Rejestr: `data/knowledge/literature.json`
 Tooli: `list_literature_sources`, `discover_literature`, `list_literature`, `register_literature`, `sync_notion_literature`  
 Config: `sources.literature` + `sources.notion.literature_database`.
 
-## Ontologia / knowledge graph (kontekst technologiczny)
+## Ontologia / knowledge graph database
 
 Boty muszą rozumieć **materiały, maszyny, chłodziwo i procesy** — nie tylko nazwy firm.
-Lokalny graf (`data/knowledge/ontology.json`) zastępuje drogi kontekst z Grok.
+Lokalny graf (`data/knowledge/ontology.json`) to trwała **ontology DB** (zamiast Grok).
 
-Encje: `material` (ISO P/M/K/N/S/H) · `machine` · `coolant` · `process` · `tool_family` · `parameter` (schemat) · `standard`
+Encje: `firm` · `material` (ISO P/M/K/N/S/H) · `machine` · `coolant` · `process` · `tool_family` · `parameter` · `standard` · `literature` · `concept`
 
 ```bash
-python -m market_agents ontology --seed
-python -m market_agents ontology --type material
+# zbuduj graf z seed + known_firms + firm_relations + literature
+python -m market_agents sync-ontology
+python -m market_agents ontology --build
+python -m market_agents ontology --type firm
 python -m market_agents ontology --node process:milling
+python -m market_agents ontology --from process:milling --to material:iso-s
+python -m market_agents ontology --export data/knowledge/ontology.graphml
 ```
 
-Tooli: `get_domain_context`, `extract_domain_context`, `list_ontology`, `ontology_neighborhood`, `add_ontology_edge`  
-Seed: `config/machining_ontology.seed.json`
+Tooli: `build_ontology`, `get_domain_context`, `extract_domain_context`, `list_ontology`,
+`ontology_neighborhood`, `find_ontology_path`, `add_ontology_edge`  
+Seed: `config/machining_ontology.seed.json`  
+Eksport: GraphML / JSON-LD
 
 ## Informacje techniczne o produktach
 
