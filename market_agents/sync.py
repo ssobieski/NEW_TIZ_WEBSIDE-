@@ -110,6 +110,70 @@ class KnowledgeSync:
         results: list[SyncResult] = []
         if self.config.sources.notion.enabled:
             results.append(self.sync_notion())
+            try:
+                results.append(self.sync_known_firms())
+            except Exception as exc:  # noqa: BLE001
+                print(f"[sync-firms] pominięto: {exc}")
         if self.config.sources.cloudflare_r2.enabled:
             results.append(self.sync_r2())
         return results
+
+    def sync_known_firms(self) -> SyncResult:
+        """Pobierz listę znanych firm z Notion indeksu → lokalny cache + podpowiedzi katalogów."""
+        token = self.config.notion_token()
+        if not token:
+            raise RuntimeError(
+                f"Ustaw {self.config.sources.notion.token_env}=secret_... "
+                "(Notion Internal Integration Token)"
+            )
+        collector = NotionCollector(self.config.sources.notion, token)
+        firms = collector.list_known_firms()
+        out = self.cache_dir / "known_firms.json"
+        out.write_text(json.dumps(firms, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        # podpowiedzi URL katalogów (Site URL + Downloads)
+        catalog_hints: list[dict[str, Any]] = []
+        for firm in firms:
+            company = firm.get("company") or ""
+            site = firm.get("site_url") or ""
+            downloads = firm.get("downloads") or ""
+            if site:
+                catalog_hints.append(
+                    {
+                        "name": f"{company} site",
+                        "brand": company,
+                        "kind": "digital_catalogue",
+                        "url": site,
+                    }
+                )
+            if downloads and downloads.rstrip("/") != site.rstrip("/"):
+                catalog_hints.append(
+                    {
+                        "name": f"{company} downloads",
+                        "brand": company,
+                        "kind": "ecatalog",
+                        "url": downloads,
+                    }
+                )
+        hints_path = self.cache_dir / "known_firms_catalog_hints.json"
+        hints_path.write_text(
+            json.dumps(catalog_hints, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        names = [str(f.get("company")) for f in firms if f.get("company")]
+        self.memory.add(
+            "known_firms",
+            f"Zsynchronizowano {len(names)} firm: {', '.join(names[:20])}"
+            + ("…" if len(names) > 20 else ""),
+            meta={"count": len(names), "path": str(out)},
+        )
+        return SyncResult(
+            source="known_firms",
+            items=len(firms),
+            path=out,
+            details={
+                "companies": names,
+                "catalog_hints": len(catalog_hints),
+                "hints_path": str(hints_path),
+            },
+        )

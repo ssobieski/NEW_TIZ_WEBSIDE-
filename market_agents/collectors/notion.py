@@ -93,6 +93,41 @@ class NotionCollector:
             )
         return out
 
+    def list_known_firms(self, limit: int = 200) -> list[dict[str, Any]]:
+        """
+        Lista znanych firm z bazy Notion „Katalogi konkurencji — indeks”.
+        Zwraca: company, country, site_url, downloads, product_focus, pdf_count, note.
+        """
+        db_ref = self.config.known_firms_database
+        if not db_ref:
+            raise RuntimeError(
+                "Brak sources.notion.known_firms_database w config — "
+                "wskaż ID bazy „Katalogi konkurencji — indeks”"
+            )
+        database_id = _to_notion_id(db_ref)
+        rows: list[dict[str, Any]] = []
+        cursor = None
+        with httpx.Client(timeout=60, headers=self._headers) as client:
+            while len(rows) < limit:
+                payload: dict[str, Any] = {"page_size": min(100, limit - len(rows))}
+                if cursor:
+                    payload["start_cursor"] = cursor
+                r = client.post(
+                    f"https://api.notion.com/v1/databases/{database_id}/query",
+                    json=payload,
+                )
+                r.raise_for_status()
+                data = r.json()
+                for page in data.get("results", []):
+                    firm = _firm_from_page(page)
+                    if firm.get("company"):
+                        rows.append(firm)
+                if not data.get("has_more"):
+                    break
+                cursor = data.get("next_cursor")
+        rows.sort(key=lambda x: str(x.get("company") or "").lower())
+        return rows[:limit]
+
     def _get_page(self, page_id: str) -> dict[str, Any]:
         with httpx.Client(timeout=60, headers=self._headers) as client:
             r = client.get(f"https://api.notion.com/v1/pages/{page_id}")
@@ -210,6 +245,49 @@ def _page_title(page: dict[str, Any]) -> str:
             return "".join(p.get("plain_text", "") for p in parts).strip()
     # child_page fallback
     return ""
+
+
+def _prop_plain(prop: dict[str, Any] | None) -> str:
+    if not prop:
+        return ""
+    ptype = prop.get("type")
+    if ptype == "title":
+        return "".join(x.get("plain_text", "") for x in (prop.get("title") or [])).strip()
+    if ptype == "rich_text":
+        return "".join(x.get("plain_text", "") for x in (prop.get("rich_text") or [])).strip()
+    if ptype == "url":
+        return str(prop.get("url") or "").strip()
+    if ptype == "select":
+        sel = prop.get("select") or {}
+        return str(sel.get("name") or "").strip()
+    if ptype == "number":
+        val = prop.get("number")
+        return "" if val is None else str(val)
+    if ptype == "date":
+        date = prop.get("date") or {}
+        return str(date.get("start") or "").strip()
+    return ""
+
+
+def _firm_from_page(page: dict[str, Any]) -> dict[str, Any]:
+    props = page.get("properties") or {}
+    company = _prop_plain(props.get("Company") or props.get("Firma") or props.get("Name"))
+    if not company:
+        company = _page_title(page)
+    return {
+        "id": page.get("id"),
+        "company": company,
+        "country": _prop_plain(props.get("Country") or props.get("Kraj")),
+        "site_url": _prop_plain(props.get("Site URL") or props.get("WWW")),
+        "downloads": _prop_plain(props.get("Downloads") or props.get("Pobrania")),
+        "product_focus": _prop_plain(
+            props.get("Product focus") or props.get("Fokus produktowy")
+        ),
+        "pdf_count": _prop_plain(props.get("PDF count") or props.get("Liczba PDF")),
+        "note": _prop_plain(props.get("Note") or props.get("Notatka")),
+        "disk_folder": _prop_plain(props.get("Disk folder") or props.get("Folder")),
+        "notion_url": page.get("url"),
+    }
 
 
 def _rich_text(parts: list[dict[str, Any]] | None) -> str:

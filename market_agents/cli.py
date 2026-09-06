@@ -128,6 +128,24 @@ def sync_notion(
     )
 
 
+@app.command("sync-firms")
+def sync_firms(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+    """Zsynchronizuj listę znanych firm z Notion (Katalogi konkurencji — indeks)."""
+    from market_agents.sync import KnowledgeSync
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    cfg.sources.notion.enabled = True
+    result = KnowledgeSync(cfg).sync_known_firms()
+    companies = (result.details or {}).get("companies") or []
+    console.print(
+        f"[green]Firmy sync OK[/green]: {result.items} → {result.path}\n"
+        f"Podpowiedzi katalogów: {(result.details or {}).get('catalog_hints')}"
+    )
+    if companies:
+        console.print("Firmy: " + ", ".join(companies[:25]) + ("…" if len(companies) > 25 else ""))
+
+
 @app.command("sync-r2")
 def sync_r2(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
     """Zsynchronizuj archiwum Cloudflare R2 → lokalny cache."""

@@ -51,6 +51,8 @@ class NotionConfig(BaseModel):
     token_env: str = "NOTION_TOKEN"
     # Root pages / databases do zsynchronizowania (URL lub ID)
     root_pages: list[str] = Field(default_factory=list)
+    # Baza „Katalogi konkurencji — indeks” ze znanymi firmami
+    known_firms_database: str | None = None
     # Opcjonalnie: query po tytule przy sync
     search_queries: list[str] = Field(default_factory=list)
     max_pages: int = 50

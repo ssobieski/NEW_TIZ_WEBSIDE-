@@ -14,7 +14,11 @@ def test_tiz_config_loads_notion_and_r2():
     assert "skraw" in cfg.industry.name.lower() or "TIZ" in cfg.industry.name
     assert cfg.sources.notion.enabled is True
     assert len(cfg.sources.notion.root_pages) >= 4
+    assert cfg.sources.notion.known_firms_database
+    assert len(cfg.industry.competitors) >= 20
     assert "Sandvik" in " ".join(cfg.industry.competitors)
+    assert "MAPAL" in " ".join(cfg.industry.competitors)
+    assert len(cfg.sources.catalogs) >= 20
     assert cfg.sources.cloudflare_r2.bucket
     assert cfg.llm.tensor_parallel_size == 4
 
@@ -40,3 +44,16 @@ def test_tool_registry_has_notion_r2_tools():
         assert "list_catalog_sources" in names
         assert "discover_catalog_assets" in names
         assert "fetch_pdf_text" in names
+        assert "list_known_firms" in names
+
+
+def test_list_known_firms_uses_seed():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = AppConfig(industry=IndustryConfig(name="Test", keywords=["tooling"]))
+        # redirect data_path via agents.data_dir
+        cfg.agents.data_dir = tmp
+        tools = ToolRegistry(cfg, MarketMemory(Path(tmp)))
+        result = tools.list_known_firms({"query": "horn", "limit": 10})
+        assert result["ok"] is True
+        assert result["count"] >= 1
+        assert any("Horn" in str(f.get("company")) for f in result["firms"])

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any, Callable
 
 from market_agents.collectors.catalog import CatalogCollector
@@ -48,6 +49,7 @@ class ToolRegistry:
             "list_catalog_sources": self.list_catalog_sources,
             "discover_catalog_assets": self.discover_catalog_assets,
             "fetch_pdf_text": self.fetch_pdf_text,
+            "list_known_firms": self.list_known_firms,
         }
 
     def _get_notion(self) -> NotionCollector:
@@ -327,6 +329,31 @@ class ToolRegistry:
                     },
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_known_firms",
+                    "description": (
+                        "Lista znanych firm z Notion (Katalogi konkurencji — indeks): "
+                        "nazwa, kraj, Site URL, Downloads, fokus produktowy."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Opcjonalny filtr po nazwie firmy / kraju / fokusie",
+                            },
+                            "limit": {"type": "integer", "default": 50},
+                            "live": {
+                                "type": "boolean",
+                                "default": False,
+                                "description": "True = odśwież z Notion API; False = lokalny cache",
+                            },
+                        },
+                    },
+                },
+            },
         ]
 
     def call(self, name: str, arguments: dict[str, Any] | str) -> dict[str, Any]:
@@ -541,3 +568,65 @@ class ToolRegistry:
                 meta={"url": result.get("url")},
             )
         return result
+
+    def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:
+        query = str(args.get("query") or "").strip().lower()
+        limit = int(args.get("limit") or 50)
+        live = bool(args.get("live"))
+        firms: list[dict[str, Any]] = []
+        cache_path = self.config.data_path / "knowledge" / "known_firms.json"
+        seed_path = Path("config/known_firms.seed.json")
+        source = "cache"
+
+        if live:
+            firms = self._get_notion().list_known_firms(limit=max(limit, 200))
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(
+                json.dumps(firms, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            source = "notion_live"
+        elif cache_path.exists():
+            try:
+                firms = json.loads(cache_path.read_text(encoding="utf-8"))
+                source = "cache"
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": f"cache read failed: {exc}"}
+        elif seed_path.exists():
+            firms = json.loads(seed_path.read_text(encoding="utf-8"))
+            source = "seed"
+        else:
+            try:
+                firms = self._get_notion().list_known_firms(limit=max(limit, 200))
+                source = "notion_live"
+            except Exception as exc:  # noqa: BLE001
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Brak cache/seed i Notion niedostępne: {exc}. "
+                        "Uruchom: python -m market_agents sync-firms"
+                    ),
+                }
+
+        if query:
+            firms = [
+                f
+                for f in firms
+                if query
+                in " ".join(
+                    str(f.get(k) or "")
+                    for k in ("company", "country", "product_focus", "note")
+                ).lower()
+            ]
+        firms = firms[:limit]
+        self.memory.add(
+            "known_firms",
+            f"query={query or '*'} → {len(firms)} firm ({source})",
+            meta={"count": len(firms), "source": source},
+        )
+        return {
+            "ok": True,
+            "count": len(firms),
+            "firms": firms,
+            "source": source,
+            "cache": str(cache_path),
+        }
