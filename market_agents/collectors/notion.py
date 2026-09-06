@@ -93,10 +93,17 @@ class NotionCollector:
             )
         return out
 
-    def list_known_firms(self, limit: int = 200) -> list[dict[str, Any]]:
+    def list_known_firms(
+        self,
+        limit: int = 200,
+        *,
+        enrich_presentations: bool | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Lista znanych firm z bazy Notion „Katalogi konkurencji — indeks”.
-        Zwraca: company, country, site_url, downloads, product_focus, pdf_count, note.
+        Notion = kanoniczny katalog / przedstawienie firm.
+        Zwraca m.in. company, country, site_url, downloads, product_focus,
+        presentation (właściwość lub treść strony firmy).
         """
         db_ref = self.config.known_firms_database
         if not db_ref:
@@ -125,6 +132,28 @@ class NotionCollector:
                 if not data.get("has_more"):
                     break
                 cursor = data.get("next_cursor")
+        do_enrich = (
+            self.config.enrich_firm_presentations
+            if enrich_presentations is None
+            else enrich_presentations
+        )
+        if do_enrich:
+            max_chars = int(self.config.presentation_max_chars or 4000)
+            for firm in rows:
+                if firm.get("presentation"):
+                    continue
+                page_id = str(firm.get("id") or "")
+                if not page_id:
+                    continue
+                try:
+                    doc = self.fetch_page_text(page_id)
+                    text = str(doc.get("text") or "").strip()
+                    if text:
+                        firm["presentation"] = text[:max_chars]
+                        firm["presentation_source"] = "notion_page_body"
+                        firm["presentation_chars"] = len(text)
+                except Exception as exc:  # noqa: BLE001
+                    firm["presentation_error"] = str(exc)[:200]
         rows.sort(key=lambda x: str(x.get("company") or "").lower())
         return rows[:limit]
 
@@ -260,6 +289,12 @@ def _prop_plain(prop: dict[str, Any] | None) -> str:
     if ptype == "select":
         sel = prop.get("select") or {}
         return str(sel.get("name") or "").strip()
+    if ptype == "multi_select":
+        return ", ".join(
+            str(x.get("name") or "").strip()
+            for x in (prop.get("multi_select") or [])
+            if x.get("name")
+        )
     if ptype == "number":
         val = prop.get("number")
         return "" if val is None else str(val)
@@ -274,20 +309,35 @@ def _firm_from_page(page: dict[str, Any]) -> dict[str, Any]:
     company = _prop_plain(props.get("Company") or props.get("Firma") or props.get("Name"))
     if not company:
         company = _page_title(page)
-    return {
+    presentation = _prop_plain(
+        props.get("Presentation")
+        or props.get("Przedstawienie")
+        or props.get("Opis")
+        or props.get("Description")
+        or props.get("About")
+    )
+    row: dict[str, Any] = {
         "id": page.get("id"),
         "company": company,
         "country": _prop_plain(props.get("Country") or props.get("Kraj")),
-        "site_url": _prop_plain(props.get("Site URL") or props.get("WWW")),
+        "site_url": _prop_plain(
+            props.get("Site URL") or props.get("Site Url") or props.get("WWW")
+        ),
         "downloads": _prop_plain(props.get("Downloads") or props.get("Pobrania")),
         "product_focus": _prop_plain(
-            props.get("Product focus") or props.get("Fokus produktowy")
+            props.get("Product focus")
+            or props.get("Fokus produktowy")
+            or props.get("Product Focus")
         ),
         "pdf_count": _prop_plain(props.get("PDF count") or props.get("Liczba PDF")),
         "note": _prop_plain(props.get("Note") or props.get("Notatka")),
         "disk_folder": _prop_plain(props.get("Disk folder") or props.get("Folder")),
         "notion_url": page.get("url"),
     }
+    if presentation:
+        row["presentation"] = presentation
+        row["presentation_source"] = "notion_property"
+    return row
 
 
 def _rich_text(parts: list[dict[str, Any]] | None) -> str:

@@ -384,6 +384,9 @@ sources:
     - handbook machining
     max_pages: 100
     include_child_pages: true
+    # Notion = źródło prawdy: jakie firmy istnieją + ich przedstawienie
+    enrich_firm_presentations: true
+    presentation_max_chars: 4000
     known_firms_database: 308dfae4-647b-40e7-84a3-0b3f8406c769
   cloudflare_r2:
     enabled: false

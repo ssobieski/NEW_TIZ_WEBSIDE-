@@ -45,10 +45,12 @@ class ParsingAgent:
         industry = self.config.industry
         system = (
             "Jesteś agentem wywiadu rynkowego TIZ (narzędzia skrawające) na lokalnym GPU. "
-            "Priorytet: (A) nowe firmy spoza known_firms, (B) siatka powiązań "
-            "(dystrybutor/dealer/marka/OEM), (C) e-catalogi/PDF/eshopy znanych marek.\n"
+            "Priorytet: (A) Notion = katalog/przedstawienie znanych firm, "
+            "(B) nowe firmy spoza known_firms, (C) siatka powiązań, "
+            "(D) e-catalogi/PDF/eshopy.\n"
             "Procedura:\n"
-            "1) list_known_firms — baza znanych firm (Notion indeks)\n"
+            "1) list_known_firms / get_firm_presentation — Notion przedstawia jakie są firmy "
+            "(nie zgaduj profilu marki: bierz presentation z Notion)\n"
             "2) list_relations / firm_neighborhood — istniejąca siatka powiązań\n"
             "3) discover_new_firms — parsing wyszukiwania nowych producentów/marek\n"
             "4) check_firm_known — zweryfikuj kandydatów (fuzzy vs known_firms)\n"
@@ -79,7 +81,7 @@ class ParsingAgent:
             f"Liczba kandydatów: {len(candidates)}\n"
             f"Limit głębokich parse: {self.config.agents.agentic.max_deep_parses}\n"
             f"Learn parse rules: {self.config.agents.agentic.learn_parse_rules}\n"
-            "Zacznij od list_known_firms + list_relations, potem discover_new_firms "
+            "Zacznij od list_known_firms (Notion katalog). Dla ważnych marek użyj get_firm_presentation. Potem list_relations, discover_new_firms "
             "i discover_relations (parse_candidates=true)."
         )
 

@@ -82,7 +82,7 @@ python -m market_agents run --agentic
 python -m market_agents schedule
 ```
 
-Tooli: `list_known_firms`, `discover_new_firms`, `check_firm_known`,
+Tooli: `list_known_firms`, `get_firm_presentation`, `discover_new_firms`, `check_firm_known`,
 `list_relations`, `add_relation`, `discover_relations`, `firm_neighborhood`,
 `list_parse_rules`, `upsert_parse_rule`, `rate_parse`,
 `list_catalog_sources`, `discover_catalog_assets`, `fetch_pdf_text`
@@ -100,6 +100,24 @@ Typy: `distributor_of`, `dealer_of`, `brand_of`, `subsidiary_of`, `oem_group`,
 `partner_of`, `rebrand_of`. Agent buduje graf np. GARANT → brand_of → Hoffmann Group,
 Hoffmann Group → distributor_of → Sandvik Coromant.
 
+
+
+## Notion = katalog i przedstawienie firm
+
+Twoja baza Notion (`Katalogi konkurencji — indeks`) jest źródłem prawdy:
+które firmy istnieją i jak je przedstawiasz.
+
+```bash
+export NOTION_TOKEN=secret_...
+python -m market_agents sync-firms
+```
+
+Sync zbiera właściwości (Company, Country, Site URL, Downloads, Product focus)
+oraz **przedstawienie**:
+- właściwość `Presentation` / `Przedstawienie` / `Opis`, albo
+- treść strony firmy w Notion (bloki)
+
+Agent używa `list_known_firms` + `get_firm_presentation` zanim scrapuje WWW znanej marki.
 
 ## Samorozwijający się parser
 

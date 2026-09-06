@@ -66,6 +66,7 @@ class ToolRegistry:
             "discover_catalog_assets": self.discover_catalog_assets,
             "fetch_pdf_text": self.fetch_pdf_text,
             "list_known_firms": self.list_known_firms,
+            "get_firm_presentation": self.get_firm_presentation,
             "discover_new_firms": self.discover_new_firms,
             "check_firm_known": self.check_firm_known,
             "list_relations": self.list_relations,
@@ -380,23 +381,51 @@ class ToolRegistry:
                 "function": {
                     "name": "list_known_firms",
                     "description": (
-                        "Lista znanych firm z Notion (Katalogi konkurencji — indeks): "
-                        "nazwa, kraj, Site URL, Downloads, fokus produktowy."
+                        "Katalog znanych firm z Notion (przedstawienie / indeks konkurencji): "
+                        "nazwa, kraj, site, downloads, fokus, presentation (opis firmy z Notion)."
                     ),
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "query": {
                                 "type": "string",
-                                "description": "Opcjonalny filtr po nazwie firmy / kraju / fokusie",
+                                "description": "Filtr po nazwie / kraju / fokusie / przedstawieniu",
                             },
                             "limit": {"type": "integer", "default": 50},
                             "live": {
                                 "type": "boolean",
                                 "default": False,
-                                "description": "True = odśwież z Notion API; False = lokalny cache",
+                                "description": "True = odśwież z Notion API (z przedstawieniami)",
+                            },
+                            "include_presentation": {
+                                "type": "boolean",
+                                "default": True,
+                                "description": "False = bez pola presentation (krótsza lista)",
                             },
                         },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_firm_presentation",
+                    "description": (
+                        "Pobierz przedstawienie jednej firmy z Notion katalogu "
+                        "(cache known_firms.presentation albo live fetch_notion_page). "
+                        "Używaj zanim scrape'ujesz WWW znanej marki."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "company": {"type": "string"},
+                            "live": {
+                                "type": "boolean",
+                                "default": False,
+                                "description": "True = dociągnij treść strony Notion na żywo",
+                            },
+                        },
+                        "required": ["company"],
                     },
                 },
             },
@@ -882,13 +911,17 @@ class ToolRegistry:
         query = str(args.get("query") or "").strip().lower()
         limit = int(args.get("limit") or 50)
         live = bool(args.get("live"))
+        include_presentation = args.get("include_presentation", True)
         firms: list[dict[str, Any]] = []
         cache_path = self.config.data_path / "knowledge" / "known_firms.json"
         seed_path = Path("config/known_firms.seed.json")
         source = "cache"
 
         if live:
-            firms = self._get_notion().list_known_firms(limit=max(limit, 200))
+            firms = self._get_notion().list_known_firms(
+                limit=max(limit, 200),
+                enrich_presentations=True,
+            )
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(
                 json.dumps(firms, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -905,7 +938,10 @@ class ToolRegistry:
             source = "seed"
         else:
             try:
-                firms = self._get_notion().list_known_firms(limit=max(limit, 200))
+                firms = self._get_notion().list_known_firms(
+                    limit=max(limit, 200),
+                    enrich_presentations=True,
+                )
                 source = "notion_live"
             except Exception as exc:  # noqa: BLE001
                 return {
@@ -923,22 +959,107 @@ class ToolRegistry:
                 if query
                 in " ".join(
                     str(f.get(k) or "")
-                    for k in ("company", "country", "product_focus", "note")
+                    for k in (
+                        "company",
+                        "country",
+                        "product_focus",
+                        "note",
+                        "presentation",
+                    )
                 ).lower()
             ]
+        if not include_presentation:
+            slim = []
+            for f in firms:
+                row = dict(f)
+                row.pop("presentation", None)
+                slim.append(row)
+            firms = slim
         firms = firms[:limit]
+        with_pres = sum(1 for f in firms if f.get("presentation"))
         self.memory.add(
             "known_firms",
-            f"query={query or '*'} → {len(firms)} firm ({source})",
-            meta={"count": len(firms), "source": source},
+            f"query={query or '*'} → {len(firms)} firm ({source}), "
+            f"z przedstawieniem={with_pres}",
+            meta={"count": len(firms), "source": source, "with_presentation": with_pres},
         )
         return {
             "ok": True,
             "count": len(firms),
+            "with_presentation": with_pres,
             "firms": firms,
             "source": source,
             "cache": str(cache_path),
+            "catalog": "notion",
         }
+
+    def get_firm_presentation(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Przedstawienie jednej firmy z Notion katalogu."""
+        company = str(args.get("company") or "").strip()
+        if not company:
+            return {"ok": False, "error": "company required"}
+        live = bool(args.get("live"))
+        listed = self.list_known_firms(
+            {"query": company, "limit": 20, "live": live, "include_presentation": True}
+        )
+        if not listed.get("ok"):
+            return listed
+        firms = listed.get("firms") or []
+        # prefer exact / best match
+        from market_agents.firms import normalize_firm_name
+
+        want = normalize_firm_name(company)
+        match = None
+        for f in firms:
+            name = str(f.get("company") or "")
+            if normalize_firm_name(name) == want:
+                match = f
+                break
+        if match is None and firms:
+            match = firms[0]
+        if match is None:
+            return {
+                "ok": False,
+                "error": f"Brak firmy w Notion katalogu: {company}",
+                "hint": "Uruchom sync-firms albo sprawdź list_known_firms",
+            }
+        presentation = str(match.get("presentation") or "").strip()
+        notion_url = str(match.get("notion_url") or match.get("id") or "")
+        if (live or not presentation) and notion_url:
+            try:
+                doc = self.fetch_notion_page({"page_id_or_url": notion_url})
+                if doc.get("ok") and doc.get("text"):
+                    presentation = str(doc.get("text") or "")[:4000]
+                    match = {
+                        **match,
+                        "presentation": presentation,
+                        "presentation_source": "notion_page_live",
+                    }
+            except Exception as exc:  # noqa: BLE001
+                return {
+                    "ok": True,
+                    "firm": match,
+                    "presentation": presentation,
+                    "warning": str(exc),
+                }
+        self.memory.add(
+            "firm_presentation",
+            f"{match.get('company')}: {(presentation or match.get('product_focus') or '')[:300]}",
+            meta={"company": match.get("company"), "notion_url": notion_url},
+        )
+        return {
+            "ok": True,
+            "company": match.get("company"),
+            "presentation": presentation,
+            "product_focus": match.get("product_focus"),
+            "country": match.get("country"),
+            "site_url": match.get("site_url"),
+            "downloads": match.get("downloads"),
+            "notion_url": match.get("notion_url"),
+            "presentation_source": match.get("presentation_source"),
+            "firm": match,
+        }
+
 
     def _get_known(self) -> KnownFirmsIndex:
         if self._known is None:

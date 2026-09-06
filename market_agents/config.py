@@ -57,6 +57,9 @@ class NotionConfig(BaseModel):
     search_queries: list[str] = Field(default_factory=list)
     max_pages: int = 50
     include_child_pages: bool = True
+    # Notion = katalog firm z przedstawieniem (właściwość lub treść strony)
+    enrich_firm_presentations: bool = True
+    presentation_max_chars: int = 4000
 
 
 class CloudflareR2Config(BaseModel):
