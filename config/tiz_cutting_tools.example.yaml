@@ -1,5 +1,6 @@
 # Profil TIZ — narzędzia skrawające / machining
-# Fokus: e-catalog, PDF, publikacje, digital catalogue, e-shop
+# Fokus: e-catalog, PDF, publikacje, digital catalogue, e-shop,
+#        targi branżowe, czasopisma, portale WWW
 # Lista znanych firm = Notion „Katalogi konkurencji — indeks”
 # cp config/tiz_cutting_tools.example.yaml config/industry.yaml
 
@@ -95,13 +96,71 @@ industry:
   - Które firmy z listy znanych firm mają nowe Downloads / Site URL?
   - Jak wyglądają kalkulatory / selektory online vs TIZ?
   - Jakie standardy danych (ISO 13399 / DIN 4000 / GTC) są w ruchu?
+  - Którzy wystawcy pojawiają się na targach (EMO / AMB / IMTS) poza known_firms?
+  - Co piszą czasopisma i portale branżowe o nowych markach / katalogach / przejęciach?
 sources:
   rss:
   - name: Google News — tooling catalogs
     url: https://news.google.com/rss/search?q=%22cutting+tools%22+catalog+OR+ecatalog+OR+%22digital+catalogue%22&hl=pl&gl=PL&ceid=PL:pl
   - name: Google News — ISO 13399
     url: https://news.google.com/rss/search?q=%22ISO+13399%22+OR+%22cutting+tool+data%22&hl=en&gl=US&ceid=US:en
+  - name: Google News — EMO / AMB / IMTS exhibitors
+    url: https://news.google.com/rss/search?q=%28EMO+OR+AMB+OR+IMTS%29+%28exhibitor+OR+cutting+tools+OR+tooling%29&hl=en&gl=US&ceid=US:en
+  - name: Google News — machining magazines
+    url: https://news.google.com/rss/search?q=%28%22Modern+Machine+Shop%22+OR+%22Cutting+Tool+Engineering%22+OR+%22MM+Maschinenmarkt%22%29+%28tool+OR+tooling+OR+carbide%29&hl=en&gl=US&ceid=US:en
   web: []
+  media:
+  - name: EMO Hannover
+    kind: trade_fair
+    brand: EMO
+    url: https://emo-hannover.com/en/
+    extract_exhibitors: true
+    link_keywords: [exhibitor, exhibitors, aussteller, hall, booth]
+    max_links: 40
+  - name: AMB Stuttgart
+    kind: trade_fair
+    brand: AMB
+    url: https://www.messe-stuttgart.de/amb/en/
+    extract_exhibitors: true
+    link_keywords: [exhibitor, exhibitors, aussteller, hall]
+    max_links: 40
+  - name: IMTS
+    kind: trade_fair
+    brand: IMTS
+    url: https://www.imts.com/
+    extract_exhibitors: true
+    link_keywords: [exhibitor, exhibitors, booth, show]
+    max_links: 40
+  - name: Cutting Tool Engineering
+    kind: magazine
+    brand: CTE
+    url: https://www.ctemag.com/
+    link_keywords: [article, news, product, tooling, carbide]
+    max_links: 35
+  - name: Modern Machine Shop
+    kind: magazine
+    brand: MMS
+    url: https://www.mmsonline.com/
+    link_keywords: [article, news, machining, tooling, cutting]
+    max_links: 35
+  - name: MM Maschinenmarkt
+    kind: magazine
+    brand: MM
+    url: https://www.maschinenmarkt.vogel.de/
+    link_keywords: [artikel, news, werkzeug, zerspanung]
+    max_links: 30
+  - name: Production Machining
+    kind: portal
+    brand: Production Machining
+    url: https://www.productionmachining.com/
+    link_keywords: [article, news, tooling, cutting]
+    max_links: 30
+  - name: Canadian Metalworking
+    kind: portal
+    brand: Canadian Metalworking
+    url: https://www.canadianmetalworking.com/
+    link_keywords: [news, article, tooling]
+    max_links: 25
   catalogs:
   - name: BIG DAISHOWA downloads
     brand: BIG DAISHOWA

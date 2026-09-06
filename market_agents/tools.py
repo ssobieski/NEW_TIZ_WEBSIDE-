@@ -7,9 +7,10 @@ from typing import Any, Callable
 
 from market_agents.collectors.catalog import CatalogCollector
 from market_agents.collectors.firm_discovery import FirmDiscoveryCollector
+from market_agents.collectors.media import IndustryMediaCollector, extract_exhibitors_from_html
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import build_r2_collector
-from market_agents.config import AppConfig, CatalogSource
+from market_agents.config import AppConfig, CatalogSource, IndustryMediaSource
 from market_agents.firm_relations import (
     RELATION_TYPES,
     FirmRelationsGraph,
@@ -65,6 +66,10 @@ class ToolRegistry:
             "list_catalog_sources": self.list_catalog_sources,
             "discover_catalog_assets": self.discover_catalog_assets,
             "fetch_pdf_text": self.fetch_pdf_text,
+            "list_media_sources": self.list_media_sources,
+            "discover_media_links": self.discover_media_links,
+            "parse_media_page": self.parse_media_page,
+            "extract_fair_exhibitors": self.extract_fair_exhibitors,
             "list_known_firms": self.list_known_firms,
             "get_firm_presentation": self.get_firm_presentation,
             "discover_new_firms": self.discover_new_firms,
@@ -372,6 +377,93 @@ class ToolRegistry:
                             "source_name": {"type": "string"},
                             "max_pages": {"type": "integer", "default": 8},
                             "max_chars": {"type": "integer", "default": 12000},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_media_sources",
+                    "description": (
+                        "Lista źródeł mediów branżowych: targi (trade_fair), czasopisma (magazine), "
+                        "portale WWW (portal). Konfiguracja: sources.media."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "description": "Filtr: trade_fair|magazine|portal",
+                            },
+                            "enabled_only": {
+                                "type": "boolean",
+                                "default": True,
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discover_media_links",
+                    "description": (
+                        "Odkryj linki z hubu targów / czasopisma / portalu "
+                        "(exhibitors, articles, news). Zwraca też heurystycznych wystawców."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source_name": {"type": "string"},
+                            "url": {"type": "string"},
+                            "kind": {
+                                "type": "string",
+                                "description": "trade_fair|magazine|portal (dla ad-hoc URL)",
+                            },
+                            "max_links": {"type": "integer", "default": 40},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "parse_media_page",
+                    "description": (
+                        "Pobierz i sparsuj stronę mediów branżowych (artykuł, lista wystawców, "
+                        "portal news). Zwraca tekst + candidate_firms + exhibitors."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source_name": {"type": "string"},
+                            "url": {"type": "string"},
+                            "kind": {"type": "string"},
+                            "max_chars": {"type": "integer", "default": 12000},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "extract_fair_exhibitors",
+                    "description": (
+                        "Wyodrębnij listę wystawców z URL targów / strony exhibitor list. "
+                        "Używaj do discovery nowych firm na EMO/AMB/IMTS."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string"},
+                            "source_name": {"type": "string"},
+                            "limit": {"type": "integer", "default": 80},
+                            "check_known": {
+                                "type": "boolean",
+                                "default": True,
+                                "description": "True = oznacz known vs new vs known_firms",
+                            },
                         },
                     },
                 },
@@ -906,6 +998,135 @@ class ToolRegistry:
                 meta={"url": result.get("url")},
             )
         return result
+
+    def list_media_sources(self, args: dict[str, Any]) -> dict[str, Any]:
+        kind_filter = str(args.get("kind") or "").strip().lower()
+        enabled_only = args.get("enabled_only", True)
+        rows = []
+        for src in self.config.sources.media:
+            if enabled_only and not src.enabled:
+                continue
+            if kind_filter and src.kind.lower() != kind_filter:
+                continue
+            rows.append(
+                {
+                    "name": src.name,
+                    "kind": src.kind,
+                    "brand": src.brand,
+                    "url": src.url,
+                    "extract_exhibitors": src.extract_exhibitors,
+                    "enabled": src.enabled,
+                }
+            )
+        return {"ok": True, "count": len(rows), "sources": rows}
+
+    def _resolve_media(self, args: dict[str, Any]) -> IndustryMediaCollector:
+        source_name = str(args.get("source_name") or "").strip().lower()
+        url = str(args.get("url") or "").strip()
+        kind = str(args.get("kind") or "portal").strip().lower() or "portal"
+        if source_name:
+            for src in self.config.sources.media:
+                if src.name.lower() == source_name or (
+                    src.brand and src.brand.lower() == source_name
+                ):
+                    return IndustryMediaCollector(src)
+        if url:
+            return IndustryMediaCollector(
+                IndustryMediaSource(
+                    name="ad-hoc",
+                    url=url,
+                    kind=kind if kind in {"trade_fair", "magazine", "portal"} else "portal",
+                    extract_exhibitors=kind == "trade_fair",
+                )
+            )
+        enabled = [s for s in self.config.sources.media if s.enabled]
+        if enabled:
+            return IndustryMediaCollector(enabled[0])
+        raise RuntimeError(
+            "Brak sources.media w config — dodaj targi / czasopisma / portale"
+        )
+
+    def discover_media_links(self, args: dict[str, Any]) -> dict[str, Any]:
+        max_links = int(args.get("max_links") or 40)
+        collector = self._resolve_media(args)
+        result = collector.discover_links(max_links=max_links)
+        self.memory.add(
+            "media_discover",
+            f"{collector.name}: {result.get('count', 0)} links, "
+            f"{len(result.get('exhibitors') or [])} exhibitors",
+            meta={
+                "source": collector.name,
+                "kind": result.get("kind"),
+                "url": result.get("url"),
+            },
+        )
+        return result
+
+    def parse_media_page(self, args: dict[str, Any]) -> dict[str, Any]:
+        max_chars = int(args.get("max_chars") or 12000)
+        url = str(args.get("url") or "").strip() or None
+        collector = self._resolve_media(args)
+        result = collector.parse_page(url=url, max_chars=max_chars)
+        if result.get("ok"):
+            self.memory.add(
+                "media_parse",
+                f"{result.get('title')}: {(result.get('excerpt') or '')[:400]}",
+                meta={
+                    "url": result.get("url"),
+                    "media_kind": result.get("media_kind"),
+                    "firms": result.get("candidate_firms") or [],
+                },
+            )
+        return result
+
+    def extract_fair_exhibitors(self, args: dict[str, Any]) -> dict[str, Any]:
+        limit = int(args.get("limit") or 80)
+        check_known = args.get("check_known", True)
+        url = str(args.get("url") or "").strip()
+        if not url and args.get("source_name"):
+            collector = self._resolve_media({**args, "kind": "trade_fair"})
+            hub = collector.discover_links(max_links=5)
+            names = list(hub.get("exhibitors") or [])
+            url = collector.source.url
+        elif url:
+            collector = self._resolve_media(
+                {"url": url, "kind": str(args.get("kind") or "trade_fair")}
+            )
+            page = collector.parse_page(url=url, max_chars=8000)
+            names = list(page.get("exhibitors") or [])
+            if len(names) < 5:
+                names = extract_exhibitors_from_html(
+                    collector._fetch(url), limit=limit  # noqa: SLF001
+                )
+        else:
+            return {"ok": False, "error": "url or source_name required"}
+
+        names = names[:limit]
+        rows: list[dict[str, Any]] = [{"company": n} for n in names]
+        if check_known and names:
+            known = self.check_firm_known({"names": names})
+            by_name = {
+                str(r.get("name") or "").lower(): r
+                for r in (known.get("results") or [])
+            }
+            for row in rows:
+                match = by_name.get(row["company"].lower()) or {}
+                row["known"] = bool(match.get("known"))
+                if match.get("match"):
+                    row["match"] = match.get("match")
+        new_count = sum(1 for r in rows if not r.get("known"))
+        self.memory.add(
+            "fair_exhibitors",
+            f"{url}: {len(rows)} exhibitors ({new_count} potentially new)",
+            meta={"url": url, "count": len(rows), "new": new_count},
+        )
+        return {
+            "ok": True,
+            "url": url,
+            "count": len(rows),
+            "new_count": new_count,
+            "exhibitors": rows,
+        }
 
     def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:
         query = str(args.get("query") or "").strip().lower()

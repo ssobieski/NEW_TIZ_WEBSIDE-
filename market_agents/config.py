@@ -88,6 +88,24 @@ class CloudflareR2Config(BaseModel):
     )
 
 
+
+
+class IndustryMediaSource(BaseModel):
+    """Targi branżowe / czasopisma / portale WWW do parsowania."""
+
+    name: str
+    url: str
+    # trade_fair | magazine | portal
+    kind: str = "portal"
+    brand: str | None = None
+    css_selector: str | None = None
+    # słowa kluczowe w linkach (exhibitors, articles, news…)
+    link_keywords: list[str] = Field(default_factory=list)
+    extract_exhibitors: bool = False
+    max_links: int = 40
+    enabled: bool = True
+
+
 class FirmDiscoveryConfig(BaseModel):
     """Parsing wyszukiwania nowych firm (spoza known_firms)."""
 
@@ -114,6 +132,7 @@ class SourcesConfig(BaseModel):
     rss: list[RssSource] = Field(default_factory=list)
     web: list[WebSource] = Field(default_factory=list)
     catalogs: list[CatalogSource] = Field(default_factory=list)
+    media: list[IndustryMediaSource] = Field(default_factory=list)
     firm_discovery: FirmDiscoveryConfig = Field(default_factory=FirmDiscoveryConfig)
     notion: NotionConfig = Field(default_factory=NotionConfig)
     cloudflare_r2: CloudflareR2Config = Field(default_factory=CloudflareR2Config)

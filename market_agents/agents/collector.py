@@ -3,7 +3,13 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from market_agents.collectors import CatalogCollector, FirmDiscoveryCollector, RssCollector, WebCollector
+from market_agents.collectors import (
+    CatalogCollector,
+    FirmDiscoveryCollector,
+    IndustryMediaCollector,
+    RssCollector,
+    WebCollector,
+)
 from market_agents.collectors.notion import NotionCollector
 from market_agents.collectors.r2 import build_r2_collector
 from market_agents.config import AppConfig
@@ -13,7 +19,7 @@ from market_agents.storage import Storage
 
 
 class CollectorAgent:
-    """Zbiera sygnały: RSS/WWW + katalogi + discovery nowych firm + Notion + R2."""
+    """Zbiera sygnały: RSS/WWW + katalogi + media (targi/czasopisma/portale) + discovery + Notion + R2."""
 
     def __init__(self, config: AppConfig, storage: Storage) -> None:
         self.config = config
@@ -33,6 +39,9 @@ class CollectorAgent:
             collectors.append(WebCollector(src))
         for src in self.config.sources.catalogs:
             collectors.append(CatalogCollector(src))
+        for src in self.config.sources.media:
+            if src.enabled:
+                collectors.append(IndustryMediaCollector(src))
         if self.config.sources.firm_discovery.enabled:
             collectors.append(
                 FirmDiscoveryCollector(
@@ -85,16 +94,16 @@ class CollectorAgent:
             if item.url in seen:
                 continue
             score = self._relevance(item)
-            # Notion/R2/katalogi/discovery — wysoka wartość nawet bez keyword match
-            if item.source in {"notion", "cloudflare_r2", "firm_discovery"} or str(
-                item.source
-            ).startswith("catalog:"):
+            # Notion/R2/katalogi/media/discovery — wysoka wartość nawet bez keyword match
+            src_name = str(item.source)
+            is_priority = (
+                item.source in {"notion", "cloudflare_r2", "firm_discovery"}
+                or src_name.startswith("catalog:")
+                or src_name.startswith("media:")
+            )
+            if is_priority:
                 score = max(score, float(item.relevance_score or 0.45))
-            if score < self.config.agents.min_relevance_score and item.source not in {
-                "notion",
-                "cloudflare_r2",
-                "firm_discovery",
-            } and not str(item.source).startswith("catalog:"):
+            if score < self.config.agents.min_relevance_score and not is_priority:
                 continue
             title_key = self._normalize_title(item.title)
             if any(SequenceMatcher(None, title_key, prev).ratio() >= 0.9 for prev in titles_norm):

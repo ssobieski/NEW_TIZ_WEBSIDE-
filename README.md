@@ -84,12 +84,17 @@ python -m market_agents schedule
 
 Tooli: `list_known_firms`, `get_firm_presentation`, `discover_new_firms`, `check_firm_known`,
 `list_relations`, `add_relation`, `discover_relations`, `firm_neighborhood`,
+`list_media_sources`, `discover_media_links`, `parse_media_page`, `extract_fair_exhibitors`,
 `list_parse_rules`, `upsert_parse_rule`, `rate_parse`,
 `list_catalog_sources`, `discover_catalog_assets`, `fetch_pdf_text`
 (+ Notion/R2: `search_notion`, `fetch_notion_page`, `search_r2`, `fetch_r2_object`).
 
 Parsing nowych firm: `sources.firm_discovery` (Google News RSS) → ekstrakcja nazw →
 filtr vs known_firms → kandydaci `new_firm` dla agenta.
+
+Media branżowe (targi / czasopisma / portale): `sources.media` w profilu TIZ
+(EMO, AMB, IMTS, CTE, MMS, MM Maschinenmarkt…). Agent: `list_media_sources` →
+`discover_media_links` / `extract_fair_exhibitors` → `check_firm_known` na wystawcach.
 
 Siatka powiązań (kto jest dystrybutorem / marką / spółką w grupie OEM):
 ```bash
@@ -143,12 +148,13 @@ python -m market_agents run --skip-llm --pipeline
 ## Jak działa agentic parsing
 
 ```text
-RSS/WWW + catalogs (PDF/ecatalog/eshop) → kandydaci
+RSS/WWW + catalogs + media (targi/czasopisma/portale) → kandydaci
             │
             ▼
    ParsingAgent (ReAct, max_steps)
      ├─ list_known_firms / list_relations / firm_neighborhood
-     ├─ discover_new_firms / discover_relations / add_relation
+     ├─ list_media_sources / discover_media_links / extract_fair_exhibitors
+     ├─ parse_media_page / discover_new_firms / discover_relations / add_relation
      ├─ list_catalog_sources / discover_catalog_assets / fetch_pdf_text
      ├─ list_candidates
      ├─ search_notion / search_r2 / search_memory
