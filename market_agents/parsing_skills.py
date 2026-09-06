@@ -201,7 +201,44 @@ def default_seed_skills() -> list[ParsingSkill]:
             url_contains=["download", "catalog", "catalogue"],
             taught_by="seed",
         ),
-        ParsingSkill(
+                ParsingSkill(
+            id="product-tech-schema",
+            name="Schemat informacji technicznych produktów",
+            category="catalog_hub",
+            description=(
+                "Handbooki / cutting data / ISO 13399 / application guides: "
+                "wykrywanie źródeł i ekstrakcja układu pól (vc, fz, ap, ae, grupy materiałowe)."
+            ),
+            preferred_method="bs4",
+            link_keywords=[
+                "cutting data",
+                "handbook",
+                "application guide",
+                "technical data",
+                "iso 13399",
+                "feeds and speeds",
+                "schnittwerte",
+                "datenblatt",
+            ],
+            hints=[
+                "Priorytet TIZ: discover_product_tech → extract_product_tech_schema",
+                "Studiuj układ pól — NIE kopiuj tabel vc/fz do CutData",
+                "register_product_tech z kind=cutting_data|handbook|iso13399|application_guide",
+                "Potem list_product_tech do briefingu",
+            ],
+            applies_to_kinds=[
+                "cutting_data",
+                "handbook",
+                "application_guide",
+                "iso13399",
+                "tech_datasheet",
+                "grade_chart",
+                "publication",
+            ],
+            url_contains=["cutting-data", "handbook", "technical", "iso-13399", "application", "datasheet"],
+            taught_by="seed",
+        ),
+ParsingSkill(
             id="pricelist-discovery",
             name="Odkrywanie dostępnych cenników",
             category="catalog_hub",

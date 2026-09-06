@@ -23,6 +23,12 @@ from market_agents.parse_rules import PARSE_METHODS, SiteParseRulesStore
 from market_agents.parsing import IntelligentParser, ParsedDocument
 from market_agents.parsing_skills import SKILL_CATEGORIES, ParsingSkillsStore
 from market_agents.pricelists import PricelistRegistry
+from market_agents.product_tech import (
+    ProductTechRegistry,
+    TECH_KINDS,
+    classify_tech_kind,
+    extract_tech_schema,
+)
 from market_agents.polite_http import build_fetcher_from_config
 
 
@@ -102,6 +108,10 @@ class ToolRegistry:
             "discover_pricelists": self.discover_pricelists,
             "list_available_pricelists": self.list_available_pricelists,
             "register_pricelist": self.register_pricelist,
+            "discover_product_tech": self.discover_product_tech,
+            "list_product_tech": self.list_product_tech,
+            "register_product_tech": self.register_product_tech,
+            "extract_product_tech_schema": self.extract_product_tech_schema,
         }
         self._known: KnownFirmsIndex | None = None
         self._relations: FirmRelationsGraph | None = None
@@ -230,6 +240,7 @@ class ToolRegistry:
                                     "regulation",
                                     "trend",
                                     "pricing",
+                                    "product_tech",
                                     "noise",
                                 ],
                             },
@@ -477,6 +488,97 @@ class ToolRegistry:
                     },
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discover_product_tech",
+                    "description": (
+                        "Priorytet TIZ: odkryj INFORMACJE TECHNICZNE o produktach — "
+                        "cutting data, handbooki, application guides, ISO 13399, karty tech. "
+                        "Rejestruje źródła (schemat pól), NIE kopiuje tabel vc/fz do CutData."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "source_name": {"type": "string"},
+                            "url": {"type": "string"},
+                            "max_sources": {"type": "integer", "default": 12},
+                            "max_links_per_source": {"type": "integer", "default": 40},
+                            "register": {"type": "boolean", "default": True},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_product_tech",
+                    "description": (
+                        "Lista zarejestrowanych źródeł tech produktów "
+                        "(data/knowledge/product_tech.json)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "brand": {"type": "string"},
+                            "kind": {
+                                "type": "string",
+                                "description": "cutting_data|handbook|application_guide|iso13399|tech_datasheet|grade_chart",
+                            },
+                            "access": {"type": "string"},
+                            "q": {"type": "string"},
+                            "limit": {"type": "integer", "default": 50},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "register_product_tech",
+                    "description": (
+                        "Dodaj/aktualizuj źródło informacji technicznej o produktach "
+                        "(handbook / cutting data / ISO 13399 / karta tech)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string"},
+                            "title": {"type": "string"},
+                            "brand": {"type": "string"},
+                            "kind": {"type": "string"},
+                            "access": {"type": "string", "default": "public"},
+                            "year": {"type": "string"},
+                            "notes": {"type": "string"},
+                            "confirmed": {"type": "boolean", "default": True},
+                        },
+                        "required": ["url"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "extract_product_tech_schema",
+                    "description": (
+                        "Z tekstu lub publicznego PDF wyodrębnij SCHEMAT pól (vc/fz/ap/ae, "
+                        "grupy materiałowe, chłodzenie, rozdziały). Tylko układ — bez kopiowania "
+                        "tabel wartości do CutData."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "url": {"type": "string", "description": "Opcjonalnie PDF/URL do pobrania tekstu"},
+                            "source_name": {"type": "string"},
+                            "brand": {"type": "string"},
+                            "register": {"type": "boolean", "default": True},
+                            "max_pages": {"type": "integer", "default": 10},
+                        },
+                    },
+                },
+            },
+            
             {
                 "type": "function",
                 "function": {
@@ -1486,6 +1588,191 @@ class ToolRegistry:
             meta={"id": item.id, "url": item.url},
         )
         return {"ok": True, "pricelist": item.to_dict(), "path": str(path)}
+
+
+    def discover_product_tech(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Skan hubów katalogów pod kątem handbooków / cutting data / ISO 13399."""
+        max_sources = int(args.get("max_sources") or 12)
+        max_links = int(args.get("max_links_per_source") or 40)
+        register = bool(args.get("register", True))
+        source_name = str(args.get("source_name") or "").strip()
+        url = str(args.get("url") or "").strip()
+
+        targets: list[CatalogSource] = []
+        if source_name or url:
+            collector = self._resolve_catalog(args)
+            for src in self.config.sources.catalogs:
+                if src.name == collector.name or (
+                    src.brand and src.brand == getattr(collector.source, "brand", None)
+                ):
+                    targets.append(src)
+                    break
+            else:
+                targets.append(
+                    CatalogSource(
+                        name=collector.name,
+                        url=url or collector.source.url,
+                        brand=getattr(collector.source, "brand", None),
+                        kind="tech_datasheet",
+                    )
+                )
+        else:
+            targets = list(self.config.sources.catalogs)[:max_sources]
+
+        registry = ProductTechRegistry.load(self.config.data_path)
+        found: list[dict[str, Any]] = []
+        per_source: list[dict[str, Any]] = []
+        tech_types = set(TECH_KINDS)
+        for src in targets:
+            collector = CatalogCollector(src)
+            assets = collector.discover_assets(max_links=max_links)
+            tech_assets = []
+            for a in assets:
+                if not isinstance(a, dict):
+                    continue
+                atype = str(a.get("asset_type") or "").lower()
+                if atype in tech_types:
+                    tech_assets.append(a)
+                    continue
+                inferred = classify_tech_kind(str(a.get("url") or ""), str(a.get("text") or ""))
+                if inferred:
+                    row = dict(a)
+                    row["asset_type"] = inferred
+                    tech_assets.append(row)
+            per_source.append(
+                {
+                    "source": src.name,
+                    "brand": src.brand,
+                    "hub": src.url,
+                    "product_tech": len(tech_assets),
+                    "assets_scanned": len(assets),
+                }
+            )
+            for row in tech_assets:
+                row = dict(row)
+                row["brand"] = row.get("brand") or src.brand or src.name
+                row["source_name"] = src.name
+                found.append(row)
+            if register and tech_assets:
+                registry.ingest_discovered(
+                    tech_assets,
+                    brand=src.brand or src.name,
+                    source=src.name,
+                )
+
+        if register:
+            registry.save(self.config.data_path)
+
+        self.memory.add(
+            "product_tech_discover",
+            f"Znaleziono {len(found)} źródeł tech w {len(targets)} hubach",
+            meta={"count": len(found), "sources": len(targets)},
+        )
+        return {
+            "ok": True,
+            "count": len(found),
+            "sources_scanned": len(targets),
+            "per_source": per_source,
+            "items": found[:80],
+            "registered_total": len(registry.items) if register else None,
+            "policy": "schema/layout only — nie kopiować tabel vc/fz do CutData",
+        }
+
+    def list_product_tech(self, args: dict[str, Any]) -> dict[str, Any]:
+        registry = ProductTechRegistry.load(self.config.data_path)
+        items = registry.list(
+            brand=str(args.get("brand") or "") or None,
+            kind=str(args.get("kind") or "") or None,
+            access=str(args.get("access") or "") or None,
+            q=str(args.get("q") or "") or None,
+            limit=int(args.get("limit") or 50),
+        )
+        return {
+            "ok": True,
+            "count": len(items),
+            "total_registered": len(registry.items),
+            "items": [i.to_dict() for i in items],
+        }
+
+    def register_product_tech(self, args: dict[str, Any]) -> dict[str, Any]:
+        url = str(args.get("url") or "").strip()
+        if not url:
+            return {"ok": False, "error": "url jest wymagany"}
+        kind = str(args.get("kind") or "").strip() or (
+            classify_tech_kind(url, str(args.get("title") or "")) or "tech_datasheet"
+        )
+        registry = ProductTechRegistry.load(self.config.data_path)
+        item = registry.upsert(
+            url=url,
+            title=str(args.get("title") or "") or None,
+            brand=str(args.get("brand") or "") or None,
+            source="agent",
+            kind=kind,
+            access=str(args.get("access") or "public") or "public",
+            year=str(args.get("year") or "") or None,
+            notes=str(args.get("notes") or ""),
+            confirmed=bool(args.get("confirmed", True)),
+        )
+        path = registry.save(self.config.data_path)
+        self.memory.add(
+            "product_tech_register",
+            f"{item.brand or '?'}: {item.kind} — {item.title}",
+            meta={"id": item.id, "url": item.url, "kind": item.kind},
+        )
+        return {"ok": True, "item": item.to_dict(), "path": str(path)}
+
+    def extract_product_tech_schema(self, args: dict[str, Any]) -> dict[str, Any]:
+        text = str(args.get("text") or "")
+        url = str(args.get("url") or "").strip() or None
+        brand = str(args.get("brand") or "") or None
+        register = bool(args.get("register", True))
+        if not text and url:
+            max_pages = int(args.get("max_pages") or 10)
+            collector = self._resolve_catalog({**args, "url": url})
+            pdf = collector.fetch_pdf_text(url=url, max_pages=max_pages, max_chars=20000)
+            if not pdf.get("ok"):
+                return {"ok": False, "error": pdf.get("error") or "nie udało się pobrać PDF"}
+            text = str(pdf.get("text_excerpt") or pdf.get("text") or "")
+            if not brand:
+                brand = str(pdf.get("brand") or "") or None
+        if not text.strip():
+            return {"ok": False, "error": "podaj text albo url PDF"}
+        schema = extract_tech_schema(text)
+        kind = classify_tech_kind(url or "", text[:500]) or "handbook"
+        saved = None
+        if register and url:
+            registry = ProductTechRegistry.load(self.config.data_path)
+            item = registry.upsert(
+                url=url,
+                title=str(args.get("title") or "") or None,
+                brand=brand,
+                source=str(args.get("source_name") or "agent") or "agent",
+                kind=kind,
+                access="public",
+                notes="schema extracted",
+                schema_summary={
+                    "fields_present": schema.get("fields_present"),
+                    "field_count": schema.get("field_count"),
+                    "richness_0_to_1": schema.get("richness_0_to_1"),
+                    "has_iso13399": schema.get("has_iso13399"),
+                    "operations_mentioned": schema.get("operations_mentioned"),
+                },
+                confirmed=True,
+            )
+            registry.save(self.config.data_path)
+            saved = item.to_dict()
+        self.memory.add(
+            "product_tech_schema",
+            f"schema fields={schema.get('fields_present')} richness={schema.get('richness_0_to_1')}",
+            meta={"url": url, "kind": kind},
+        )
+        return {
+            "ok": True,
+            "kind": kind,
+            "schema": schema,
+            "registered": saved,
+            "policy": schema.get("purpose"),
+        }
 
 
     def list_media_sources(self, args: dict[str, Any]) -> dict[str, Any]:

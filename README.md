@@ -126,6 +126,21 @@ oraz **przedstawienie**:
 
 Agent używa `list_known_firms` + `get_firm_presentation` zanim scrapuje WWW znanej marki.
 
+## Informacje techniczne o produktach
+
+Agenty zbierają **źródła tech** konkurencji (cutting data, handbooki, application guides, ISO 13399)
+i wyciągają **schemat pól** (vc / fz / ap / ae, grupy materiałowe, chłodzenie) — bez kopiowania
+tabel wartości do CutData (zgodnie z polityką Notion TIZ).
+
+```bash
+python -m market_agents run --agentic
+python -m market_agents product-tech
+python -m market_agents product-tech --kind cutting_data --brand Seco
+```
+
+Rejestr: `data/knowledge/product_tech.json`  
+Tooli: `discover_product_tech`, `list_product_tech`, `register_product_tech`, `extract_product_tech_schema`.
+
 ## Dostępne cenniki
 
 Agenty szukają **publicznych / semi-publicznych cenników** konkurencji

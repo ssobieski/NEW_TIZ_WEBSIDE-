@@ -276,6 +276,44 @@ def run_schedule(
         time.sleep(30)
 
 
+@app.command("product-tech")
+def product_tech_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    brand: Optional[str] = typer.Option(None, "--brand"),
+    kind: Optional[str] = typer.Option(
+        None, "--kind", help="cutting_data|handbook|application_guide|iso13399|tech_datasheet|grade_chart"
+    ),
+    access: Optional[str] = typer.Option(None, "--access"),
+    q: Optional[str] = typer.Option(None, "--q"),
+) -> None:
+    """Pokaż zarejestrowane źródła informacji technicznych o produktach."""
+    from market_agents.product_tech import ProductTechRegistry
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    registry = ProductTechRegistry.load(cfg.data_path)
+    items = registry.list(brand=brand, kind=kind, access=access, q=q, limit=100)
+    table = Table(title=f"Product tech ({len(items)} / {len(registry.items)})")
+    table.add_column("Marka")
+    table.add_column("Kind")
+    table.add_column("Tytuł")
+    table.add_column("Access")
+    table.add_column("URL")
+    for item in items:
+        table.add_row(
+            item.brand or "—",
+            item.kind,
+            item.title[:36],
+            item.access,
+            item.url[:50],
+        )
+    console.print(table)
+    console.print(
+        "Polityka: schemat pól do nauki kalkulatora TIZ — bez kopiowania tabel vc/fz do CutData."
+    )
+    console.print(f"Plik: {ProductTechRegistry.path_for(cfg.data_path)}")
+
+
 @app.command("pricelists")
 def list_pricelists_cmd(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),

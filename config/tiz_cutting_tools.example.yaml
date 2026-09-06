@@ -1,5 +1,6 @@
 # Profil TIZ — narzędzia skrawające / machining
-# Fokus: cenniki (price list / Preisliste), e-catalog, PDF, publikacje, digital catalogue, e-shop,
+# Fokus: info techniczne produktów (cutting data / handbook / ISO 13399),
+#        cenniki (price list / Preisliste), e-catalog, PDF, publikacje, digital catalogue, e-shop,
 #        targi branżowe, czasopisma, portale WWW
 # Lista znanych firm = Notion „Katalogi konkurencji — indeks”
 # cp config/tiz_cutting_tools.example.yaml config/industry.yaml
@@ -19,11 +20,16 @@ industry:
   - price list
   - pricelist
   - Preisliste
+  - schnittwerte
+  - feeds and speeds
+  - technical datasheet
   - Preise
   - catalogue
   - digital catalogue
   - PDF
   - handbook
+  - application guide
+  - cutting data
   - webshop
   - e-shop
   - vc
@@ -97,6 +103,7 @@ industry:
   - Która firma jest dystrybutorem / dealerem innej (siatka powiązań distributor_of / dealer_of)?
   - Jakie marki własne (brand_of) i grupy OEM (oem_group / subsidiary_of) widać u konkurencji?
   - Jakie nowe e-katalogi / PDF / digital catalogues wypuszczają znane firmy z indeksu?
+  - Jakie DOSTĘPNE źródła TECHNICZNE o produktach (cutting data / handbook / ISO 13399 / application guide) mają znane firmy — i jaki jest układ pól vc/fz/ap (bez kopiowania tabel do CutData)?
   - Jakie DOSTĘPNE CENNIKI (price list / Preisliste / cennik PDF) publikują znane firmy — publiczne vs za loginem?
   - Co zmienia się w e-shopach (asortyment, ceny, selektory)?
   - Jakie publikacje / handbooki / application guides są nowe?
@@ -107,6 +114,8 @@ industry:
   - Co piszą czasopisma i portale branżowe o nowych markach / katalogach / przejęciach?
 sources:
   rss:
+  - name: Google News — cutting data / handbooks
+    url: https://news.google.com/rss/search?q=%22cutting+tools%22+(%22cutting+data%22+OR+handbook+OR+%22application+guide%22+OR+%22ISO+13399%22)&hl=pl&gl=PL&ceid=PL:pl
   - name: Google News — cutting tools price lists
     url: https://news.google.com/rss/search?q=%22cutting+tools%22+(%22price+list%22+OR+pricelist+OR+Preisliste+OR+cennik)&hl=pl&gl=PL&ceid=PL:pl
   - name: Google News — tooling catalogs

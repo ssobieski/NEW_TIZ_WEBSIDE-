@@ -18,10 +18,20 @@ _ASSET_HINTS = re.compile(
     r"katalog|catalogue|catalog|webshop|e-?shop|shop|store|"
     r"download|publication|handbook|brochure|flyer|pdf|"
     r"flip.?catalog|online.?catalogue|"
-    r"cennik|pricelist|price.?list|preisliste|preis.?liste|listino)",
+    r"cennik|pricelist|price.?list|preisliste|preis.?liste|listino|cutting.?data|handbook|iso.?13399|application.?guide|datenblatt)",
     re.I,
 )
 _PDF_EXT = re.compile(r"\.pdf(\?|#|$)", re.I)
+_TECH_HINTS = re.compile(
+    r"(cutting[\s_-]?data|schnittwerte|parametr(?:y)?[\s_-]?skrawania|"
+    r"feeds?[\s_-]?(?:and|&)[\s_-]?speeds?|"
+    r"handbook|technical[\s_-]?(?:guide|manual|data|datasheet|reference)|"
+    r"application[\s_-]?guide|anwendungs|"
+    r"iso[\s_-]?13399|din[\s_-]?4000|"
+    r"grade[\s_-]?(?:chart|overview)|datenblatt|karta[\s_-]?technicz|"
+    r"metal[\s_-]?cutting[\s_-]?knowledge)",
+    re.I,
+)
 _PRICELIST_HINTS = re.compile(
     r"(cennik|cenniki|cennika|"
     r"price[\s_-]?list|pricelist|price[\s_-]?sheet|pricing[\s_-]?sheet|"
@@ -144,7 +154,7 @@ class CatalogCollector(BaseCollector):
                     source=f"catalog:{self.source.name}",
                     summary=f"Odkryty asset ({atype}) z hubu {url}",
                     tags=[atype, "discovered", brand],
-                    relevance_score=0.8 if atype == "pricelist" else (0.65 if atype == "pdf" else 0.5),
+                    relevance_score=(0.85 if atype in {"pricelist", "cutting_data", "handbook", "iso13399", "application_guide", "tech_datasheet", "grade_chart"} else (0.65 if atype == "pdf" else 0.5)),
                 )
             )
             if len(items) >= max_items:
@@ -187,7 +197,7 @@ class CatalogCollector(BaseCollector):
                 break
 
         # Preferuj PDF / catalog / shop
-        priority = {"pricelist": 0, "pdf": 1, "ecatalog": 2, "digital_catalogue": 3, "eshop": 4, "publication": 5, "link": 9}
+        priority = {"pricelist": 0, "cutting_data": 1, "handbook": 1, "iso13399": 1, "application_guide": 1, "tech_datasheet": 1, "grade_chart": 1, "pdf": 2, "ecatalog": 3, "digital_catalogue": 4, "eshop": 5, "publication": 6, "link": 9}
         found.sort(key=lambda x: priority.get(str(x.get("asset_type")), 8))
         return found
 
@@ -247,6 +257,12 @@ def _classify_asset(url: str, text: str) -> str | None:
     # Cennik ma pierwszeństwo nawet gdy to PDF / downloads
     if _PRICELIST_HINTS.search(blob):
         return "pricelist"
+    # Dane techniczne produktów (handbook / cutting data / ISO 13399) przed zwykłym PDF
+    if _TECH_HINTS.search(blob):
+        from market_agents.product_tech import classify_tech_kind
+
+        kind = classify_tech_kind(url, text)
+        return kind or "tech_datasheet"
     if _PDF_EXT.search(url) or "application/pdf" in blob:
         return "pdf"
     if re.search(r"e-?shop|webshop|/shop|/store|buy.?online", blob):
