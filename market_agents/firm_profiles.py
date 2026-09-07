@@ -525,6 +525,10 @@ class FirmProfileRegistry:
             seen: set[str] = set()
             out: list[dict[str, Any]] = []
             for row in list(a or []) + list(b or []):
+                if isinstance(row, str):
+                    row = {"url": row}
+                if not isinstance(row, dict):
+                    continue
                 k = str(row.get(key) or row.get("raw") or row.get("url") or "").lower().strip()
                 if not k or k in seen:
                     continue
@@ -536,6 +540,8 @@ class FirmProfileRegistry:
             seen: set[str] = set()
             out: list[dict[str, Any]] = []
             for row in list(a or []) + list(b or []):
+                if not isinstance(row, dict):
+                    continue
                 k = f"{row.get('metric')}|{row.get('value_text')}"
                 if k in seen:
                     continue
@@ -725,7 +731,13 @@ class FirmProfileRegistry:
                     "pricelists": [],
                     "leaflets": [],
                     "eshops": [],
-                    "downloads": [firm["downloads"]] if firm.get("downloads") else [],
+                    "downloads": (
+                        [{"url": firm["downloads"]}]
+                        if isinstance(firm.get("downloads"), str) and firm.get("downloads")
+                        else list(firm.get("downloads") or [])
+                        if isinstance(firm.get("downloads"), list)
+                        else []
+                    ),
                 },
                 sources=["known_firms"],
                 origin="ecosystem_build",
