@@ -19,6 +19,8 @@ KNOWLEDGE_FILES = (
     "product_tech.json",
     "literature.json",
     "ontology.json",
+    "firm_profiles.json",
+    "crm_tasks.json",
 )
 
 FEEDBACK_FILES = (
@@ -71,6 +73,11 @@ class FleetConfig:
     auto_push_after_run: bool = True
     publish_known_firms: bool = True
     publish_relations: bool = True
+    publish_ontology: bool = True
+    publish_firm_profiles: bool = True
+    publish_pricelists: bool = True
+    publish_literature: bool = True
+    publish_product_tech: bool = True
 
 
 class FleetSync:
@@ -113,7 +120,19 @@ class FleetSync:
             files.append("known_firms.json")
         if self.fleet.publish_relations:
             files.append("firm_relations.json")
-        return files
+        if getattr(self.fleet, "publish_ontology", True):
+            files.append("ontology.json")
+        if getattr(self.fleet, "publish_firm_profiles", True):
+            files.append("firm_profiles.json")
+            files.append("crm_tasks.json")
+        if getattr(self.fleet, "publish_pricelists", True):
+            files.append("available_pricelists.json")
+        if getattr(self.fleet, "publish_literature", True):
+            files.append("literature.json")
+        if getattr(self.fleet, "publish_product_tech", True):
+            files.append("product_tech.json")
+        # dedupe preserve order
+        return list(dict.fromkeys(files))
 
     def publish_knowledge(self, notes: str = "") -> dict[str, Any]:
         """Centrala: spakuj aktualną wiedzę parserów dla VPS."""
@@ -500,4 +519,9 @@ def fleet_config_from_app(config: Any) -> FleetConfig:
         auto_push_after_run=bool(getattr(fleet, "auto_push_after_run", True)),
         publish_known_firms=bool(getattr(fleet, "publish_known_firms", True)),
         publish_relations=bool(getattr(fleet, "publish_relations", True)),
+        publish_ontology=bool(getattr(fleet, "publish_ontology", True)),
+        publish_firm_profiles=bool(getattr(fleet, "publish_firm_profiles", True)),
+        publish_pricelists=bool(getattr(fleet, "publish_pricelists", True)),
+        publish_literature=bool(getattr(fleet, "publish_literature", True)),
+        publish_product_tech=bool(getattr(fleet, "publish_product_tech", True)),
     )

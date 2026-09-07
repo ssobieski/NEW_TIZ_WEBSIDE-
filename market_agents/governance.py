@@ -476,6 +476,31 @@ class GovernanceEngine:
             mode=self.mode,
             deny_require_approval=self.deny_require_approval,
         )
+        # Operator allowlist: require_approval → allow if grant exists
+        if (
+            decision.effect == "require_approval"
+            and not decision.allowed
+            and self.mode == "enforce"
+        ):
+            from market_agents.approvals import ApprovalStore
+
+            store = ApprovalStore.load(self.audit_dir)
+            company = None
+            host = None
+            if req.args:
+                company = str(req.args.get("company") or req.args.get("host_or_url") or "") or None
+                host = str(req.args.get("host_or_url") or req.args.get("host") or "") or None
+            grant = store.is_approved(req.tool or "", company=company, host=host)
+            if grant:
+                decision = PolicyDecision(
+                    effect="allow",
+                    allowed=True,
+                    reason=f"operator approval {grant.id} by {grant.approved_by}",
+                    matched_rules=list(dict.fromkeys(decision.matched_rules + [f"approval:{grant.id}"])),
+                    obligations=list(dict.fromkeys(decision.obligations + ["audit", "approved"])),
+                    policy_id=self.pack.id if self.pack else None,
+                    mode=self.mode,
+                )
         decision = self._apply_rate_limits(req, decision)
         self._audit(req, decision)
         return decision

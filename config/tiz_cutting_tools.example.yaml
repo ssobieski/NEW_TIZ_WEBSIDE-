@@ -678,5 +678,10 @@ agents:
     sync_dir: data/fleet
     publish_known_firms: true
     publish_relations: true
+    publish_ontology: true
+    publish_firm_profiles: true
+    publish_pricelists: true
+    publish_literature: true
+    publish_product_tech: true
 schedule:
   every_hours: 6

@@ -51,7 +51,6 @@ EDGE_TYPES = (
     "rebrand_of",
     "customer_of",
     "supplier_of",
-    "competes_with",
     "focuses_on",  # firm → process/tool_family/material
 )
 

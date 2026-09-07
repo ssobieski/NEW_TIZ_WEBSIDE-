@@ -571,14 +571,21 @@ def governance_cmd(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     action: str = typer.Argument(
         "status",
-        help="status | validate | eval | audit",
+        help="status | validate | eval | audit | approve | revoke | approvals",
     ),
-    tool: Optional[str] = typer.Option(None, "--tool", help="Nazwa toola (dla eval)"),
+    tool: Optional[str] = typer.Option(None, "--tool", help="Nazwa toola (eval/approve)"),
     role: Optional[str] = typer.Option(None, "--role", help="central|worker (dla eval)"),
     url: Optional[str] = typer.Option(None, "--url", help="URL (dla eval fetch)"),
     tail: int = typer.Option(20, "--tail", help="Liczba wpisów audit"),
+    by: str = typer.Option("operator", "--by", help="Kto zatwierdza (approve)"),
+    note: str = typer.Option("", "--note", help="Notatka approve"),
+    company: Optional[str] = typer.Option(None, "--company", help="Scope approve"),
+    host: Optional[str] = typer.Option(None, "--host", help="Scope approve (host)"),
+    grant_id: Optional[str] = typer.Option(None, "--id", help="ID grantu (revoke)"),
+    expires: Optional[str] = typer.Option(None, "--expires", help="ISO expiry approve"),
 ) -> None:
-    """AI governance — Policy-as-Code (status / validate / eval / audit)."""
+    """AI governance — Policy-as-Code + operator approvals."""
+    from market_agents.approvals import ApprovalStore
     from market_agents.governance import (
         GovernanceEngine,
         PolicyRequest,
@@ -590,16 +597,19 @@ def governance_cmd(
     cfg = load_config(path)
     engine = GovernanceEngine.from_config(cfg)
     act = (action or "status").lower().strip()
+    audit_dir = Path(getattr(cfg.agents.governance, "audit_dir", "data/governance"))
 
     if act == "status":
         st = engine.status()
+        store = ApprovalStore.load(audit_dir)
+        st["active_approvals"] = len(store.list_active())
         table = Table(title="AI Governance (policy-as-code)")
         table.add_column("Key")
         table.add_column("Value")
         for k, v in st.items():
             table.add_row(k, str(v))
         console.print(table)
-        console.print("Docs: GOVERNANCE.md")
+        console.print("Docs: GOVERNANCE.md — approve: governance approve --tool …")
         return
 
     if act == "validate":
@@ -627,8 +637,10 @@ def governance_cmd(
                 tool=tool,
                 role=role or engine.role,
                 url=url,
-                args={"url": url} if url else {},
+                args={"url": url, "company": company, "host_or_url": host} if True else {},
             )
+            # clean empty args
+            req.args = {k: v for k, v in (req.args or {}).items() if v}
         elif url:
             req = PolicyRequest(action="fetch", url=url, role=role or engine.role)
         else:
@@ -649,8 +661,110 @@ def governance_cmd(
             console.print_json(data=row)
         return
 
-    console.print(f"Nieznana akcja: {action} (status|validate|eval|audit)")
+    if act == "approve":
+        if not tool:
+            console.print("Podaj --tool (np. promote_host_skill)")
+            raise typer.Exit(1)
+        store = ApprovalStore.load(audit_dir)
+        grant = store.approve(
+            tool,
+            approved_by=by,
+            note=note,
+            company=company,
+            host=host,
+            expires_at=expires,
+        )
+        store.save(audit_dir)
+        console.print(f"[green]Approved[/green] id={grant.id} tool={grant.tool}")
+        console.print_json(data=grant.to_dict())
+        return
+
+    if act == "revoke":
+        if not grant_id:
+            console.print("Podaj --id grantu")
+            raise typer.Exit(1)
+        store = ApprovalStore.load(audit_dir)
+        ok = store.revoke(grant_id)
+        store.save(audit_dir)
+        if not ok:
+            console.print(f"[red]Nie znaleziono[/red] {grant_id}")
+            raise typer.Exit(1)
+        console.print(f"[yellow]Revoked[/yellow] {grant_id}")
+        return
+
+    if act in {"approvals", "list-approvals"}:
+        store = ApprovalStore.load(audit_dir)
+        rows = store.list_active()
+        if not rows:
+            console.print("Brak aktywnych approvals")
+            return
+        table = Table(title="Active approvals")
+        table.add_column("ID")
+        table.add_column("Tool")
+        table.add_column("By")
+        table.add_column("Company")
+        table.add_column("Expires")
+        for g in rows:
+            table.add_row(g.id, g.tool, g.approved_by, g.company or "", g.expires_at or "∞")
+        console.print(table)
+        return
+
+    console.print(
+        f"Nieznana akcja: {action} (status|validate|eval|audit|approve|revoke|approvals)"
+    )
     raise typer.Exit(1)
+
+
+@app.command("crm")
+def crm_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    action: str = typer.Argument("list", help="list | sync-prospects | done"),
+    company: Optional[str] = typer.Option(None, "--company"),
+    task_id: Optional[str] = typer.Option(None, "--id"),
+    min_opp: float = typer.Option(60.0, "--min-opportunity"),
+    limit: int = typer.Option(30, "--limit"),
+) -> None:
+    """Lokalna kolejka CRM / follow-up (hot prospects)."""
+    from market_agents.crm_tasks import CrmTaskStore, create_tasks_from_prospect_scoreboard
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    act = (action or "list").lower().strip()
+    if act == "sync-prospects":
+        result = create_tasks_from_prospect_scoreboard(
+            cfg.data_path, min_opportunity=min_opp, limit=limit
+        )
+        console.print(result)
+        return
+    if act == "done":
+        if not task_id:
+            console.print("Podaj --id")
+            raise typer.Exit(1)
+        store = CrmTaskStore.load(cfg.data_path)
+        t = store.set_status(task_id, "done")
+        if not t:
+            console.print("[red]Brak taska[/red]")
+            raise typer.Exit(1)
+        store.save(cfg.data_path)
+        console.print(f"[green]Done[/green] {t.id} {t.company}")
+        return
+    store = CrmTaskStore.load(cfg.data_path)
+    rows = store.list(status="open", company=company, limit=limit)
+    table = Table(title=f"CRM open tasks ({len(rows)})")
+    table.add_column("ID")
+    table.add_column("Pri")
+    table.add_column("Company")
+    table.add_column("Opp", justify="right")
+    table.add_column("Title")
+    for t in rows:
+        table.add_row(
+            t.id,
+            t.priority,
+            t.company,
+            str(int(t.opportunity_score)) if t.opportunity_score is not None else "—",
+            t.title[:48],
+        )
+    console.print(table)
 
 
 @app.command("social")

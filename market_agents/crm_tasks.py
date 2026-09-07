@@ -1,0 +1,194 @@
+"""
+Lokalne zadania CRM / follow-up dla hot prospectów.
+
+Bez pełnego UI: JSON queue + opcjonalny sync do Notion (gdy włączony).
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Literal
+
+TaskStatus = Literal["open", "in_progress", "done", "cancelled"]
+TaskPriority = Literal["low", "medium", "high", "hot"]
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+@dataclass
+class CrmTask:
+    id: str
+    title: str
+    company: str
+    status: TaskStatus = "open"
+    priority: TaskPriority = "medium"
+    reason: str = ""
+    opportunity_score: float | None = None
+    owner: str = ""
+    due: str = ""
+    source: str = "local"
+    notion_url: str | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=utc_now_iso)
+    updated_at: str = field(default_factory=utc_now_iso)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> CrmTask:
+        return cls(
+            id=str(raw.get("id") or uuid.uuid4().hex[:12]),
+            title=str(raw.get("title") or ""),
+            company=str(raw.get("company") or ""),
+            status=str(raw.get("status") or "open"),  # type: ignore[arg-type]
+            priority=str(raw.get("priority") or "medium"),  # type: ignore[arg-type]
+            reason=str(raw.get("reason") or "")[:800],
+            opportunity_score=(
+                float(raw["opportunity_score"])
+                if raw.get("opportunity_score") is not None
+                else None
+            ),
+            owner=str(raw.get("owner") or ""),
+            due=str(raw.get("due") or ""),
+            source=str(raw.get("source") or "local"),
+            notion_url=raw.get("notion_url"),
+            meta=dict(raw.get("meta") or {}),
+            created_at=str(raw.get("created_at") or utc_now_iso()),
+            updated_at=str(raw.get("updated_at") or utc_now_iso()),
+        )
+
+
+class CrmTaskStore:
+    def __init__(self, tasks: list[CrmTask] | None = None) -> None:
+        self.tasks: list[CrmTask] = list(tasks or [])
+
+    @classmethod
+    def load(cls, data_dir: Path | str | None = None) -> CrmTaskStore:
+        path = Path(data_dir or "data") / "knowledge" / "crm_tasks.json"
+        if not path.is_file():
+            return cls()
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            rows = raw.get("tasks") if isinstance(raw, dict) else raw
+            return cls([CrmTask.from_dict(r) for r in (rows or []) if isinstance(r, dict)])
+        except Exception:  # noqa: BLE001
+            return cls()
+
+    def save(self, data_dir: Path | str | None = None) -> Path:
+        data_dir = Path(data_dir or "data")
+        path = data_dir / "knowledge" / "crm_tasks.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "updated_at": utc_now_iso(),
+            "count": len(self.tasks),
+            "tasks": [t.to_dict() for t in self.tasks],
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return path
+
+    def create(
+        self,
+        *,
+        company: str,
+        title: str | None = None,
+        reason: str = "",
+        opportunity_score: float | None = None,
+        priority: TaskPriority | None = None,
+        owner: str = "",
+        meta: dict[str, Any] | None = None,
+    ) -> CrmTask:
+        company = (company or "").strip()
+        if not company:
+            raise ValueError("company required")
+        if priority is None:
+            if opportunity_score is not None and opportunity_score >= 75:
+                priority = "hot"
+            elif opportunity_score is not None and opportunity_score >= 60:
+                priority = "high"
+            else:
+                priority = "medium"
+        # dedupe open tasks for same company+similar title
+        for t in self.tasks:
+            if (
+                t.status in {"open", "in_progress"}
+                and t.company.lower() == company.lower()
+                and (not title or t.title.lower() == (title or "").lower())
+            ):
+                t.updated_at = utc_now_iso()
+                if opportunity_score is not None:
+                    t.opportunity_score = opportunity_score
+                if reason:
+                    t.reason = reason[:800]
+                return t
+        task = CrmTask(
+            id=uuid.uuid4().hex[:12],
+            title=title or f"Follow-up: {company}",
+            company=company,
+            priority=priority,
+            reason=reason,
+            opportunity_score=opportunity_score,
+            owner=owner,
+            meta=dict(meta or {}),
+        )
+        self.tasks.insert(0, task)
+        return task
+
+    def list(
+        self,
+        *,
+        status: str | None = None,
+        company: str | None = None,
+        limit: int = 50,
+    ) -> list[CrmTask]:
+        rows = self.tasks
+        if status:
+            rows = [t for t in rows if t.status == status]
+        if company:
+            c = company.lower()
+            rows = [t for t in rows if c in t.company.lower()]
+        return rows[:limit]
+
+    def set_status(self, task_id: str, status: TaskStatus) -> CrmTask | None:
+        for t in self.tasks:
+            if t.id == task_id:
+                t.status = status
+                t.updated_at = utc_now_iso()
+                return t
+        return None
+
+
+def create_tasks_from_prospect_scoreboard(
+    data_dir: Path | str,
+    *,
+    min_opportunity: float = 60.0,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Utwórz CRM tasks z hot prospectów (scoreboard)."""
+    from market_agents.prospects import ProspectRegistry
+
+    store = CrmTaskStore.load(data_dir)
+    pr = ProspectRegistry.load(data_dir)
+    created = 0
+    for row in pr.scoreboard(limit=limit):
+        opp = float(row.get("opportunity") or 0)
+        if opp < min_opportunity:
+            continue
+        store.create(
+            company=str(row["company"]),
+            title=f"Prospect outreach: {row['company']}",
+            reason=f"vertical={row.get('vertical')} quality={row.get('quality_tier')} "
+            f"budget_mid={row.get('budget_mid_eur')}",
+            opportunity_score=opp,
+            meta={"processes": row.get("processes") or []},
+        )
+        created += 1
+    path = store.save(data_dir)
+    return {"ok": True, "created_or_updated": created, "path": str(path), "open": len(store.list(status="open"))}

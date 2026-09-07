@@ -274,6 +274,11 @@ class FleetConfig(BaseModel):
     auto_push_after_run: bool = True
     publish_known_firms: bool = True
     publish_relations: bool = True
+    publish_ontology: bool = True
+    publish_firm_profiles: bool = True
+    publish_pricelists: bool = True
+    publish_literature: bool = True
+    publish_product_tech: bool = True
 
 
 class AgentsConfig(BaseModel):
@@ -282,6 +287,10 @@ class AgentsConfig(BaseModel):
     report_dir: str = "reports"
     data_dir: str = "data"
     min_relevance_score: float = 0.35
+    # Po każdym run: odśwież profiles + CRM tasks z hot prospectów
+    post_enrich_profiles: bool = True
+    post_enrich_crm_tasks: bool = True
+    crm_min_opportunity: float = 60.0
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)
     fleet: FleetConfig = Field(default_factory=FleetConfig)

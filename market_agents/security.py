@@ -202,6 +202,7 @@ SAFE_TOOLS = frozenset(
         "get_prospect_profile",
         "prospect_scoreboard",
         "estimate_tooling_budget",
+        "list_crm_tasks",
         "list_parse_rules",
         "list_parsing_skills",
         "match_parsing_skills",
@@ -260,6 +261,8 @@ WRITE_TOOLS = frozenset(
         "upsert_firm_profile",
         "register_social_mention",
         "ingest_prospect_seeds",
+        "create_crm_task",
+        "sync_crm_from_prospects",
     }
 )
 
@@ -339,6 +342,7 @@ FLEET_ALLOWED_KNOWLEDGE = frozenset(
         "literature.json",
         "ontology.json",
         "firm_profiles.json",
+        "crm_tasks.json",
         "manifest.json",
         "fleet_pulled.json",
     }

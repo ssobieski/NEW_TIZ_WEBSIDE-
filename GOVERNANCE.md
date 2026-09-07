@@ -75,9 +75,15 @@ python -m market_agents governance eval --tool remember --role worker
 python -m market_agents governance audit --tail 30
 ```
 
-## Relacja do cybersecurity
+## Operator approvals
 
-| Warstwa | Odpowiedzialność |
-|---------|------------------|
-| `security.py` | SSRF, secrets, path/R2/fleet, twarde tiery tooli |
-| `governance.py` | Policy-as-code, role, approval, rate limits, domenowe zakazy (CutData) |
+Gdy polityka zwraca `require_approval` (np. `promote_host_skill`), operator może odblokować:
+
+```bash
+python -m market_agents governance approve --tool promote_host_skill --by jan --note "OK po review"
+python -m market_agents governance approvals
+python -m market_agents governance eval --tool promote_host_skill   # powinno allow
+python -m market_agents governance revoke --id <grant_id>
+```
+
+Granty: `data/governance/approvals.json`.

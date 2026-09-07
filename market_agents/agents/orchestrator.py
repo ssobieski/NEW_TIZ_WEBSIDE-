@@ -89,6 +89,13 @@ class Orchestrator:
         if items:
             self.storage.append_items(items)
             self.storage.mark_seen([i.url for i in items])
+
+        enrich_meta: dict = {}
+        try:
+            enrich_meta = self._post_enrich()
+        except Exception as exc:  # noqa: BLE001
+            enrich_meta = {"ok": False, "error": str(exc)[:200]}
+
         self.storage.export_snapshot(
             {
                 "industry": self.config.industry.name,
@@ -96,6 +103,7 @@ class Orchestrator:
                 "mode": mode,
                 "report_md": str(md_path),
                 "trace": str(trace_path) if trace_path else None,
+                "post_enrich": enrich_meta,
             }
         )
         return RunResult(
@@ -107,3 +115,32 @@ class Orchestrator:
             agentic=agentic_result,
             trace_path=trace_path,
         )
+
+    def _post_enrich(self) -> dict:
+        """Odśwież firm profiles + CRM tasks po cyklu (offline knowledge)."""
+        out: dict = {"ok": True}
+        data_dir = self.config.data_path
+        if getattr(self.config.agents, "post_enrich_profiles", True):
+            from market_agents.firm_profiles import FirmProfileRegistry
+
+            reg = FirmProfileRegistry.load(data_dir)
+            built = reg.build_from_ecosystem(
+                data_dir,
+                competitors=list(self.config.industry.competitors or []),
+                default_role="competitor",
+            )
+            out["profiles"] = {
+                "count": built.get("count"),
+                "path": built.get("path"),
+            }
+        if getattr(self.config.agents, "post_enrich_crm_tasks", True):
+            from market_agents.crm_tasks import create_tasks_from_prospect_scoreboard
+
+            crm = create_tasks_from_prospect_scoreboard(
+                data_dir,
+                min_opportunity=float(
+                    getattr(self.config.agents, "crm_min_opportunity", 60.0) or 60.0
+                ),
+            )
+            out["crm"] = crm
+        return out
