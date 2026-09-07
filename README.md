@@ -130,9 +130,10 @@ Tooli: `analyze_prospect`, `list_prospects`, `get_prospect_profile`, `prospect_s
 
 1. ParsingAgent procedura obejmuje **profiles + prospects + CRM tasks**
 2. Fleet publish: ontology, firm_profiles, pricelists, literature, product_tech, crm_tasks
-3. Po `run`: post-enrich profiles + suppliers + CRM; metryki w `data/metrics/`
+3. Po `run`: post-enrich profiles + suppliers + CRM + digest (**tylko centrala**; worker skip);
+   centrala z `auto_push_after_run` publikuje knowledge pack dla VPS
 4. `governance approve|revoke|approvals` — operator allowlist
-5. Testy: schema↔handler parity, orchestrator smoke, fleet publish
+5. Testy: schema↔handler parity, orchestrator smoke, fleet publish, architecture gaps
 6. CRM lokalny (`crm` CLI) + split `market_agents/tooling/` (shim `tools.py`)
 
 ```bash
