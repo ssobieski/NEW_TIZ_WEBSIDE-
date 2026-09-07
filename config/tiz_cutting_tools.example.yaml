@@ -631,7 +631,8 @@ agents:
     parse_rules_path: data/knowledge/site_parse_rules.json
     learn_parsing_skills: true
     parsing_skills_path: data/knowledge/parsing_skills.json
-    auto_promote_host_skills: true
+    # safer default: nie auto-promuj reguł z VPS bez przeglądu
+    auto_promote_host_skills: false
   crawl:
     enabled: true
     min_delay_seconds: 1.5
@@ -645,6 +646,25 @@ agents:
     adaptive: true
     cooldown_on_block_seconds: 900
     timeout_seconds: 35
+    # SSRF: blokuj localhost / RFC1918 / metadata
+    block_private_networks: true
+    resolve_dns_for_ssrf: true
+    max_redirects: 3
+    max_response_bytes: 15000000
+    allowed_hosts: []
+  security:
+    enabled: true
+    block_private_networks: true
+    allow_write_tools: true
+    allow_notion_tools: true
+    allow_r2_tools: true
+    # strict_tool_mode: true  # tylko SAFE+FETCH tools
+    strict_tool_mode: false
+    redact_traces: true
+    trace_tool_result_max_chars: 4000
+    fleet_allowlist_only: true
+    enforce_r2_prefix: true
+    allowed_hosts: []
   fleet:
     # central = ten serwer GPU uczy skills/rules i publikuje knowledge dla VPS
     role: central

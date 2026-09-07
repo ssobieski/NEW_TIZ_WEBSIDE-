@@ -82,6 +82,25 @@ def doctor(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> Non
     table.add_row("LLM provider", cfg.llm.provider)
     table.add_row("Model", cfg.llm.model)
     table.add_row("TP (A100)", str(cfg.llm.tensor_parallel_size))
+    sec = getattr(cfg.agents, "security", None)
+    if sec is not None:
+        table.add_row(
+            "Security SSRF",
+            "[green]block private[/green]"
+            if getattr(sec, "block_private_networks", True)
+            else "[yellow]private allowed[/yellow]",
+        )
+        table.add_row(
+            "Security tools",
+            f"write={getattr(sec, 'allow_write_tools', True)} "
+            f"notion={getattr(sec, 'allow_notion_tools', True)} "
+            f"r2={getattr(sec, 'allow_r2_tools', True)} "
+            f"strict={getattr(sec, 'strict_tool_mode', False)}",
+        )
+        table.add_row(
+            "Trace redaction",
+            "[green]on[/green]" if getattr(sec, "redact_traces", True) else "[yellow]off[/yellow]",
+        )
     if health.get("ok"):
         table.add_row("LLM", f"[green]OK[/green] modele: {health.get('models')}")
     else:
@@ -274,6 +293,42 @@ def run_schedule(
     while True:
         schedule.run_pending()
         time.sleep(30)
+
+
+@app.command("security")
+def security_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+) -> None:
+    """Pokaż politykę cybersecurity (SSRF, tool policy, fleet, redaction)."""
+    from market_agents.security import SecurityPolicy, security_status
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    sec = getattr(cfg.agents, "security", None)
+    policy = SecurityPolicy(
+        block_private_networks=bool(getattr(sec, "block_private_networks", True)),
+        allowed_hosts=list(getattr(sec, "allowed_hosts", None) or []),
+        allow_write_tools=bool(getattr(sec, "allow_write_tools", True)),
+        allow_notion_tools=bool(getattr(sec, "allow_notion_tools", True)),
+        allow_r2_tools=bool(getattr(sec, "allow_r2_tools", True)),
+        strict_tool_mode=bool(getattr(sec, "strict_tool_mode", False)),
+        redact_traces=bool(getattr(sec, "redact_traces", True)),
+        fleet_allowlist_only=bool(getattr(sec, "fleet_allowlist_only", True)),
+        enforce_r2_prefix=bool(getattr(sec, "enforce_r2_prefix", True)),
+    )
+    st = security_status(policy)
+    table = Table(title="Cybersecurity controls")
+    table.add_column("Control")
+    table.add_column("Value")
+    for k, v in st.items():
+        if k in {"ok", "controls"}:
+            continue
+        table.add_row(k, str(v))
+    console.print(table)
+    console.print("Controls: " + ", ".join(st.get("controls") or []))
+    console.print(
+        "Szczegóły: SECURITY.md — SSRF, prompt-injection, fleet pack, secrets redaction."
+    )
 
 
 @app.command("social")

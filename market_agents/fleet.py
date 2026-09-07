@@ -153,23 +153,27 @@ class FleetSync:
         return {"ok": True, "pack_id": pack_id, "path": str(dest), "files": copied}
 
     def latest_knowledge_pack(self) -> Path | None:
+        from market_agents.security import resolve_fleet_pack_path
+
         latest_path = self.sync_root / "latest.json"
         if latest_path.exists():
             try:
                 payload = json.loads(latest_path.read_text(encoding="utf-8"))
-                pack = Path(str(payload.get("path") or ""))
-                if pack.exists():
-                    return pack
                 pack_id = str(payload.get("pack_id") or "")
-                candidate = self.outbox / pack_id
-                if candidate.exists():
-                    return candidate
+                safe = resolve_fleet_pack_path(
+                    payload.get("path"),
+                    sync_root=self.sync_root,
+                    pack_id=pack_id or None,
+                )
+                if safe is not None:
+                    return safe
             except Exception:  # noqa: BLE001
                 pass
-        if not self.outbox.exists():
+        outbox = self.outbox
+        if not outbox.exists():
             return None
         packs = sorted(
-            [p for p in self.outbox.iterdir() if p.is_dir()],
+            [p for p in outbox.iterdir() if p.is_dir() and not p.is_symlink()],
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
@@ -177,16 +181,18 @@ class FleetSync:
 
     def pull_knowledge(self) -> dict[str, Any]:
         """Worker: pobierz najnowszy knowledge pack z centrali do lokalnego knowledge/."""
+        from market_agents.security import FLEET_ALLOWED_KNOWLEDGE, SecurityError, iter_safe_pack_files
+
         self.ensure_dirs()
         pack = self.latest_knowledge_pack()
         if pack is None:
             return {"ok": False, "error": "brak knowledge packa w fleet/outbox"}
         copied: list[str] = []
-        for src in pack.iterdir():
-            if src.name == "manifest.json" or not src.is_file():
-                continue
-            if src.suffix != ".json":
-                continue
+        try:
+            files = iter_safe_pack_files(pack, allowlist=FLEET_ALLOWED_KNOWLEDGE)
+        except SecurityError as exc:
+            return {"ok": False, "error": str(exc)}
+        for src in files:
             shutil.copy2(src, self.knowledge_dir / src.name)
             copied.append(src.name)
         # zapisz marker lokalny
@@ -195,6 +201,7 @@ class FleetSync:
             "pack_id": pack.name,
             "files": copied,
             "worker_id": self.worker_id,
+            "security": "allowlist+no-symlink",
         }
         (self.knowledge_dir / "fleet_pulled.json").write_text(
             json.dumps(marker, ensure_ascii=False, indent=2),
@@ -214,13 +221,33 @@ class FleetSync:
             if src.exists():
                 shutil.copy2(src, dest / name)
                 copied.append(name)
-        # dołącz lokalne items jeśli są
+        # dołącz lokalne items jeśli są — tylko metadane (bez pełnej treści = mniej wycieku)
+        from market_agents.security import redact_secrets
+
         items = self.data_dir / "items.jsonl"
         if items.exists():
-            # tylko ogon — ostatnie 200 linii
             lines = items.read_text(encoding="utf-8").splitlines()
-            tail = "\n".join(lines[-200:]) + ("\n" if lines else "")
-            (dest / "items_tail.jsonl").write_text(tail, encoding="utf-8")
+            slim: list[str] = []
+            for line in lines[-200:]:
+                try:
+                    row = json.loads(line)
+                    slim.append(
+                        json.dumps(
+                            {
+                                "title": row.get("title"),
+                                "url": row.get("url"),
+                                "source": row.get("source"),
+                                "tags": row.get("tags"),
+                                "relevance_score": row.get("relevance_score"),
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                except Exception:  # noqa: BLE001
+                    slim.append(redact_secrets(line[:300]))
+            (dest / "items_tail.jsonl").write_text(
+                "\n".join(slim) + ("\n" if slim else ""), encoding="utf-8"
+            )
             copied.append("items_tail.jsonl")
         manifest = FleetManifest(
             pack_id=pack_id,

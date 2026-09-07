@@ -185,6 +185,15 @@ Każdy zebrany sygnał dostaje automatycznie `analysis.domain_context` (bez LLM)
 materiały ISO · maszyny · chłodziwo · procesy · parametry (schemat). Briefing ma sekcję
 **Kontekst technologiczny**.
 
+## Cybersecurity
+
+SSRF guard (blokada localhost/RFC1918/metadata), tool policy (Notion/R2/write),
+redakcja sekretów w traces, fleet pack allowlista. Szczegóły: [SECURITY.md](SECURITY.md).
+
+```bash
+python -m market_agents security
+```
+
 Encje: `firm` · `material` (ISO P/M/K/N/S/H) · `machine` · `coolant` · `process` · `tool_family` · `parameter` · `standard` · `literature` · `concept`
 
 ```bash

@@ -88,7 +88,8 @@ def test_promote_host_rule_creates_shared_skill(tmp_path: Path):
 def test_tiz_config_enables_shared_skills():
     cfg = load_config("config/tiz_cutting_tools.example.yaml")
     assert cfg.agents.agentic.learn_parsing_skills is True
-    assert cfg.agents.agentic.auto_promote_host_skills is True
+    # cyber default: no auto-promote without review
+    assert cfg.agents.agentic.auto_promote_host_skills is False
 
 
 def test_parsing_skill_tools_in_registry(tmp_path: Path):

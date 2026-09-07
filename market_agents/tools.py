@@ -45,6 +45,14 @@ from market_agents.product_tech import (
     extract_tech_schema,
 )
 from market_agents.polite_http import build_fetcher_from_config
+from market_agents.security import (
+    SecurityPolicy,
+    enforce_r2_key_prefix,
+    redact_secrets,
+    safe_error,
+    security_status,
+    validate_fetch_url,
+)
 
 
 ToolFn = Callable[[dict[str, Any]], dict[str, Any]]
@@ -83,6 +91,7 @@ class ToolRegistry:
         self.structured: list[dict[str, Any]] = []
         self._notion: NotionCollector | None = None
         self._r2 = None
+        self._security = self._build_security_policy(config)
         self._handlers: dict[str, ToolFn] = {
             "list_candidates": self.list_candidates,
             "fetch_and_parse": self.fetch_and_parse,
@@ -142,10 +151,31 @@ class ToolRegistry:
             "list_product_tech": self.list_product_tech,
             "register_product_tech": self.register_product_tech,
             "extract_product_tech_schema": self.extract_product_tech_schema,
+            "security_status": self.security_status_tool,
         }
         self._known: KnownFirmsIndex | None = None
         self._relations: FirmRelationsGraph | None = None
         self._ontology: MachiningOntology | None = None
+
+    @staticmethod
+    def _build_security_policy(config: AppConfig) -> SecurityPolicy:
+        sec = getattr(config.agents, "security", None)
+        if sec is None:
+            return SecurityPolicy()
+        return SecurityPolicy(
+            block_private_networks=bool(getattr(sec, "block_private_networks", True)),
+            allowed_hosts=list(getattr(sec, "allowed_hosts", None) or []),
+            allow_write_tools=bool(getattr(sec, "allow_write_tools", True)),
+            allow_notion_tools=bool(getattr(sec, "allow_notion_tools", True)),
+            allow_r2_tools=bool(getattr(sec, "allow_r2_tools", True)),
+            strict_tool_mode=bool(getattr(sec, "strict_tool_mode", False)),
+            redact_traces=bool(getattr(sec, "redact_traces", True)),
+            trace_tool_result_max_chars=int(
+                getattr(sec, "trace_tool_result_max_chars", 4000)
+            ),
+            fleet_allowlist_only=bool(getattr(sec, "fleet_allowlist_only", True)),
+            enforce_r2_prefix=bool(getattr(sec, "enforce_r2_prefix", True)),
+        )
 
     def _get_ontology(self) -> MachiningOntology:
         if self._ontology is None:
@@ -254,6 +284,17 @@ class ToolRegistry:
                             }
                         },
                     },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "security_status",
+                    "description": (
+                        "Status kontroli bezpieczeństwa: SSRF guard, tool policy "
+                        "(Notion/R2/write), redaction, fleet allowlist."
+                    ),
+                    "parameters": {"type": "object", "properties": {}},
                 },
             },
             {
@@ -1547,10 +1588,49 @@ class ToolRegistry:
         handler = self._handlers.get(name)
         if not handler:
             return {"ok": False, "error": f"unknown tool: {name}"}
+        allowed, reason = self._security.tool_allowed(name)
+        if not allowed:
+            return {"ok": False, "error": reason, "tool": name, "security": True}
+        # SSRF pre-check for common url args
+        url = str((arguments or {}).get("url") or "").strip()
+        if url and name in {
+            "fetch_and_parse",
+            "fetch_pdf_text",
+            "parse_media_page",
+            "parse_social_post",
+            "extract_fair_exhibitors",
+            "extract_domain_context",
+            "extract_product_tech_schema",
+        }:
+            try:
+                validate_fetch_url(
+                    url,
+                    allowed_hosts=self._security.allowed_hosts or None,
+                    allow_private=not self._security.block_private_networks,
+                )
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": safe_error(exc), "tool": name, "security": True}
         try:
-            return handler(arguments or {})
+            result = handler(arguments or {})
+            if self._security.redact_traces and isinstance(result, dict):
+                # lekka redakcja stringów w wyniku
+                for key, val in list(result.items()):
+                    if isinstance(val, str) and key in {
+                        "excerpt",
+                        "text",
+                        "content",
+                        "error",
+                        "summary",
+                    }:
+                        result[key] = redact_secrets(
+                            val, max_chars=self._security.trace_tool_result_max_chars
+                        )
+            return result
         except Exception as exc:  # noqa: BLE001
-            return {"ok": False, "error": str(exc), "tool": name}
+            return {"ok": False, "error": safe_error(exc), "tool": name}
+
+    def security_status_tool(self, args: dict[str, Any]) -> dict[str, Any]:
+        return security_status(self._security)
 
     def list_candidates(self, args: dict[str, Any]) -> dict[str, Any]:
         limit = int(args.get("limit") or 20)
@@ -1745,9 +1825,16 @@ class ToolRegistry:
         return {"ok": True, "hits": hits}
 
     def fetch_r2_object(self, args: dict[str, Any]) -> dict[str, Any]:
-        key = str(args.get("key") or "")
+        key = str(args.get("key") or "").strip()
         max_chars = int(args.get("max_chars") or 12000)
-        text = self._get_r2().get_text(key)
+        if not key:
+            return {"ok": False, "error": "key required"}
+        if self._security.enforce_r2_prefix:
+            try:
+                key = enforce_r2_key_prefix(key, self.config.sources.cloudflare_r2.prefix)
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": safe_error(exc), "security": True}
+        text = redact_secrets(self._get_r2().get_text(key), max_chars=max_chars)
         return {
             "ok": True,
             "key": key,

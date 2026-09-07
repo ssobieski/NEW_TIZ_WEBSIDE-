@@ -19,7 +19,7 @@ DEFAULT_USER_AGENT = (
 
 @dataclass
 class CrawlPolicy:
-    """Polityka anty-ban: bez bulk, z adaptacyjnym opóźnieniem per host."""
+    """Polityka anty-ban: bez bulk, z adaptacyjnym opóźnieniem per host + SSRF."""
 
     enabled: bool = True
     min_delay_seconds: float = 1.5
@@ -37,6 +37,11 @@ class CrawlPolicy:
     deny_path_prefixes: list[str] = field(
         default_factory=lambda: ["/cdn-cgi/", "/wp-admin/", "/cart", "/checkout"]
     )
+    block_private_networks: bool = True
+    resolve_dns_for_ssrf: bool = True
+    allowed_hosts: list[str] = field(default_factory=list)
+    max_redirects: int = 3
+    max_response_bytes: int = 15_000_000
 
 
 @dataclass
@@ -346,13 +351,28 @@ class AdaptivePoliteFetcher:
         timeout: float | None = None,
         max_retries: int | None = None,
     ) -> httpx.Response:
+        from market_agents.security import SecurityError, validate_fetch_url
+
+        try:
+            url = validate_fetch_url(
+                url,
+                allowed_hosts=self.policy.allowed_hosts or None,
+                allow_private=not bool(self.policy.block_private_networks),
+                resolve_dns=bool(self.policy.resolve_dns_for_ssrf),
+            )
+        except SecurityError as exc:
+            raise CrawlBlockedError(str(exc)) from exc
+
         if not self.policy.enabled:
             with httpx.Client(
                 timeout=timeout or self.policy.timeout_seconds,
                 follow_redirects=True,
+                max_redirects=max(0, int(self.policy.max_redirects)),
                 headers={"User-Agent": self.policy.user_agent, **(headers or {})},
             ) as client:
-                return client.request(method, url, headers=headers)
+                response = client.request(method, url, headers=headers)
+                self._assert_public_response(response)
+                return response
 
         host = self.host_of(url)
         if not host:
@@ -382,9 +402,11 @@ class AdaptivePoliteFetcher:
                 with httpx.Client(
                     timeout=timeout or self.policy.timeout_seconds,
                     follow_redirects=True,
+                    max_redirects=max(0, int(self.policy.max_redirects)),
                     headers=req_headers,
                 ) as client:
                     response = client.request(method, url)
+                self._assert_public_response(response)
                 latency = time.time() - started
                 self._host_state(host).last_request_at = time.time()
 
@@ -412,6 +434,17 @@ class AdaptivePoliteFetcher:
                     self._on_fail(host, response.status_code)
                     response.raise_for_status()
 
+                clen = response.headers.get("content-length")
+                max_bytes = int(self.policy.max_response_bytes)
+                if clen and int(clen) > max_bytes:
+                    raise CrawlBlockedError(
+                        f"response too large ({clen} > {max_bytes})"
+                    )
+                if len(response.content) > max_bytes:
+                    raise CrawlBlockedError(
+                        f"response too large ({len(response.content)} bytes)"
+                    )
+
                 self._on_success(host, latency, response.status_code)
                 return response
             except CrawlBlockedError:
@@ -437,6 +470,22 @@ class AdaptivePoliteFetcher:
         assert last_exc is not None
         raise last_exc
 
+    def _assert_public_response(self, response: httpx.Response) -> None:
+        """Po redirectach — sprawdź finalny host (SSRF via redirect)."""
+        if not self.policy.block_private_networks:
+            return
+        from market_agents.security import SecurityError, validate_fetch_url
+
+        try:
+            validate_fetch_url(
+                str(response.url),
+                allowed_hosts=self.policy.allowed_hosts or None,
+                allow_private=False,
+                resolve_dns=bool(self.policy.resolve_dns_for_ssrf),
+            )
+        except SecurityError as exc:
+            raise CrawlBlockedError(f"SSRF blocked after redirect: {exc}") from exc
+
     def get_text(self, url: str, **kwargs: Any) -> str:
         return self.get(url, **kwargs).text
 
@@ -446,9 +495,27 @@ class AdaptivePoliteFetcher:
 
 def build_fetcher_from_config(config: Any) -> AdaptivePoliteFetcher:
     crawl = getattr(getattr(config, "agents", None), "crawl", None)
+    security = getattr(getattr(config, "agents", None), "security", None)
     if crawl is None:
         policy = CrawlPolicy()
+        if security is not None:
+            policy.block_private_networks = bool(
+                getattr(security, "block_private_networks", True)
+            )
+            policy.allowed_hosts = list(getattr(security, "allowed_hosts", None) or [])
     else:
+        allowed = list(getattr(crawl, "allowed_hosts", None) or [])
+        if security is not None:
+            allowed = list(
+                dict.fromkeys(
+                    [*allowed, *(getattr(security, "allowed_hosts", None) or [])]
+                )
+            )
+        block_private = bool(getattr(crawl, "block_private_networks", True))
+        if security is not None:
+            block_private = block_private and bool(
+                getattr(security, "block_private_networks", True)
+            )
         policy = CrawlPolicy(
             enabled=bool(getattr(crawl, "enabled", True)),
             min_delay_seconds=float(getattr(crawl, "min_delay_seconds", 1.5)),
@@ -465,6 +532,11 @@ def build_fetcher_from_config(config: Any) -> AdaptivePoliteFetcher:
             ),
             timeout_seconds=float(getattr(crawl, "timeout_seconds", 35.0)),
             user_agent=str(getattr(crawl, "user_agent", DEFAULT_USER_AGENT)),
+            block_private_networks=block_private,
+            resolve_dns_for_ssrf=bool(getattr(crawl, "resolve_dns_for_ssrf", True)),
+            allowed_hosts=allowed,
+            max_redirects=int(getattr(crawl, "max_redirects", 3)),
+            max_response_bytes=int(getattr(crawl, "max_response_bytes", 15_000_000)),
         )
     data_dir = getattr(config, "data_path", None) or "data"
     return AdaptivePoliteFetcher.shared(policy=policy, data_dir=data_dir)

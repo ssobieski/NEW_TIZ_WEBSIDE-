@@ -190,7 +190,7 @@ class LlmConfig(BaseModel):
 
 
 class CrawlConfig(BaseModel):
-    """Adaptacyjny polite crawl — anty-bulk / anty-ban."""
+    """Adaptacyjny polite crawl — anty-bulk / anty-ban + SSRF guard."""
 
     enabled: bool = True
     min_delay_seconds: float = 1.5
@@ -207,6 +207,29 @@ class CrawlConfig(BaseModel):
     user_agent: str = (
         "MarketAgentsLocal/0.3 (+local research; polite adaptive crawler; contact: local-only)"
     )
+    # Cybersecurity / SSRF
+    block_private_networks: bool = True
+    resolve_dns_for_ssrf: bool = True
+    allowed_hosts: list[str] = Field(default_factory=list)
+    max_redirects: int = 3
+    max_response_bytes: int = 15_000_000
+
+
+class SecurityConfig(BaseModel):
+    """Polityka bezpieczeństwa agentów (SSRF, tool policy, fleet, redaction)."""
+
+    enabled: bool = True
+    block_private_networks: bool = True
+    allow_write_tools: bool = True
+    allow_notion_tools: bool = True
+    allow_r2_tools: bool = True
+    strict_tool_mode: bool = False
+    redact_traces: bool = True
+    trace_tool_result_max_chars: int = 4000
+    fleet_allowlist_only: bool = True
+    enforce_r2_prefix: bool = True
+    # opcjonalna allowlista hostów (pusta = wszystkie publiczne HTTP/S)
+    allowed_hosts: list[str] = Field(default_factory=list)
 
 
 class AgenticConfig(BaseModel):
@@ -222,7 +245,7 @@ class AgenticConfig(BaseModel):
     # Wspólna baza umiejętności parsowania (agenty uczą się razem)
     learn_parsing_skills: bool = True
     parsing_skills_path: str = "data/knowledge/parsing_skills.json"
-    auto_promote_host_skills: bool = True
+    auto_promote_host_skills: bool = False  # safer default (cyber)
 
 
 class FleetConfig(BaseModel):
@@ -249,6 +272,7 @@ class AgentsConfig(BaseModel):
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)
     fleet: FleetConfig = Field(default_factory=FleetConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
 
 
 class ScheduleConfig(BaseModel):
