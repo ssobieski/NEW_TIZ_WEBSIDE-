@@ -136,6 +136,77 @@ def test_entity_resolve_rewrites_crm_and_relations(tmp_path: Path):
     assert sandvik_distributor[0]["source"] == "Sandvik Coromant AB"
 
 
+def test_alias_chain_flattens_across_resolve_runs(tmp_path: Path):
+    """old → mid, then mid → canonical must rewrite CRM/relations to canonical."""
+    # Round 1: Old Co → Mid Co
+    reg = FirmProfileRegistry()
+    old = FirmProfile(id="old", company="Old Co", roles=["competitor"], sources=["seed"])
+    mid = FirmProfile(
+        id="mid",
+        company="Mid Co",
+        roles=["competitor"],
+        aliases=["Old Co"],
+        sources=["web"],
+        websites=[{"url": "https://mid.example", "primary": True}],
+    )
+    reg.profiles[old.id] = old
+    reg.profiles[mid.id] = mid
+    reg.save(tmp_path)
+
+    store = CrmTaskStore.load(tmp_path)
+    store.create(company="Old Co", title="Outreach", opportunity_score=80)
+    store.save(tmp_path)
+    g = FirmRelationsGraph()
+    g.add_relation("Old Co", "Partner GmbH", "partner_of", confidence=0.9)
+    g.save(tmp_path)
+
+    r1 = resolve_golden_records(tmp_path, dry_run=False)
+    assert r1["duplicate_groups"] >= 1
+    companies = {t.company for t in CrmTaskStore.load(tmp_path).tasks}
+    assert companies == {"Mid Co"}
+
+    # Round 2: Mid Co → Canonical Co (new profile wins on websites)
+    reg = FirmProfileRegistry.load(tmp_path)
+    # Drop leftover Mid if already alone; add Canonical with Mid as alias duplicate
+    canon = FirmProfile(
+        id="canon",
+        company="Canonical Co",
+        roles=["competitor"],
+        aliases=["Mid Co"],
+        sources=["web", "crm"],
+        websites=[
+            {"url": "https://canonical.example", "primary": True},
+            {"url": "https://mid.example"},
+        ],
+    )
+    # Ensure Mid still present so they form a duplicate group
+    if "mid" not in reg.profiles and not any(p.company == "Mid Co" for p in reg.profiles.values()):
+        reg.profiles["mid"] = FirmProfile(id="mid", company="Mid Co", roles=["competitor"], sources=["seed"])
+    reg.profiles[canon.id] = canon
+    reg.save(tmp_path)
+
+    r2 = resolve_golden_records(tmp_path, dry_run=False)
+    assert r2["duplicate_groups"] >= 1
+
+    companies = {t.company for t in CrmTaskStore.load(tmp_path).tasks}
+    assert companies == {"Canonical Co"}
+
+    rel = FirmRelationsGraph.load(tmp_path, include_seed=False)
+    partner_edges = [
+        e for e in rel.edges if e.get("relation_type") == "partner_of" and "partner" in str(e.get("target") or "").lower()
+    ]
+    assert partner_edges
+    assert all(e["source"] == "Canonical Co" for e in partner_edges)
+    assert not any(e["source"] in {"Old Co", "Mid Co"} for e in partner_edges)
+
+    from market_agents.entity_resolution import load_alias_map
+    from market_agents.firms import normalize_firm_name
+
+    aliases = load_alias_map(tmp_path)
+    assert aliases[normalize_firm_name("Old Co")] == "Canonical Co"
+    assert aliases[normalize_firm_name("Mid Co")] == "Canonical Co"
+
+
 def test_post_enrich_marks_step_ok_false(tmp_path: Path):
     """Enabled step returning {ok: False} must fail overall post_enrich."""
     cfg = _cfg(tmp_path)

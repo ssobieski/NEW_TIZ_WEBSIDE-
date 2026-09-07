@@ -58,8 +58,9 @@ def merge_profiles(primary: FirmProfile, *others: FirmProfile) -> FirmProfile:
     cur = primary
     for o in others:
         cur = FirmProfileRegistry._merge(cur, o)
-        # keep stable id of primary
+        # keep stable id and display name of primary (_merge prefers new.company)
         cur.id = primary.id
+        cur.company = primary.company
         cur.aliases = list(
             dict.fromkeys(
                 cur.aliases
@@ -83,11 +84,29 @@ def _alias_map_from_merges(merges: list[dict[str, Any]]) -> dict[str, str]:
         mapping[normalize_firm_name(keep)] = keep
         for name in m.get("merge") or []:
             mapping[normalize_firm_name(str(name))] = keep
+        for name in m.get("merge_aliases") or []:
+            mapping[normalize_firm_name(str(name))] = keep
     return mapping
 
 
 def _alias_map_path(data_dir: Path | str) -> Path:
     return Path(data_dir) / "knowledge" / "firm_aliases.json"
+
+
+def flatten_alias_map(alias_map: dict[str, str]) -> dict[str, str]:
+    """Resolve chains so every key maps directly to the terminal canonical name."""
+    flat = {str(k): str(v) for k, v in (alias_map or {}).items() if k and v}
+    changed = True
+    guard = 0
+    while changed and guard < 32:
+        changed = False
+        guard += 1
+        for k, v in list(flat.items()):
+            nxt = flat.get(normalize_firm_name(v))
+            if nxt and nxt != v:
+                flat[k] = nxt
+                changed = True
+    return flat
 
 
 def load_alias_map(data_dir: Path | str) -> dict[str, str]:
@@ -104,7 +123,7 @@ def load_alias_map(data_dir: Path | str) -> dict[str, str]:
     for k, v in raw.items():
         if k and v:
             out[str(k)] = str(v)
-    return out
+    return flatten_alias_map(out)
 
 
 def save_alias_map(data_dir: Path | str, alias_map: dict[str, str]) -> Path:
@@ -116,15 +135,7 @@ def save_alias_map(data_dir: Path | str, alias_map: dict[str, str]) -> Path:
     for k, v in (alias_map or {}).items():
         if k and v:
             merged[str(k)] = str(v)
-    # Follow chains: alias → mid → keep becomes alias → keep
-    changed = True
-    while changed:
-        changed = False
-        for k, v in list(merged.items()):
-            nxt = merged.get(normalize_firm_name(v))
-            if nxt and nxt != v:
-                merged[k] = nxt
-                changed = True
+    merged = flatten_alias_map(merged)
     path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 
@@ -220,6 +231,11 @@ def resolve_golden_records(
                 "keep_id": primary.id,
                 "merge": [o.company for o in others],
                 "merge_ids": [o.id for o in others],
+                "merge_aliases": [
+                    a
+                    for o in others
+                    for a in ([o.company, *list(o.aliases or [])])
+                ],
             }
         )
         if dry_run:
@@ -240,7 +256,7 @@ def resolve_golden_records(
         alias_map = _alias_map_from_merges(merges)
         # Merge with any prior aliases so seed remaps stay complete across runs.
         prior = load_alias_map(data_dir)
-        alias_map = {**prior, **alias_map}
+        alias_map = flatten_alias_map({**prior, **alias_map})
         crm_rewritten = rewrite_crm_companies(data_dir, alias_map)
         relations_rewritten = rewrite_relation_endpoints(data_dir, alias_map)
     return {
