@@ -87,3 +87,10 @@ python -m market_agents governance revoke --id <grant_id>
 ```
 
 Granty: `data/governance/approvals.json`.
+
+## Relacja do cybersecurity
+
+| Warstwa | Odpowiedzialność |
+|---------|------------------|
+| `security.py` | SSRF, secrets, path/R2/fleet, twarde tiery tooli |
+| `governance.py` | Policy-as-code, role, approval grants, rate limits, CutData deny |

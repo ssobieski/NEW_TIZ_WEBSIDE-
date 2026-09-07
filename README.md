@@ -126,6 +126,21 @@ Założenia: `config/prospect_assumptions.json` · seed: `config/prospects.seed.
 Tooli: `analyze_prospect`, `list_prospects`, `get_prospect_profile`, `prospect_scoreboard`,
 `estimate_tooling_budget`, `ingest_prospect_seeds`.
 
+## Architecture hardening (P0–P6)
+
+1. ParsingAgent procedura obejmuje **profiles + prospects + CRM tasks**
+2. Fleet publish: ontology, firm_profiles, pricelists, literature, product_tech, crm_tasks
+3. Po `run`: post-enrich profiles + CRM z hot prospectów
+4. `governance approve|revoke|approvals` — operator allowlist
+5. Testy: schema↔handler parity, orchestrator smoke, fleet publish
+6. CRM lokalny (`crm` CLI) + split `market_agents/tooling/` (shim `tools.py`)
+
+```bash
+python -m market_agents governance approve --tool promote_host_skill --by ops
+python -m market_agents crm sync-prospects
+python -m market_agents crm list
+```
+
 ## Uruchomienie na Dellu
 
 ```bash
