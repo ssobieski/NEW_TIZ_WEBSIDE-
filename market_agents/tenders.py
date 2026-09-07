@@ -69,7 +69,7 @@ _INTENT_PATTERNS: list[tuple[str, Intent, float]] = [
     ),
     (
         r"(?i)\b(?:przetarg|zapytanie\s+ofertowe|ZO|RFP|RFQ|ITT)\b.{0,40}?"
-        r"(?:na|dla|dotycząc)",
+        r"(?:\bna\b|\bdla\b|dotycząc)",
         "announced_tender",
         0.85,
     ),
@@ -96,8 +96,9 @@ _INTENT_PATTERNS: list[tuple[str, Intent, float]] = [
         0.8,
     ),
     (
-        r"(?i)\b(?:zakupi[łła]|kupi[łła]|naby[łła]|odebra[łła]|zainstalowa[łła]|"
-        r"wdroży[łła]|uruchomi[łła])\b",
+        r"(?i)\b(?:zakupi(?:ł|ła|ło|li)|kupi(?:ł|ła|ło|li)|naby(?:ł|ła|ło|li)|"
+        r"odebra(?:ł|ła|ło|li)|zainstalowa(?:ł|ła|ło|li)|"
+        r"wdroży(?:ł|ła|ło|li)|uruchomi(?:ł|ła|ło|li))\b",
         "purchased",
         0.85,
     ),
@@ -328,9 +329,20 @@ def parse_tender_text(
     ]
     company_norm = normalize_firm_name(company or "")
     if company_norm:
-        for c in candidates:
+        for idx, c in enumerate(candidates):
             if company_norm in normalize_firm_name(c.get("company") or ""):
-                return c
+                chosen = dict(c)
+                chosen["related_signals"] = [
+                    {
+                        "company": o.get("company"),
+                        "intent": o.get("intent"),
+                        "equipment": [e.get("kind") for e in (o.get("equipment") or [])[:4]],
+                        "confidence": o.get("confidence"),
+                    }
+                    for j, o in enumerate(candidates)
+                    if j != idx and o.get("tender_relevant")
+                ][:5]
+                return chosen
     candidates.sort(
         key=lambda c: (
             1 if c.get("tender_relevant") else 0,
@@ -365,22 +377,36 @@ def _parse_tender_block(
     intent, conf, evidence = detect_intent(blob)
     equipment = extract_equipment(blob)
     extracted = extract_company_hint(blob, fallback=None)
+    # Explicit company always wins; keep extract in meta when it disagrees.
+    extracted_company = None
     if company and company.strip():
-        # Explicit company wins when extract is empty or clearly the same firm.
-        if (
-            not extracted
-            or normalize_firm_name(company) in normalize_firm_name(extracted)
-            or normalize_firm_name(extracted) in normalize_firm_name(company)
-        ):
-            company_name = company.strip()
-        else:
-            company_name = extracted
+        company_name = company.strip()
+        if extracted and normalize_firm_name(extracted) not in {
+            normalize_firm_name(company),
+            "",
+        } and normalize_firm_name(company) not in normalize_firm_name(extracted):
+            extracted_company = extracted
     else:
         company_name = extracted
     value_eur, value_text = extract_value(blob)
     deadline = extract_deadline(blob)
     cpv = extract_cpv(blob)
     reference = extract_reference(blob)
+
+    # Soft-gate generic "bought/installed" without machining/equipment context
+    _machining_ctx = bool(
+        equipment
+        or cpv
+        or re.search(
+            r"(?i)\b(?:cnc|obrabiark|maszyn\w*|machine\s+tool|tokark|frezar|"
+            r"przetarg|tender|machining|cutting\s+tool|oprawk|toolholder)\b",
+            blob,
+        )
+    )
+    if intent == "purchased" and not _machining_ctx:
+        intent = "other"
+        conf = min(conf, 0.35)
+        evidence = (evidence or "") + " [no machining context]"
 
     if equipment:
         conf = min(1.0, conf + 0.05)
@@ -394,7 +420,7 @@ def _parse_tender_block(
         evidence = evidence or "equipment + purchase/tender context"
 
     summary = (title or blob[:240]).strip()
-    return {
+    out: dict[str, Any] = {
         "ok": True,
         "company": company_name,
         "intent": intent,
@@ -410,8 +436,12 @@ def _parse_tender_block(
         "evidence": evidence,
         "url": url,
         "source": source,
-        "tender_relevant": intent != "other" or bool(equipment),
+        # Intent required — equipment alone is not a tender/purchase signal
+        "tender_relevant": intent != "other",
     }
+    if extracted_company:
+        out["extracted_company"] = extracted_company
+    return out
 
 
 def parse_tender_html(
@@ -474,11 +504,29 @@ class TenderRegistry:
                 and existing.url
                 and existing.url == signal.url
             ):
-                merged = TenderSignal.from_dict({**existing.to_dict(), **signal.to_dict()})
+                # Field-wise merge: never wipe non-empty fields with empties
+                base = existing.to_dict()
+                incoming = signal.to_dict()
+                merged_raw: dict[str, Any] = dict(base)
+                for field_name, new_val in incoming.items():
+                    if field_name in {"id", "created_at"}:
+                        continue
+                    if new_val is None or new_val == "" or new_val == []:
+                        continue
+                    if field_name == "confidence":
+                        merged_raw[field_name] = max(
+                            float(base.get("confidence") or 0),
+                            float(new_val or 0),
+                        )
+                        continue
+                    if field_name == "equipment":
+                        continue  # merged below
+                    merged_raw[field_name] = new_val
+                merged = TenderSignal.from_dict(merged_raw)
                 merged.id = existing.id
                 merged.created_at = existing.created_at
                 merged.updated_at = utc_now_iso()
-                # merge equipment kinds
+                # Prefer richer equipment set
                 seen = {e.get("kind") for e in (existing.equipment or [])}
                 eq = list(existing.equipment or [])
                 for e in signal.equipment or []:
@@ -541,7 +589,7 @@ def ingest_tender_analysis(
     update_profile: bool = True,
 ) -> dict[str, Any]:
     """Persist parsed signal; optionally touch firm profile + CRM."""
-    if not analysis.get("tender_relevant") and analysis.get("intent") == "other":
+    if not analysis.get("tender_relevant"):
         return {"ok": False, "error": "not tender-relevant", "analysis": analysis}
 
     company = str(analysis.get("company") or "").strip()
@@ -627,7 +675,11 @@ def _attach_to_profile(signal: TenderSignal, data_dir: Path | str) -> dict[str, 
         p.sources = list(dict.fromkeys([*(p.sources or []), "tenders"]))
     eq_labels = ", ".join(e.get("label") or e.get("kind") or "" for e in signal.equipment[:3])
     snip = f"[{signal.intent}] {eq_labels or signal.title}".strip()
-    p.notes = ((p.notes or "") + "\n" + snip).strip()[:4000]
+    note_tag = f"[tender:{signal.id}]"
+    tagged = f"{note_tag} {snip}"
+    lines = [ln for ln in (p.notes or "").split("\n") if ln.strip() and note_tag not in ln and snip not in ln]
+    lines.append(tagged)
+    p.notes = "\n".join(lines).strip()[:4000]
     reg.upsert(p)
     reg.save(data_dir)
     return {"company": p.company, "id": p.id, "tenders": len(tenders)}

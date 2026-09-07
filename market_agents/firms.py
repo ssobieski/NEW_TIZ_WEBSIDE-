@@ -76,6 +76,9 @@ def normalize_firm_name(name: str) -> str:
     """Normalizacja do porównań: lowercase, bez formy prawnej / znaków specjalnych."""
     text = (name or "").lower().strip()
     text = re.sub(r"[\"'`]", "", text)
+    # Polish / DE / EN legal forms before stripping punctuation
+    text = re.sub(r"\bsp\.?\s*z\.?\s*o\.?\s*o\.?\b", " ", text)
+    text = re.sub(r"\bs\.?\s*k\.?\s*a\.?\b", " ", text)
     text = re.sub(
         r"\b(gmbh|ag|sa|s\.a\.|spa|s\.p\.a\.|ltd|limited|llc|inc|corp|corporation|"
         r"co\.|company|group|tools|tooling|cutting\s+tools?)\b",
@@ -83,6 +86,8 @@ def normalize_firm_name(name: str) -> str:
         text,
     )
     text = re.sub(r"[^a-z0-9ąćęłńóśźż\s-]", " ", text)
+    # leftover after punctuation strip: "sp z o o"
+    text = re.sub(r"\bsp\s+z\s+o\s+o\b", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 

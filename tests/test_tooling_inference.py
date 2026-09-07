@@ -129,3 +129,66 @@ def test_crm_dedupe_tender_and_prospect(tmp_path: Path):
     assert len(again.list(status="open")) == 1
     sources = (again.tasks[0].meta or {}).get("sources") or []
     assert "tender" in sources and "prospect" in sources
+
+
+def test_crm_dedupe_normalizes_legal_form(tmp_path: Path):
+    from market_agents.crm_tasks import CrmTaskStore
+
+    store = CrmTaskStore.load(tmp_path)
+    t1, _ = store.create(
+        company="Acme",
+        title="Prospect: Acme",
+        source="prospect",
+        dedupe_by_company=True,
+        opportunity_score=70,
+        priority="medium",
+    )
+    t2, created = store.create(
+        company="Acme Sp. z o.o.",
+        title="Przetarg: tokarka",
+        source="tender",
+        dedupe_by_company=True,
+        opportunity_score=85,
+        priority="hot",
+    )
+    assert created is False
+    assert t2.id == t1.id
+    assert t2.priority == "hot"
+
+
+def test_rules_load_from_other_cwd(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rules = load_tooling_rules()
+    assert rules.get("product_families")
+    assert "injection_molds" in rules["product_families"]
+
+
+def test_citizen_brand_maps_to_lathe():
+    cats = detect_equipment_categories(
+        "Citizen L20 Swiss-type and Index G200.",
+        brand_equipment=[
+            {"brand": "Citizen", "quality_tier": "premium"},
+            {"brand": "Index", "quality_tier": "premium"},
+        ],
+    )
+    ids = {c["category"] for c in cats}
+    assert "cnc_lathe" in ids
+
+
+def test_dmg_nlx_maps_to_lathe():
+    cats = detect_equipment_categories(
+        "Park: DMG MORI NLX 2500.",
+        brand_equipment=[{"brand": "DMG MORI", "quality_tier": "premium"}],
+    )
+    ids = {c["category"] for c in cats}
+    assert "cnc_lathe" in ids
+
+
+def test_peer_same_family_no_gap_fill():
+    peers = apply_peer_rules(
+        product_families=[{"id": "injection_molds"}],
+        vertical="mold_die",
+    )
+    mold = next(p for p in peers if p.get("rule_id") == "mold_peers_share_tooling")
+    assert mold.get("gap_fill") is False
+    assert mold.get("practical_tools") == []

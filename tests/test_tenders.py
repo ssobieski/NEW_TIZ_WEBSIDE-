@@ -85,6 +85,80 @@ def test_ingest_updates_profile_and_crm(tmp_path: Path):
     assert any(t.source == "tender" for t in crm.tasks)
 
 
+def test_następnie_not_announced_tender():
+    """`na` inside `następnie` must not flip purchase news to announced_tender."""
+    text = (
+        "Acme Aerospace kupiła tokarkę CNC, a następnie zainstalowała centrum obróbcze."
+    )
+    intent, _, _ = detect_intent(text)
+    assert intent != "announced_tender"
+    assert intent == "purchased"
+
+
+def test_upsert_preserves_nonempty_fields(tmp_path: Path):
+    from market_agents.tenders import TenderSignal
+
+    reg = TenderRegistry.load(tmp_path)
+    full = TenderSignal(
+        id="abc123def456",
+        company="Beta Precision CNC",
+        intent="announced_tender",
+        equipment=[{"kind": "cnc_mill", "label": "centrum"}],
+        title="Przetarg CNC",
+        value_eur=1000.0,
+        deadline="15.10.2026",
+        evidence="ogłoszono przetarg",
+        url="https://example.com/tender",
+        confidence=0.9,
+    )
+    reg.upsert(full)
+    weak = TenderSignal(
+        id="abc123def456",
+        company="Beta Precision CNC",
+        intent="announced_tender",
+        equipment=[],
+        title="Przetarg CNC",
+        value_eur=None,
+        deadline="",
+        evidence="",
+        url="https://example.com/tender",
+        confidence=0.5,
+    )
+    merged = reg.upsert(weak)
+    assert merged.value_eur == 1000.0
+    assert merged.deadline == "15.10.2026"
+    assert merged.evidence == "ogłoszono przetarg"
+    assert merged.confidence == 0.9
+    assert merged.equipment
+
+
+def test_software_buy_not_ingested(tmp_path: Path):
+    analysis = parse_tender_text(
+        "Acme Corp installed new ERP software and bought cloud licenses.",
+        company="Acme Corp",
+    )
+    assert analysis.get("tender_relevant") is False
+    result = ingest_tender_analysis(analysis, tmp_path)
+    assert result.get("ok") is False
+
+
+def test_equipment_only_without_intent_not_relevant():
+    analysis = parse_tender_text(
+        "Firma Delta używa oprawek HAIMER i toolholders w warsztacie.",
+        company="Delta",
+    )
+    assert analysis.get("intent") == "other"
+    assert analysis.get("tender_relevant") is False
+
+
+def test_explicit_company_wins():
+    analysis = parse_tender_text(
+        SAMPLE_ANNOUNCED,
+        company="Operator Override Sp. z o.o.",
+    )
+    assert "Override" in (analysis.get("company") or "")
+
+
 def test_tools_parse_and_list_tenders(tmp_path: Path):
     cfg = AppConfig(
         industry=IndustryConfig(name="Test", keywords=["cnc", "przetarg"]),

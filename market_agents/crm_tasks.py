@@ -13,8 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from market_agents.firms import normalize_firm_name
+
 TaskStatus = Literal["open", "in_progress", "done", "cancelled"]
 TaskPriority = Literal["low", "medium", "high", "hot"]
+
+_PRIORITY_RANK: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "hot": 3}
 
 
 def utc_now_iso() -> str:
@@ -130,9 +134,14 @@ class CrmTaskStore:
             else:
                 priority = "medium"
         meta_in = dict(meta or {})
+        company_norm = normalize_firm_name(company)
         # dedupe open tasks for same company+similar title, or whole company
         for t in self.tasks:
-            same_company = t.company.lower() == company.lower()
+            same_company = (
+                normalize_firm_name(t.company) == company_norm
+                if company_norm
+                else t.company.lower() == company.lower()
+            )
             title_match = not title or t.title.lower() == (title or "").lower()
             company_lead = dedupe_by_company and same_company and t.status in {
                 "open",
@@ -158,7 +167,11 @@ class CrmTaskStore:
                     t.meta["alt_titles"] = alts[:8]
                 if meta_in:
                     t.meta = dict(t.meta or {})
-                    t.meta.update(meta_in)
+                    # preserve existing keys unless new value is non-empty
+                    for k, v in meta_in.items():
+                        if v is None or v == "" or v == []:
+                            continue
+                        t.meta[k] = v
                 if source:
                     # track multi-source lead
                     t.meta = dict(t.meta or {})
@@ -168,7 +181,7 @@ class CrmTaskStore:
                     t.meta["sources"] = sources[:8]
                     if not t.source or t.source == "local":
                         t.source = source
-                if priority == "hot" and t.priority != "hot":
+                if _PRIORITY_RANK.get(priority, 0) > _PRIORITY_RANK.get(t.priority, 0):
                     t.priority = priority
                 return t, False
         task = CrmTask(

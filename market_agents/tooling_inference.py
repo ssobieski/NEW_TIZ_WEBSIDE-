@@ -14,19 +14,84 @@ Reguły: config/tooling_inference.rules.json
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
-DEFAULT_RULES_PATH = Path("config/tooling_inference.rules.json")
+_LOG = logging.getLogger(__name__)
+
+# Resolve relative to repo root (parent of market_agents/), not CWD.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RULES_PATH = _REPO_ROOT / "config" / "tooling_inference.rules.json"
+
+_LATHE_BRANDS = (
+    "citizen",
+    "index",
+    "traub",
+    "star",
+    "tsugami",
+    "nakamura",
+    "hardinge",
+    "miyano",
+    "goodway",
+    "takisawa",
+    "emco",
+    "weiler",
+)
+_MILL_BRANDS = (
+    "mazak",
+    "haas",
+    "dmg",
+    "doosan",
+    "hyundai",
+    "makino",
+    "hermle",
+    "grob",
+    "brother",
+    "kitamura",
+    "mikron",
+    "gf machining",
+    "syil",
+    "tormach",
+)
+_LATHE_MODEL_HINTS = (
+    "nlx",
+    "integrex",
+    "multus",
+    "swiss",
+    "sliding head",
+    "tokark",
+    "lathe",
+    "turning",
+)
+_MILL_MODEL_HINTS = (
+    "vmc",
+    "hmc",
+    "dmu",
+    "dmx",
+    "c42",
+    "c400",
+    "vf-",
+    "mill",
+    "frezar",
+    "5-axis",
+    "5 axis",
+)
 
 
 def load_tooling_rules(path: Path | str | None = None) -> dict[str, Any]:
-    path = Path(path or DEFAULT_RULES_PATH)
+    path = Path(path) if path else DEFAULT_RULES_PATH
+    if not path.is_file() and not path.is_absolute():
+        alt = _REPO_ROOT / path
+        if alt.is_file():
+            path = alt
     if not path.is_file():
+        _LOG.warning("tooling rules not found: %s", path)
         return {"product_families": {}, "equipment_to_tools": {}, "peer_rules": []}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _LOG.warning("tooling rules load failed (%s): %s", path, exc)
         return {"product_families": {}, "equipment_to_tools": {}, "peer_rules": []}
     return raw if isinstance(raw, dict) else {}
 
@@ -63,6 +128,27 @@ def detect_product_families(
     return found
 
 
+def _brand_to_category(brand: str, *, text_low: str = "") -> list[str]:
+    """Return one or more equipment categories for a machine brand mention."""
+    b = (brand or "").lower().strip()
+    if not b:
+        return ["cnc_mill"]
+    idx = text_low.find(b) if text_low else -1
+    window = text_low[max(0, idx - 5) : idx + len(b) + 48] if idx >= 0 else b
+    cats: list[str] = []
+    lathe_hit = any(x in b for x in _LATHE_BRANDS) or any(h in window for h in _LATHE_MODEL_HINTS)
+    mill_hit = any(x in b for x in _MILL_BRANDS) or any(h in window for h in _MILL_MODEL_HINTS)
+    if lathe_hit:
+        cats.append("cnc_lathe")
+    if mill_hit and "cnc_lathe" not in cats:
+        cats.append("cnc_mill")
+    elif mill_hit and lathe_hit and any(h in window for h in _MILL_MODEL_HINTS):
+        cats.append("cnc_mill")
+    if not cats:
+        cats.append("cnc_mill")
+    return cats
+
+
 def detect_equipment_categories(
     text: str,
     *,
@@ -95,12 +181,10 @@ def detect_equipment_categories(
         )
     # Brand machines from detect_equipment → soft map to mill/lathe
     for row in brand_equipment or []:
-        brand = str(row.get("brand") or "").lower()
-        cat = "cnc_mill"
-        if any(x in brand for x in ("okuma", "mazak", "haas", "dmg", "doosan", "hyundai", "makino", "hermle", "grob")):
-            # unknown — keep mill as default for machining centers; lathe brands weaker signal
-            cat = "cnc_mill"
-        if cat not in seen:
+        brand = str(row.get("brand") or "")
+        for cat in _brand_to_category(brand, text_low=low):
+            if cat in seen:
+                continue
             seen.add(cat)
             meta = (rules.get("equipment_to_tools") or {}).get(cat) or {}
             found.append(
@@ -141,15 +225,18 @@ def apply_peer_rules(
         src = families.get(src_id) or {}
         if not src:
             continue
+        # Same family already detected → annotate peer match for UI, but no tool echo.
+        gap_fill = src_id not in fam_ids
         applied.append(
             {
                 "rule_id": rule.get("id"),
                 "rationale": rule.get("rationale") or "",
                 "from_family": src_id,
-                "practical_tools": list(src.get("practical_tools") or []),
-                "workholding": list(src.get("workholding") or []),
-                "theoretical_process": list(src.get("theoretical_process") or []),
-                "typical_materials": list(src.get("typical_materials") or []),
+                "gap_fill": gap_fill,
+                "practical_tools": list(src.get("practical_tools") or []) if gap_fill else [],
+                "workholding": list(src.get("workholding") or []) if gap_fill else [],
+                "theoretical_process": list(src.get("theoretical_process") or []) if gap_fill else [],
+                "typical_materials": list(src.get("typical_materials") or []) if gap_fill else [],
             }
         )
     return applied
@@ -192,6 +279,8 @@ def infer_customer_tooling(
         # map process steps that look like known process keys
         for step in fam.get("theoretical_process") or []:
             s = str(step).lower()
+            if "5_axis" in s or "5-axis" in s:
+                processes.append("5_axis")
             if "mill" in s or "hsm" in s:
                 processes.append("milling" if "hsm" not in s else "hsm")
             if "turn" in s or "swiss" in s:
@@ -225,7 +314,8 @@ def infer_customer_tooling(
             }
         )
 
-    for peer in peers:
+    gap_peers = [p for p in peers if p.get("gap_fill")]
+    for peer in gap_peers:
         theoretical.extend(peer.get("theoretical_process") or [])
         materials.extend(peer.get("typical_materials") or [])
         tools.extend(peer.get("practical_tools") or [])
@@ -241,14 +331,14 @@ def infer_customer_tooling(
     def _dedupe(rows: list[str]) -> list[str]:
         return list(dict.fromkeys(str(x) for x in rows if x))
 
-    # Confidence: more independent sources → higher
+    # Confidence: more independent sources → higher (peer echo of same family excluded)
     src_kinds = {e.get("source") for e in evidence}
     conf = 0.35
     if families:
         conf += 0.2
     if equipment_cats:
         conf += 0.15
-    if peers:
+    if gap_peers:
         conf += 0.15
     if process_hint:
         conf += 0.1
