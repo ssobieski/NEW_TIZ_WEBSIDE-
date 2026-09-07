@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Start vLLM na Dellu z 4x NVIDIA A100 — OpenAI-compatible API dla agentów.
-# Wymaga: CUDA, vllm, model na dysku/HF cache.
+# Start vLLM on Dell A100s — OpenAI-compatible API for market agents.
+# Requires: CUDA, vllm, model on disk / HF cache.
+# Note: attention heads must be divisible by tensor parallel size
+# (Qwen2.5-72B = 64 heads → TP ∈ {1,2,4,8,…}; with 3 GPUs use TP=2).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -35,7 +37,9 @@ fi
 
 MODEL="${MODEL:-Qwen/Qwen2.5-72B-Instruct-AWQ}"
 PORT="${PORT:-8000}"
-TP="${TP:-4}"                 # 4x A100
+REQUESTED_TP="${TP:-4}"
+# Qwen2.5-72B = 64 heads; override if you change MODEL to another arch.
+ATTN_HEADS="${ATTN_HEADS:-64}"
 GPU_UTIL="${GPU_UTIL:-0.90}"
 MAX_LEN="${MAX_LEN:-32768}"
 HOST="${HOST:-0.0.0.0}"
@@ -45,12 +49,29 @@ if [[ "${GPU_COUNT}" -lt 1 ]]; then
   echo "ERROR: 0 GPU widocznych dla nvidia-smi"
   exit 1
 fi
-if [[ "${GPU_COUNT}" -lt "$TP" ]]; then
-  echo "WARN: GPU_COUNT=$GPU_COUNT < TP=$TP — obniżam TP do $GPU_COUNT"
-  TP="$GPU_COUNT"
+
+# TP must satisfy ATTN_HEADS % TP == 0 and TP <= GPU_COUNT.
+pick_tp() {
+  local gpus="$1" heads="$2" want="$3" t
+  if [[ "${want}" -le "${gpus}" && $((heads % want)) -eq 0 ]]; then
+    echo "${want}"
+    return
+  fi
+  for (( t=gpus; t>=1; t-- )); do
+    if (( heads % t == 0 )); then
+      echo "${t}"
+      return
+    fi
+  done
+  echo 1
+}
+
+TP="$(pick_tp "${GPU_COUNT}" "${ATTN_HEADS}" "${REQUESTED_TP}")"
+if [[ "${REQUESTED_TP}" != "${TP}" ]]; then
+  echo "WARN: TP=${REQUESTED_TP} niepasujący do GPU_COUNT=${GPU_COUNT} / heads=${ATTN_HEADS} — używam TP=${TP}"
 fi
 
-echo "==> vLLM model=$MODEL tp=$TP port=$PORT max_len=$MAX_LEN python=$PYTHON gpus=$GPU_COUNT"
+echo "==> vLLM model=$MODEL tp=$TP port=$PORT max_len=$MAX_LEN python=$PYTHON gpus=$GPU_COUNT heads=$ATTN_HEADS"
 
 exec "$PYTHON" -m vllm.entrypoints.openai.api_server \
   --model "$MODEL" \
