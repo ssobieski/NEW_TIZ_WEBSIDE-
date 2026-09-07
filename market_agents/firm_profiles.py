@@ -28,6 +28,7 @@ FirmRole = Literal[
     "distributor",
     "dealer",
     "customer",
+    "prospect",
     "partner",
     "unknown",
 ]
@@ -164,6 +165,7 @@ class FirmProfile:
     assets: dict[str, Any] = field(default_factory=dict)
     network: dict[str, Any] = field(default_factory=dict)
     scores: dict[str, Any] = field(default_factory=dict)
+    prospect: dict[str, Any] = field(default_factory=dict)
     product_focus: str = ""
     notes: str = ""
     sources: list[str] = field(default_factory=list)
@@ -197,6 +199,7 @@ class FirmProfile:
             assets=dict(raw.get("assets") or {}),
             network=dict(raw.get("network") or {}),
             scores=dict(raw.get("scores") or {}),
+            prospect=dict(raw.get("prospect") or {}),
             product_focus=str(raw.get("product_focus") or ""),
             notes=str(raw.get("notes") or raw.get("presentation") or "")[:4000],
             sources=[str(s) for s in (raw.get("sources") or [])],
@@ -546,6 +549,8 @@ class FirmProfileRegistry:
                 "signals": (old.financial or {}).get("signals", [])
                 + (new.financial or {}).get("signals", []),
                 "notes": (new.financial or {}).get("notes") or (old.financial or {}).get("notes") or "",
+                "tooling_budget": (new.financial or {}).get("tooling_budget")
+                or (old.financial or {}).get("tooling_budget"),
             },
             public_relations=new.public_relations or old.public_relations,
             assets={
@@ -588,6 +593,7 @@ class FirmProfileRegistry:
                 )
             },
             scores=new.scores or old.scores,
+            prospect=new.prospect or old.prospect,
             product_focus=new.product_focus or old.product_focus,
             notes=(new.notes or old.notes)[:4000],
             sources=list(dict.fromkeys(old.sources + new.sources)),

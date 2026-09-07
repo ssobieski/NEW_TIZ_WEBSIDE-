@@ -31,6 +31,13 @@ from market_agents.firm_profiles import (
     firm_id_from_name,
     score_sentiment,
 )
+from market_agents.prospects import (
+    ProspectRegistry,
+    analyze_prospect_html,
+    analyze_prospect_text,
+    estimate_tooling_budget,
+    load_vertical_assumptions,
+)
 from market_agents.firms import KnownFirmsIndex, extract_candidate_firm_names, filter_new_firms
 from market_agents.literature import LITERATURE_KINDS, LiteratureRegistry, classify_literature_kind
 from market_agents.memory import MarketMemory
@@ -152,6 +159,12 @@ class ToolRegistry:
             "upsert_firm_profile": self.upsert_firm_profile,
             "enrich_firm_profile": self.enrich_firm_profile,
             "register_social_mention": self.register_social_mention,
+            "list_prospects": self.list_prospects,
+            "get_prospect_profile": self.get_prospect_profile,
+            "prospect_scoreboard": self.prospect_scoreboard,
+            "analyze_prospect": self.analyze_prospect,
+            "estimate_tooling_budget": self.estimate_tooling_budget_tool,
+            "ingest_prospect_seeds": self.ingest_prospect_seeds,
             "list_parse_rules": self.list_parse_rules,
             "upsert_parse_rule": self.upsert_parse_rule,
             "rate_parse": self.rate_parse,
@@ -1351,6 +1364,7 @@ class ToolRegistry:
                                     "distributor",
                                     "dealer",
                                     "customer",
+                                    "prospect",
                                     "partner",
                                     "unknown",
                                 ],
@@ -1493,6 +1507,114 @@ class ToolRegistry:
                         },
                         "required": ["company"],
                     },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_prospects",
+                    "description": (
+                        "Lista potencjalnych klientów (role=prospect) z oceną szansy, "
+                        "branżą, jakością parku maszyn i budżetem tooling."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "q": {"type": "string"},
+                            "limit": {"type": "integer", "default": 30},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_prospect_profile",
+                    "description": (
+                        "Pełny profil potencjalnego klienta: budżet 4–10%, od kogo kupuje, "
+                        "sprzęt/jakość, mapa produktów→narzędzia, stakeholders zakupowi."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"company": {"type": "string"}},
+                        "required": ["company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "prospect_scoreboard",
+                    "description": "Tabela ocen szans sprzedażowych (prospect opportunity).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"limit": {"type": "integer", "default": 25}},
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "analyze_prospect",
+                    "description": (
+                        "Przeanalizuj potencjalnego klienta z URL (fetch WWW) albo z przekazanego tekstu: "
+                        "branża, budżet tooling, park maszyn, dostawcy narzędzi, procesy, decydenci."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "company": {"type": "string"},
+                            "url": {"type": "string"},
+                            "text": {
+                                "type": "string",
+                                "description": "Opcjonalna treść zamiast fetch (test / Notion excerpt)",
+                            },
+                            "persist": {"type": "boolean", "default": True},
+                        },
+                        "required": ["company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "estimate_tooling_budget",
+                    "description": (
+                        "Oszacuj roczny budżet na narzędzia skrawające: 4–10% kosztów produkcji "
+                        "wg branży (założenie). Podaj vertical i opcjonalnie revenue_eur."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "vertical": {
+                                "type": "string",
+                                "enum": [
+                                    "automotive",
+                                    "aerospace",
+                                    "medical",
+                                    "mold_die",
+                                    "energy",
+                                    "general_machining",
+                                    "electronics",
+                                    "unknown",
+                                ],
+                            },
+                            "revenue_eur": {"type": "number"},
+                            "production_cost_ratio": {
+                                "type": "number",
+                                "default": 0.65,
+                            },
+                        },
+                        "required": ["vertical"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "ingest_prospect_seeds",
+                    "description": "Wczytaj seed potencjalnych klientów z config/prospects.seed.json.",
+                    "parameters": {"type": "object", "properties": {}},
                 },
             },
 
@@ -3674,6 +3796,111 @@ class ToolRegistry:
         p = reg.upsert(p)
         reg.save(self.config.data_path)
         return {"ok": True, "company": p.company, "sentiment": p.public_relations.get("sentiment"), "scores": p.scores}
+
+    def _get_prospects(self) -> ProspectRegistry:
+        return ProspectRegistry(profiles=self._get_profiles(), assumptions=load_vertical_assumptions())
+
+    def list_prospects(self, args: dict[str, Any]) -> dict[str, Any]:
+        pr = self._get_prospects()
+        rows = pr.list_prospects(q=str(args.get("q") or "").strip() or None, limit=int(args.get("limit") or 30))
+        return {
+            "ok": True,
+            "count": len(rows),
+            "prospects": [
+                {
+                    "company": p.company,
+                    "vertical": (p.prospect or {}).get("vertical"),
+                    "quality_tier": (p.prospect or {}).get("quality_tier"),
+                    "opportunity": ((p.prospect or {}).get("opportunity") or {}).get("overall"),
+                    "budget": (p.prospect or {}).get("budget"),
+                    "buys_from": [b.get("brand") for b in ((p.prospect or {}).get("buys_from") or [])[:8]],
+                    "processes": ((p.prospect or {}).get("product_map") or {}).get("likely_processes"),
+                }
+                for p in rows
+            ],
+        }
+
+    def get_prospect_profile(self, args: dict[str, Any]) -> dict[str, Any]:
+        company = str(args.get("company") or "").strip()
+        if not company:
+            return {"ok": False, "error": "company required"}
+        p = self._get_profiles().get(company)
+        if not p or not (p.prospect or "prospect" in (p.roles or [])):
+            return {
+                "ok": False,
+                "error": f"brak prospect: {company}",
+                "hint": "Uruchom analyze_prospect lub ingest_prospect_seeds",
+            }
+        return {
+            "ok": True,
+            "company": p.company,
+            "roles": p.roles,
+            "prospect": p.prospect,
+            "financial": p.financial,
+            "network": p.network,
+            "scores": p.scores,
+            "stakeholders": (p.prospect or {}).get("stakeholders"),
+        }
+
+    def prospect_scoreboard(self, args: dict[str, Any]) -> dict[str, Any]:
+        pr = self._get_prospects()
+        return {"ok": True, "scoreboard": pr.scoreboard(limit=int(args.get("limit") or 25))}
+
+    def analyze_prospect(self, args: dict[str, Any]) -> dict[str, Any]:
+        company = str(args.get("company") or "").strip()
+        if not company:
+            return {"ok": False, "error": "company required"}
+        url = str(args.get("url") or "").strip()
+        text = str(args.get("text") or "")
+        persist = bool(args.get("persist", True))
+        assumptions = load_vertical_assumptions()
+        if text.strip():
+            analysis = analyze_prospect_text(
+                text, company=company, website=url, assumptions=assumptions
+            )
+        elif url:
+            try:
+                resp = self._fetcher.get(url)
+                html = resp.text or ""
+                final_url = str(resp.url) if resp.url else url
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": safe_error(exc), "url": url}
+            analysis = analyze_prospect_html(
+                html, company=company, base_url=final_url, assumptions=assumptions
+            )
+        else:
+            return {"ok": False, "error": "podaj url albo text"}
+        if persist:
+            pr = self._get_prospects()
+            profile = pr.upsert_from_analysis(company, analysis, self.config.data_path)
+            self._profiles = pr.profiles
+            return {
+                "ok": True,
+                "company": profile.company,
+                "prospect": profile.prospect,
+                "scores": profile.scores,
+                "disclaimer": analysis.get("disclaimer"),
+            }
+        return {"ok": True, "analysis": analysis}
+
+    def estimate_tooling_budget_tool(self, args: dict[str, Any]) -> dict[str, Any]:
+        vertical = str(args.get("vertical") or "unknown").strip()
+        revenue = args.get("revenue_eur")
+        revenue_f = float(revenue) if revenue is not None else None
+        ratio = float(args.get("production_cost_ratio") or 0.65)
+        budget = estimate_tooling_budget(
+            vertical=vertical,
+            revenue_eur=revenue_f,
+            production_cost_ratio=ratio,
+            assumptions=load_vertical_assumptions(),
+        )
+        return {"ok": True, "budget": budget}
+
+    def ingest_prospect_seeds(self, args: dict[str, Any]) -> dict[str, Any]:
+        pr = self._get_prospects()
+        result = pr.ingest_seeds(self.config.data_path)
+        self._profiles = pr.profiles
+        return result
 
     def discover_new_firms(self, args: dict[str, Any]) -> dict[str, Any]:
         limit = int(args.get("limit") or 25)

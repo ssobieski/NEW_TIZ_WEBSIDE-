@@ -109,6 +109,23 @@ Tooli: `build_firm_profiles`, `list_firm_profiles`, `get_firm_profile`, `firm_sc
 `upsert_firm_profile`, `enrich_firm_profile`, `register_social_mention`.
 Relacje: `customer_of`, `supplier_of`, `competes_with` (+ dystrybutor/dealer/OEM).
 
+## Potencjalni klienci (prospects)
+
+Intelligence zakupowy dla firm, które mogą kupować narzędzia/usługi TIZ:
+budżet tooling **4–10% kosztów produkcji** (założenie branżowe), od kogo kupują,
+jakość parku maszyn, mapa produktów→procesy/narzędzia, osoby wpływające na zakup.
+
+```bash
+python -m market_agents prospects --seed
+python -m market_agents prospects --budget --vertical automotive --revenue 50000000
+python -m market_agents prospects --company "Acme CNC" --analyze-url https://example.com/ --text-file page.txt
+python -m market_agents prospects --scoreboard
+```
+
+Założenia: `config/prospect_assumptions.json` · seed: `config/prospects.seed.json`  
+Tooli: `analyze_prospect`, `list_prospects`, `get_prospect_profile`, `prospect_scoreboard`,
+`estimate_tooling_budget`, `ingest_prospect_seeds`.
+
 ## Uruchomienie na Dellu
 
 ```bash

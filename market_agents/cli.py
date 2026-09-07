@@ -309,6 +309,119 @@ def profiles_cmd(
     console.print(table)
 
 
+@app.command("prospects")
+def prospects_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    company: Optional[str] = typer.Option(None, "--company"),
+    analyze_url: Optional[str] = typer.Option(
+        None, "--analyze-url", help="Pobierz WWW i zbuduj intel zakupowy"
+    ),
+    text_file: Optional[Path] = typer.Option(
+        None, "--text-file", help="Analiza z pliku tekstowego (bez fetch)"
+    ),
+    scoreboard: bool = typer.Option(False, "--scoreboard"),
+    seed: bool = typer.Option(False, "--seed", help="Wczytaj config/prospects.seed.json"),
+    vertical: Optional[str] = typer.Option(None, "--vertical", help="Dla --budget"),
+    revenue: Optional[float] = typer.Option(None, "--revenue", help="Przychód EUR (szacunek budżetu)"),
+    budget: bool = typer.Option(False, "--budget", help="Policz budżet tooling 4–10%"),
+    limit: int = typer.Option(25, "--limit"),
+) -> None:
+    """Potencjalni klienci — budżet tooling, park maszyn, dostawcy, decydenci, scorecard."""
+    from market_agents.prospects import (
+        ProspectRegistry,
+        analyze_prospect_html,
+        analyze_prospect_text,
+        estimate_tooling_budget,
+        load_vertical_assumptions,
+    )
+    from market_agents.polite_http import build_fetcher_from_config
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    pr = ProspectRegistry.load(cfg.data_path)
+
+    if seed:
+        console.print(pr.ingest_seeds(cfg.data_path))
+        return
+
+    if budget:
+        vert = vertical or "unknown"
+        out = estimate_tooling_budget(
+            vertical=vert,
+            revenue_eur=revenue,
+            assumptions=load_vertical_assumptions(),
+        )
+        console.print_json(data=out)
+        return
+
+    if analyze_url or text_file or (company and (analyze_url or text_file)):
+        name = company or "Unknown prospect"
+        assumptions = load_vertical_assumptions()
+        if text_file:
+            raw = Path(text_file).read_text(encoding="utf-8")
+            analysis = analyze_prospect_text(
+                raw, company=name, website=analyze_url or "", assumptions=assumptions
+            )
+        else:
+            assert analyze_url
+            fetcher = build_fetcher_from_config(cfg)
+            try:
+                resp = fetcher.get(analyze_url)
+                html = resp.text or ""
+                final = str(resp.url) if resp.url else analyze_url
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[red]Fetch failed:[/red] {exc}")
+                raise typer.Exit(1)
+            analysis = analyze_prospect_html(
+                html, company=name, base_url=final, assumptions=assumptions
+            )
+        profile = pr.upsert_from_analysis(name, analysis, cfg.data_path)
+        console.print(
+            f"[green]Prospect OK[/green]: {profile.company} "
+            f"opportunity={((profile.prospect or {}).get('opportunity') or {}).get('overall')} "
+            f"vertical={(profile.prospect or {}).get('vertical')} "
+            f"quality={(profile.prospect or {}).get('quality_tier')}"
+        )
+        console.print_json(data=profile.prospect)
+        return
+
+    if company:
+        p = pr.profiles.get(company)
+        if not p or not p.prospect:
+            console.print(f"[red]Brak prospect:[/red] {company}")
+            raise typer.Exit(1)
+        console.print_json(data={"company": p.company, "prospect": p.prospect, "scores": p.scores})
+        return
+
+    if scoreboard or True:  # default: scoreboard list
+        rows = pr.scoreboard(limit=limit)
+        if not rows:
+            console.print(
+                "[yellow]Brak prospectów.[/yellow] "
+                "Użyj: prospects --seed  albo  prospects --company X --analyze-url URL"
+            )
+            raise typer.Exit(0)
+        table = Table(title="Prospect opportunity scoreboard")
+        table.add_column("Firma")
+        table.add_column("Branża")
+        table.add_column("Jakość")
+        table.add_column("Opportunity", justify="right")
+        table.add_column("Budżet mid EUR", justify="right")
+        table.add_column("Dostawcy", justify="right")
+        table.add_column("Procesy")
+        for row in rows:
+            table.add_row(
+                str(row.get("company")),
+                str(row.get("vertical") or ""),
+                str(row.get("quality_tier") or ""),
+                str(row.get("opportunity") or 0),
+                str(int(row["budget_mid_eur"])) if row.get("budget_mid_eur") else "—",
+                str(row.get("buys_from_count") or 0),
+                ",".join(row.get("processes") or [])[:40],
+            )
+        console.print(table)
+
+
 @app.command("sync-r2")
 def sync_r2(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
     """Zsynchronizuj archiwum Cloudflare R2 → lokalny cache."""

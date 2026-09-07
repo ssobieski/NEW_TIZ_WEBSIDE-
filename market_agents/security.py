@@ -198,6 +198,10 @@ SAFE_TOOLS = frozenset(
         "get_firm_profile",
         "score_firm_profile",
         "firm_scoreboard",
+        "list_prospects",
+        "get_prospect_profile",
+        "prospect_scoreboard",
+        "estimate_tooling_budget",
         "list_parse_rules",
         "list_parsing_skills",
         "match_parsing_skills",
@@ -230,6 +234,7 @@ FETCH_TOOLS = frozenset(
         "discover_relations",
         "extract_domain_context",
         "enrich_firm_profile",
+        "analyze_prospect",
     }
 )
 
@@ -254,6 +259,7 @@ WRITE_TOOLS = frozenset(
         "build_firm_profiles",
         "upsert_firm_profile",
         "register_social_mention",
+        "ingest_prospect_seeds",
     }
 )
 

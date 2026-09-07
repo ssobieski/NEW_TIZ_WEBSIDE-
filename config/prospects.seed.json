@@ -1,0 +1,18 @@
+[
+  {
+    "company": "Example Aerospace Components",
+    "country": "PL",
+    "site_url": "https://example-aerospace.invalid/",
+    "roles": ["prospect"],
+    "product_focus": "aerospace structural parts / titanium",
+    "notes": "Seed przykładu — zastąp realnymi leadami"
+  },
+  {
+    "company": "Example Auto Tier2 CNC",
+    "country": "PL",
+    "site_url": "https://example-auto.invalid/",
+    "roles": ["prospect"],
+    "product_focus": "automotive CNC job shop",
+    "notes": "Seed przykładu — zastąp realnymi leadami"
+  }
+]

@@ -1,0 +1,54 @@
+{
+  "description": "Założenia budżetu tooling dla potencjalnych klientów TIZ (4–10% kosztów produkcji)",
+  "production_cost_ratio_of_revenue": 0.65,
+  "verticals": {
+    "automotive": {
+      "label": "Motoryzacja / automotive",
+      "tooling_pct_min": 0.04,
+      "tooling_pct_max": 0.08,
+      "notes": "Wysoki wolumen; typowo 4–8% kosztów produkcji na tooling"
+    },
+    "aerospace": {
+      "label": "Lotnictwo / aerospace",
+      "tooling_pct_min": 0.06,
+      "tooling_pct_max": 0.10,
+      "notes": "ISO S / trudne stopy; 6–10%"
+    },
+    "medical": {
+      "label": "Medycyna / implanty",
+      "tooling_pct_min": 0.05,
+      "tooling_pct_max": 0.10,
+      "notes": "Precyzja + stopy; 5–10%"
+    },
+    "mold_die": {
+      "label": "Formy / matryce",
+      "tooling_pct_min": 0.05,
+      "tooling_pct_max": 0.09,
+      "notes": "HSM / węgliki; 5–9%"
+    },
+    "energy": {
+      "label": "Energetyka / oil & gas",
+      "tooling_pct_min": 0.05,
+      "tooling_pct_max": 0.09,
+      "notes": "Duże detale; 5–9%"
+    },
+    "general_machining": {
+      "label": "Obróbka ogólna / job shop",
+      "tooling_pct_min": 0.04,
+      "tooling_pct_max": 0.07,
+      "notes": "Mix detali; 4–7%"
+    },
+    "electronics": {
+      "label": "Elektronika / precyzja",
+      "tooling_pct_min": 0.04,
+      "tooling_pct_max": 0.08,
+      "notes": "Mikro-narzędzia; 4–8%"
+    },
+    "unknown": {
+      "label": "Nieznana / ogólna produkcja",
+      "tooling_pct_min": 0.04,
+      "tooling_pct_max": 0.10,
+      "notes": "Domyślny widełki 4–10%"
+    }
+  }
+}
