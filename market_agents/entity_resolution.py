@@ -94,19 +94,46 @@ def _alias_map_path(data_dir: Path | str) -> Path:
 
 
 def flatten_alias_map(alias_map: dict[str, str]) -> dict[str, str]:
-    """Resolve chains so every key maps directly to the terminal canonical name."""
-    flat = {str(k): str(v) for k, v in (alias_map or {}).items() if k and v}
-    changed = True
-    guard = 0
-    while changed and guard < 32:
-        changed = False
-        guard += 1
-        for k, v in list(flat.items()):
-            nxt = flat.get(normalize_firm_name(v))
-            if nxt and nxt != v:
-                flat[k] = nxt
-                changed = True
-    return flat
+    """Resolve chains so every key maps directly to the terminal canonical name.
+
+    Uses per-key traversal with cycle detection (no fixed pass limit).
+    On a cycle, keeps the last non-cycling display name seen for that key.
+    """
+    raw = {str(k): str(v) for k, v in (alias_map or {}).items() if k and v}
+    # normalized key → display value (raw may already use normalized keys)
+    by_norm: dict[str, str] = {}
+    for k, v in raw.items():
+        by_norm[normalize_firm_name(k)] = v
+
+    memo: dict[str, str] = {}
+
+    def resolve(start_key: str, start_val: str) -> str:
+        nk = normalize_firm_name(start_key)
+        if nk in memo:
+            return memo[nk]
+        visited: set[str] = set()
+        cur_display = start_val
+        cur_norm = normalize_firm_name(start_key)
+        path_norms: list[str] = []
+        while True:
+            if cur_norm in visited:
+                # cycle — stop at last display before looping
+                break
+            visited.add(cur_norm)
+            path_norms.append(cur_norm)
+            nxt = by_norm.get(normalize_firm_name(cur_display))
+            if not nxt or normalize_firm_name(nxt) == normalize_firm_name(cur_display):
+                break
+            cur_display = nxt
+            cur_norm = normalize_firm_name(nxt)
+        for pn in path_norms:
+            memo[pn] = cur_display
+        return cur_display
+
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        out[normalize_firm_name(k)] = resolve(k, v)
+    return out
 
 
 def load_alias_map(data_dir: Path | str) -> dict[str, str]:

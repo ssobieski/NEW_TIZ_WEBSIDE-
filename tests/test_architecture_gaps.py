@@ -136,6 +136,40 @@ def test_entity_resolve_rewrites_crm_and_relations(tmp_path: Path):
     assert sandvik_distributor[0]["source"] == "Sandvik Coromant AB"
 
 
+def test_flatten_alias_map_long_chain_rewrites_stores(tmp_path: Path):
+    """Chains longer than 32 links must still resolve to the terminal canonical."""
+    from market_agents.entity_resolution import (
+        flatten_alias_map,
+        rewrite_crm_companies,
+        rewrite_relation_endpoints,
+        save_alias_map,
+    )
+    from market_agents.firms import normalize_firm_name
+
+    names = [f"Alias{i} Co" for i in range(40)] + ["Canonical Co"]
+    chain: dict[str, str] = {}
+    for a, b in zip(names, names[1:]):
+        chain[normalize_firm_name(a)] = b
+    flat = flatten_alias_map(chain)
+    assert flat[normalize_firm_name("Alias0 Co")] == "Canonical Co"
+    assert flat[normalize_firm_name("Alias39 Co")] == "Canonical Co"
+
+    store = CrmTaskStore.load(tmp_path)
+    store.create(company="Alias0 Co", title="Long chain", opportunity_score=70)
+    store.save(tmp_path)
+    g = FirmRelationsGraph()
+    g.add_relation("Alias0 Co", "Partner GmbH", "partner_of", confidence=0.8)
+    g.save(tmp_path)
+
+    save_alias_map(tmp_path, flat)
+    assert rewrite_crm_companies(tmp_path, flat) >= 1
+    assert rewrite_relation_endpoints(tmp_path, flat) >= 1
+    assert {t.company for t in CrmTaskStore.load(tmp_path).tasks} == {"Canonical Co"}
+    rel = FirmRelationsGraph.load(tmp_path, include_seed=False)
+    assert any(e.get("source") == "Canonical Co" for e in rel.edges)
+    assert not any(e.get("source") == "Alias0 Co" for e in rel.edges)
+
+
 def test_alias_chain_flattens_across_resolve_runs(tmp_path: Path):
     """old → mid, then mid → canonical must rewrite CRM/relations to canonical."""
     # Round 1: Old Co → Mid Co
