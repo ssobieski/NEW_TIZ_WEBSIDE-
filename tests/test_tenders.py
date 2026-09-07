@@ -132,6 +132,20 @@ def test_upsert_preserves_nonempty_fields(tmp_path: Path):
     assert merged.equipment
 
 
+def test_nourl_reingest_dedupes(tmp_path: Path):
+    a = parse_tender_text(SAMPLE_ANNOUNCED, company="Beta Precision CNC", title="Przetarg CNC")
+    r1 = ingest_tender_analysis(a, tmp_path)
+    assert r1["ok"]
+    a2 = parse_tender_text(SAMPLE_ANNOUNCED, company="Beta Precision CNC", title="Przetarg CNC v2")
+    # Force empty URL path with same company/intent/near title
+    a2["url"] = ""
+    a2["title"] = "Przetarg CNC"
+    r2 = ingest_tender_analysis(a2, tmp_path)
+    assert r2["ok"]
+    reg = TenderRegistry.load(tmp_path)
+    assert len(reg.list()) == 1
+
+
 def test_software_buy_not_ingested(tmp_path: Path):
     analysis = parse_tender_text(
         "Acme Corp installed new ERP software and bought cloud licenses.",

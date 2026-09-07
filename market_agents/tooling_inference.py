@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +97,15 @@ def load_tooling_rules(path: Path | str | None = None) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def _keyword_hit(kw: str, low: str) -> bool:
+    """Prefer word-boundary for short tokens to avoid 'gear' in 'gear oil' / 'detal' noise."""
+    if not kw:
+        return False
+    if " " in kw or len(kw) >= 5:
+        return kw in low
+    return bool(re.search(rf"(?<!\w){re.escape(kw)}(?!\w)", low, flags=re.IGNORECASE))
+
+
 def detect_product_families(
     text: str,
     *,
@@ -108,7 +118,7 @@ def detect_product_families(
         if not isinstance(meta, dict):
             continue
         kws = [str(k).lower() for k in (meta.get("keywords") or [])]
-        hits = [k for k in kws if k and k in low]
+        hits = [k for k in kws if _keyword_hit(k, low)]
         if not hits:
             continue
         found.append(

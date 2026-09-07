@@ -95,7 +95,7 @@
     },
     "gears": {
       "label": "Koła zębate / gears",
-      "keywords": ["koło zębate", "zębat", "gear", "pinion", "zębnik"],
+      "keywords": ["koło zębate", "zębat", "gears", "gearbox", "pinion", "zębnik", "gear blank"],
       "peer_vertical": "automotive",
       "theoretical_process": [
         "turning",
@@ -116,7 +116,7 @@
     },
     "aerospace_structurals": {
       "label": "Detale lotnicze / aerospace structurals",
-      "keywords": ["aerospace", "lotnic", "turbine", "blade", "impeller", "titanium part", "struktural"],
+      "keywords": ["aerospace", "lotnic", "turbine blade", "turbine blades", "impeller", "titanium part", "struktural", "blisk"],
       "peer_vertical": "aerospace",
       "theoretical_process": [
         "5_axis_milling",
@@ -156,7 +156,7 @@
     },
     "precision_parts": {
       "label": "Detale precyzyjne / job-shop parts",
-      "keywords": ["detal", "obrabiamy", "precyz", "cnc parts", "contract machining", "usługi cnc"],
+      "keywords": ["detale precyzyjne", "detali precyzyj", "precyzyjne detale", "obrabiamy", "cnc parts", "contract machining", "usługi cnc", "job shop"],
       "peer_vertical": "general_machining",
       "theoretical_process": [
         "milling",

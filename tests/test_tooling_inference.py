@@ -110,7 +110,7 @@ def test_crm_dedupe_tender_and_prospect(tmp_path: Path):
         opportunity_score=85,
         source="tender",
         dedupe_by_company=True,
-        meta={"tender_id": "abc"},
+        meta={"tender": {"tender_id": "abc"}},
     )
     assert c1 is True
     t2, c2 = store.create(
@@ -192,3 +192,11 @@ def test_peer_same_family_no_gap_fill():
     mold = next(p for p in peers if p.get("rule_id") == "mold_peers_share_tooling")
     assert mold.get("gap_fill") is False
     assert mold.get("practical_tools") == []
+
+
+def test_short_keyword_false_positives():
+    # bare "gear oil" / "detale usług" alone should not force gears / precision_parts
+    gear_oil = detect_product_families("We stock gear oil and lubricants only.")
+    assert not any(f["id"] == "gears" for f in gear_oil)
+    weak = detect_product_families("detale usług biurowych bez CNC")
+    assert not any(f["id"] == "precision_parts" for f in weak)

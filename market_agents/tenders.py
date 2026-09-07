@@ -204,7 +204,7 @@ class TenderSignal:
         if intent not in TENDER_INTENTS:
             intent = "other"
         return cls(
-            id=str(raw.get("id") or _signal_id(raw.get("company"), raw.get("url"), raw.get("title"))),
+            id=str(raw.get("id") or _signal_id(raw.get("company"), raw.get("url"), raw.get("title"), raw.get("intent"))),
             company=str(raw.get("company") or "").strip(),
             intent=intent,  # type: ignore[arg-type]
             equipment=list(raw.get("equipment") or []),
@@ -227,9 +227,31 @@ class TenderSignal:
         )
 
 
-def _signal_id(company: Any, url: Any, title: Any) -> str:
-    raw = f"{company or ''}|{url or ''}|{title or ''}".lower().strip()
+def _signal_id(company: Any, url: Any, title: Any, intent: Any = "") -> str:
+    # Without URL, include intent so re-ingest of same event collapses.
+    raw = f"{company or ''}|{url or ''}|{intent or ''}|{title or ''}".lower().strip()
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]  # noqa: S324
+
+
+def _signals_match(existing: "TenderSignal", signal: "TenderSignal") -> bool:
+    if existing.id == signal.id:
+        return True
+    same_co = normalize_firm_name(existing.company) == normalize_firm_name(signal.company)
+    if not same_co:
+        return False
+    if existing.url and signal.url and existing.url == signal.url:
+        return True
+    # No-URL path: same company + intent + similar title/summary
+    if not existing.url and not signal.url and existing.intent == signal.intent:
+        et = normalize_firm_name(existing.title)[:100]
+        st = normalize_firm_name(signal.title)[:100]
+        if et and st and (et == st or et in st or st in et):
+            return True
+        es = (existing.summary or "")[:200].lower().strip()
+        ss = (signal.summary or "")[:200].lower().strip()
+        if es and ss and es == ss:
+            return True
+    return False
 
 
 def detect_intent(text: str) -> tuple[Intent, float, str]:
@@ -497,45 +519,41 @@ class TenderRegistry:
         return path
 
     def upsert(self, signal: TenderSignal) -> TenderSignal:
-        key = signal.id
         for i, existing in enumerate(self.signals):
-            if existing.id == key or (
-                normalize_firm_name(existing.company) == normalize_firm_name(signal.company)
-                and existing.url
-                and existing.url == signal.url
-            ):
-                # Field-wise merge: never wipe non-empty fields with empties
-                base = existing.to_dict()
-                incoming = signal.to_dict()
-                merged_raw: dict[str, Any] = dict(base)
-                for field_name, new_val in incoming.items():
-                    if field_name in {"id", "created_at"}:
-                        continue
-                    if new_val is None or new_val == "" or new_val == []:
-                        continue
-                    if field_name == "confidence":
-                        merged_raw[field_name] = max(
-                            float(base.get("confidence") or 0),
-                            float(new_val or 0),
-                        )
-                        continue
-                    if field_name == "equipment":
-                        continue  # merged below
-                    merged_raw[field_name] = new_val
-                merged = TenderSignal.from_dict(merged_raw)
-                merged.id = existing.id
-                merged.created_at = existing.created_at
-                merged.updated_at = utc_now_iso()
-                # Prefer richer equipment set
-                seen = {e.get("kind") for e in (existing.equipment or [])}
-                eq = list(existing.equipment or [])
-                for e in signal.equipment or []:
-                    if e.get("kind") not in seen:
-                        eq.append(e)
-                        seen.add(e.get("kind"))
-                merged.equipment = eq
-                self.signals[i] = merged
-                return merged
+            if not _signals_match(existing, signal):
+                continue
+            # Field-wise merge: never wipe non-empty fields with empties
+            base = existing.to_dict()
+            incoming = signal.to_dict()
+            merged_raw: dict[str, Any] = dict(base)
+            for field_name, new_val in incoming.items():
+                if field_name in {"id", "created_at"}:
+                    continue
+                if new_val is None or new_val == "" or new_val == []:
+                    continue
+                if field_name == "confidence":
+                    merged_raw[field_name] = max(
+                        float(base.get("confidence") or 0),
+                        float(new_val or 0),
+                    )
+                    continue
+                if field_name == "equipment":
+                    continue  # merged below
+                merged_raw[field_name] = new_val
+            merged = TenderSignal.from_dict(merged_raw)
+            merged.id = existing.id
+            merged.created_at = existing.created_at
+            merged.updated_at = utc_now_iso()
+            # Prefer richer equipment set
+            seen = {e.get("kind") for e in (existing.equipment or [])}
+            eq = list(existing.equipment or [])
+            for e in signal.equipment or []:
+                if e.get("kind") not in seen:
+                    eq.append(e)
+                    seen.add(e.get("kind"))
+            merged.equipment = eq
+            self.signals[i] = merged
+            return merged
         self.signals.append(signal)
         return signal
 
@@ -597,7 +615,7 @@ def ingest_tender_analysis(
         return {"ok": False, "error": "company required", "analysis": analysis}
 
     signal = TenderSignal(
-        id=_signal_id(company, analysis.get("url"), analysis.get("title")),
+        id=_signal_id(company, analysis.get("url"), analysis.get("title"), analysis.get("intent")),
         company=company,
         intent=analysis.get("intent") or "other",  # type: ignore[arg-type]
         equipment=list(analysis.get("equipment") or []),
@@ -723,7 +741,13 @@ def _maybe_create_crm(signal: TenderSignal, data_dir: Path | str) -> dict[str, A
         priority=priority,  # type: ignore[arg-type]
         source="tender",
         dedupe_by_company=True,
-        meta={"tender_id": signal.id, "intent": signal.intent, "url": signal.url},
+        meta={
+            "tender": {
+                "tender_id": signal.id,
+                "intent": signal.intent,
+                "url": signal.url,
+            }
+        },
     )
     store.save(data_dir)
     return {

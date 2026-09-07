@@ -408,6 +408,7 @@ def prospects_cmd(
     table.add_column("Jakość")
     table.add_column("Opportunity", justify="right")
     table.add_column("ToolingInf", justify="right")
+    table.add_column("Dostawcy", justify="right")
     table.add_column("Budżet mid EUR", justify="right")
     table.add_column("Families")
     table.add_column("Narzędzia")
@@ -420,6 +421,7 @@ def prospects_cmd(
             str(row.get("quality_tier") or ""),
             str(row.get("opportunity") or 0),
             str(row.get("tooling_inference") or "—"),
+            str(row.get("buys_from_count") or 0),
             str(int(row["budget_mid_eur"])) if row.get("budget_mid_eur") else "—",
             ",".join(row.get("product_families") or [])[:36] or "—",
             ",".join(row.get("practical_tools") or [])[:40] or "—",

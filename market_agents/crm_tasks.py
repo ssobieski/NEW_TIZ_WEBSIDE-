@@ -167,11 +167,22 @@ class CrmTaskStore:
                     t.meta["alt_titles"] = alts[:8]
                 if meta_in:
                     t.meta = dict(t.meta or {})
-                    # preserve existing keys unless new value is non-empty
+                    # Namespace source-specific blobs; merge other keys non-destructively
                     for k, v in meta_in.items():
                         if v is None or v == "" or v == []:
                             continue
-                        t.meta[k] = v
+                        if isinstance(v, dict) and k in {"tender", "prospect"}:
+                            bucket = dict(t.meta.get(k) or {})
+                            for sk, sv in v.items():
+                                if sv is None or sv == "" or sv == []:
+                                    continue
+                                bucket[sk] = sv
+                            t.meta[k] = bucket
+                        elif k not in t.meta or t.meta.get(k) in (None, "", []):
+                            t.meta[k] = v
+                        elif k not in {"tender", "prospect"}:
+                            # avoid clobbering existing non-empty scalars from other source
+                            continue
                 if source:
                     # track multi-source lead
                     t.meta = dict(t.meta or {})
@@ -248,9 +259,11 @@ def create_tasks_from_prospect_scoreboard(
             source="prospect",
             dedupe_by_company=True,
             meta={
-                "processes": row.get("processes") or [],
-                "product_families": row.get("product_families") or [],
-                "practical_tools": row.get("practical_tools") or [],
+                "prospect": {
+                    "processes": row.get("processes") or [],
+                    "product_families": row.get("product_families") or [],
+                    "practical_tools": row.get("practical_tools") or [],
+                }
             },
         )
         if was_created:
