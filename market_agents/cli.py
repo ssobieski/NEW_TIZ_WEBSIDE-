@@ -718,14 +718,22 @@ def governance_cmd(
 @app.command("crm")
 def crm_cmd(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
-    action: str = typer.Argument("list", help="list | sync-prospects | done"),
+    action: str = typer.Argument("list", help="list | sync-prospects | done | push-notion"),
     company: Optional[str] = typer.Option(None, "--company"),
     task_id: Optional[str] = typer.Option(None, "--id"),
     min_opp: float = typer.Option(60.0, "--min-opportunity"),
     limit: int = typer.Option(30, "--limit"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    all_priorities: bool = typer.Option(
+        False, "--all-priorities", help="push-notion: nie tylko hot/high"
+    ),
 ) -> None:
     """Lokalna kolejka CRM / follow-up (hot prospects)."""
-    from market_agents.crm_tasks import CrmTaskStore, create_tasks_from_prospect_scoreboard
+    from market_agents.crm_tasks import (
+        CrmTaskStore,
+        create_tasks_from_prospect_scoreboard,
+        push_crm_tasks_to_notion,
+    )
 
     path = _resolve_config(config)
     cfg = load_config(path)
@@ -733,6 +741,15 @@ def crm_cmd(
     if act == "sync-prospects":
         result = create_tasks_from_prospect_scoreboard(
             cfg.data_path, min_opportunity=min_opp, limit=limit
+        )
+        console.print(result)
+        return
+    if act == "push-notion":
+        result = push_crm_tasks_to_notion(
+            cfg,
+            only_hot=not all_priorities,
+            limit=limit,
+            dry_run=dry_run,
         )
         console.print(result)
         return
@@ -755,6 +772,7 @@ def crm_cmd(
     table.add_column("Pri")
     table.add_column("Company")
     table.add_column("Opp", justify="right")
+    table.add_column("Notion")
     table.add_column("Title")
     for t in rows:
         table.add_row(
@@ -762,7 +780,119 @@ def crm_cmd(
             t.priority,
             t.company,
             str(int(t.opportunity_score)) if t.opportunity_score is not None else "—",
-            t.title[:48],
+            "yes" if t.notion_url else "—",
+            t.title[:40],
+        )
+    console.print(table)
+
+
+@app.command("suppliers")
+def suppliers_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    scoreboard: bool = typer.Option(True, "--scoreboard/--no-scoreboard"),
+    refresh: bool = typer.Option(False, "--refresh", help="Przelicz i zapisz scorecard"),
+    q: Optional[str] = typer.Option(None, "--q", help="Filtr nazwy"),
+    limit: int = typer.Option(25, "--limit"),
+) -> None:
+    """Dostawcy / dystrybutorzy — scorecard kanału i pokrycia marek."""
+    from market_agents.suppliers import SupplierRegistry
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    reg = SupplierRegistry.load(cfg.data_path)
+    if refresh:
+        console.print(reg.refresh_and_save(cfg.data_path))
+        return
+    rows = reg.scoreboard(limit=limit) if scoreboard else []
+    if q:
+        ql = q.lower()
+        rows = [r for r in rows if ql in str(r.get("company") or "").lower()]
+    if not rows:
+        # still list without forcing scoreboard flag
+        for p in reg.list_suppliers(q=q, limit=limit):
+            rows.append(
+                {
+                    "company": p.company,
+                    "roles": p.roles,
+                    "country": p.country,
+                    "supplier_overall": (p.scores or {}).get("supplier_overall"),
+                    "brand_coverage": None,
+                    "channel_reach": None,
+                    "customers": len((p.network or {}).get("customers") or []),
+                    "brands": [],
+                }
+            )
+    if not rows:
+        console.print(
+            "[yellow]Brak dostawców.[/yellow] Uruchom sync-profiles / relacje, potem suppliers --refresh"
+        )
+        raise typer.Exit(0)
+    table = Table(title="Supplier scoreboard")
+    table.add_column("Firma")
+    table.add_column("Role")
+    table.add_column("Score", justify="right")
+    table.add_column("Kanał", justify="right")
+    table.add_column("Klienci", justify="right")
+    table.add_column("Kraj")
+    for row in rows:
+        table.add_row(
+            str(row.get("company")),
+            ",".join(row.get("roles") or [])[:28],
+            str(row.get("supplier_overall") or "—"),
+            str(row.get("channel_reach") if row.get("channel_reach") is not None else "—"),
+            str(row.get("customers") or 0),
+            str(row.get("country") or "—"),
+        )
+    console.print(table)
+
+
+@app.command("resolve-firms")
+def resolve_firms_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    dry_run: bool = typer.Option(True, "--dry-run/--apply", help="Domyślnie tylko podgląd"),
+    threshold: float = typer.Option(0.92, "--threshold"),
+) -> None:
+    """Golden record — znajdź / scal duplikaty firm."""
+    from market_agents.entity_resolution import resolve_golden_records
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    result = resolve_golden_records(
+        cfg.data_path, threshold=threshold, dry_run=dry_run
+    )
+    console.print(result)
+
+
+@app.command("metrics")
+def metrics_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    limit: int = typer.Option(15, "--limit"),
+) -> None:
+    """Ostatnie metryki runów (data/metrics/runs.jsonl)."""
+    from market_agents.metrics import recent_metrics
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    rows = recent_metrics(cfg.data_path, limit=limit)
+    if not rows:
+        console.print("[yellow]Brak metryk — uruchom run.[/yellow]")
+        raise typer.Exit(0)
+    table = Table(title="Run metrics")
+    table.add_column("ts")
+    table.add_column("mode")
+    table.add_column("new", justify="right")
+    table.add_column("profiles", justify="right")
+    table.add_column("crm_open", justify="right")
+    table.add_column("relations", justify="right")
+    for row in reversed(rows):
+        counts = row.get("knowledge_counts") or {}
+        table.add_row(
+            str(row.get("ts") or "")[:19],
+            str(row.get("mode") or ""),
+            str(row.get("new_items") or 0),
+            str(counts.get("firm_profiles") or 0),
+            str(counts.get("crm_tasks_open") or 0),
+            str(counts.get("relations") or 0),
         )
     console.print(table)
 

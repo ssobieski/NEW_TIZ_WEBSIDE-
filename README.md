@@ -130,7 +130,7 @@ Tooli: `analyze_prospect`, `list_prospects`, `get_prospect_profile`, `prospect_s
 
 1. ParsingAgent procedura obejmuje **profiles + prospects + CRM tasks**
 2. Fleet publish: ontology, firm_profiles, pricelists, literature, product_tech, crm_tasks
-3. Po `run`: post-enrich profiles + CRM z hot prospectów
+3. Po `run`: post-enrich profiles + suppliers + CRM; metryki w `data/metrics/`
 4. `governance approve|revoke|approvals` — operator allowlist
 5. Testy: schema↔handler parity, orchestrator smoke, fleet publish
 6. CRM lokalny (`crm` CLI) + split `market_agents/tooling/` (shim `tools.py`)
@@ -139,7 +139,23 @@ Tooli: `analyze_prospect`, `list_prospects`, `get_prospect_profile`, `prospect_s
 python -m market_agents governance approve --tool promote_host_skill --by ops
 python -m market_agents crm sync-prospects
 python -m market_agents crm list
+python -m market_agents crm push-notion --dry-run
+python -m market_agents suppliers --refresh
+python -m market_agents resolve-firms --dry-run
+python -m market_agents metrics
 ```
+
+## Dostawcy (suppliers)
+
+Scorecard kanału dystrybucji / dealerów / OEM tooling (obok prospects):
+
+```bash
+python -m market_agents suppliers --scoreboard
+python -m market_agents suppliers --refresh
+```
+
+Tooli: `list_suppliers`, `supplier_scoreboard`, `score_suppliers`.
+Golden record: `resolve-firms` / tool `resolve_firm_duplicates` (domyślnie dry-run).
 
 ## Uruchomienie na Dellu
 

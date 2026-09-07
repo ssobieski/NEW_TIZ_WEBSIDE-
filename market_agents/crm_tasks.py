@@ -192,3 +192,81 @@ def create_tasks_from_prospect_scoreboard(
         created += 1
     path = store.save(data_dir)
     return {"ok": True, "created_or_updated": created, "path": str(path), "open": len(store.list(status="open"))}
+
+
+def push_crm_tasks_to_notion(
+    config: Any,
+    *,
+    status: str = "open",
+    only_hot: bool = True,
+    limit: int = 20,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """
+    Opcjonalny push otwartych CRM tasks do Notion (dzieci crm_parent_page).
+    Wymaga: Notion enabled + token + sources.notion.crm_parent_page.
+    """
+    from market_agents.collectors.notion import NotionCollector
+
+    notion_cfg = getattr(getattr(config, "sources", None), "notion", None)
+    if notion_cfg is None or not getattr(notion_cfg, "enabled", False):
+        return {"ok": False, "error": "Notion disabled — włącz sources.notion.enabled"}
+    parent = getattr(notion_cfg, "crm_parent_page", None)
+    if not parent:
+        return {
+            "ok": False,
+            "error": "Brak sources.notion.crm_parent_page w config",
+        }
+    token_fn = getattr(config, "notion_token", None)
+    token = token_fn() if callable(token_fn) else None
+    if not token:
+        return {"ok": False, "error": f"Brak tokenu Notion ({notion_cfg.token_env})"}
+
+    data_dir = getattr(config, "data_path", Path("data"))
+    store = CrmTaskStore.load(data_dir)
+    rows = store.list(status=status, limit=200)
+    if only_hot:
+        rows = [t for t in rows if t.priority in {"hot", "high"}]
+    rows = [t for t in rows if not t.notion_url][:limit]
+
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "would_push": len(rows),
+            "tasks": [{"id": t.id, "company": t.company, "priority": t.priority} for t in rows],
+        }
+
+    collector = NotionCollector(notion_cfg, token)
+    pushed = 0
+    errors: list[str] = []
+    for t in rows:
+        try:
+            body = [
+                f"Company: {t.company}",
+                f"Priority: {t.priority}",
+                f"Opportunity: {t.opportunity_score}",
+                f"Reason: {t.reason}",
+                f"Local CRM id: {t.id}",
+                f"Source: {t.source}",
+            ]
+            created = collector.create_child_page(
+                parent_page_id_or_url=str(parent),
+                title=t.title or f"CRM: {t.company}",
+                body_lines=body,
+            )
+            t.notion_url = created.get("url")
+            t.meta = dict(t.meta or {})
+            t.meta["notion_id"] = created.get("id")
+            t.updated_at = utc_now_iso()
+            pushed += 1
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{t.id}:{exc}"[:160])
+    path = store.save(data_dir)
+    return {
+        "ok": True,
+        "pushed": pushed,
+        "errors": errors[:10],
+        "path": str(path),
+        "open_with_notion": sum(1 for t in store.tasks if t.notion_url),
+    }

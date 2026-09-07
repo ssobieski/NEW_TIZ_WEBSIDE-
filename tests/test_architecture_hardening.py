@@ -206,6 +206,7 @@ def test_smoke_e2e_registries_and_post_enrich(tmp_path: Path):
     assert (tmp_path / "knowledge" / "available_pricelists.json").is_file()
     assert (tmp_path / "knowledge" / "literature.json").is_file()
     assert (tmp_path / "knowledge" / "product_tech.json").is_file()
+    assert (tmp_path / "metrics" / "latest.json").is_file()
 
     # parsing agent prompt mentions prospects/profiles
     from market_agents.agents.parsing_agent import ParsingAgent
@@ -215,7 +216,7 @@ def test_smoke_e2e_registries_and_post_enrich(tmp_path: Path):
     # instead read source contract via tool presence after agent constructs tools in run
     tools = ToolRegistry(cfg, MarketMemory(tmp_path))
     names = set(tools._handlers)
-    assert {"build_firm_profiles", "analyze_prospect", "create_crm_task"} <= names
+    assert {"build_firm_profiles", "analyze_prospect", "create_crm_task", "list_suppliers"} <= names
 
 
 def test_parsing_agent_prompt_mentions_profiles_prospects():

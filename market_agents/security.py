@@ -203,6 +203,9 @@ SAFE_TOOLS = frozenset(
         "prospect_scoreboard",
         "estimate_tooling_budget",
         "list_crm_tasks",
+        "list_suppliers",
+        "supplier_scoreboard",
+        "list_run_metrics",
         "list_parse_rules",
         "list_parsing_skills",
         "match_parsing_skills",
@@ -263,6 +266,9 @@ WRITE_TOOLS = frozenset(
         "ingest_prospect_seeds",
         "create_crm_task",
         "sync_crm_from_prospects",
+        "push_crm_to_notion",
+        "score_suppliers",
+        "resolve_firm_duplicates",
     }
 )
 

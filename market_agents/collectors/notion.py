@@ -264,6 +264,47 @@ class NotionCollector:
                     break
         return blocks
 
+    def create_child_page(
+        self,
+        *,
+        parent_page_id_or_url: str,
+        title: str,
+        body_lines: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Utwórz stronę-dziecko pod parent (CRM push)."""
+        parent_id = _to_notion_id(parent_page_id_or_url)
+        children: list[dict[str, Any]] = []
+        for line in (body_lines or [])[:40]:
+            text = (line or "").strip()
+            if not text:
+                continue
+            children.append(
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [{"type": "text", "text": {"content": text[:1900]}}]
+                    },
+                }
+            )
+        payload: dict[str, Any] = {
+            "parent": {"page_id": parent_id},
+            "properties": {
+                "title": {
+                    "title": [{"type": "text", "text": {"content": (title or "CRM")[:200]}}]
+                }
+            },
+        }
+        if children:
+            payload["children"] = children
+        with httpx.Client(headers=self._headers, timeout=60.0) as client:
+            r = client.post("https://api.notion.com/v1/pages", json=payload)
+            r.raise_for_status()
+            page = r.json()
+        page_id = page.get("id") or ""
+        url = page.get("url") or f"https://www.notion.so/{page_id.replace('-', '')}"
+        return {"ok": True, "id": page_id, "url": url, "title": title}
+
     def _page_to_item(self, page: dict[str, Any]) -> MarketItem | None:
         title = _page_title(page)
         if not title:

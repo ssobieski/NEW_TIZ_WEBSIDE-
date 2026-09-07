@@ -573,6 +573,8 @@ sources:
     known_firms_database: 308dfae4-647b-40e7-84a3-0b3f8406c769
     # Baza Pozycje (Type=book|paper|video|code) — paper→article
     literature_database: 948d6c02-d3bb-4b30-8c0c-a26f873bf719
+    # Parent page for optional CRM task push (crm push-notion)
+    # crm_parent_page: <notion-page-id-or-url>
   cloudflare_r2:
     enabled: false
     account_id_env: CF_ACCOUNT_ID

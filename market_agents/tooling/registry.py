@@ -169,6 +169,12 @@ class ToolRegistry:
             "create_crm_task": self.create_crm_task,
             "list_crm_tasks": self.list_crm_tasks,
             "sync_crm_from_prospects": self.sync_crm_from_prospects,
+            "push_crm_to_notion": self.push_crm_to_notion,
+            "list_suppliers": self.list_suppliers,
+            "supplier_scoreboard": self.supplier_scoreboard,
+            "score_suppliers": self.score_suppliers,
+            "resolve_firm_duplicates": self.resolve_firm_duplicates,
+            "list_run_metrics": self.list_run_metrics,
             "list_parse_rules": self.list_parse_rules,
             "upsert_parse_rule": self.upsert_parse_rule,
             "rate_parse": self.rate_parse,
@@ -1672,6 +1678,87 @@ class ToolRegistry:
                             "min_opportunity": {"type": "number", "default": 60},
                             "limit": {"type": "integer", "default": 20},
                         },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "push_crm_to_notion",
+                    "description": (
+                        "Opcjonalny push otwartych CRM tasks (hot/high) do Notion jako child pages "
+                        "pod sources.notion.crm_parent_page. Wymaga NOTION_TOKEN."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "default": 20},
+                            "only_hot": {"type": "boolean", "default": True},
+                            "dry_run": {"type": "boolean", "default": False},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_suppliers",
+                    "description": (
+                        "Lista dostawców/dystrybutorów/dealerów z oceną kanału i pokrycia marek."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "q": {"type": "string"},
+                            "limit": {"type": "integer", "default": 30},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "supplier_scoreboard",
+                    "description": "Tabela ocen dostawców (supplier_overall, channel_reach, brand_coverage).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"limit": {"type": "integer", "default": 25}},
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "score_suppliers",
+                    "description": "Przelicz i zapisz scorecard dostawców w firm_profiles.json.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "resolve_firm_duplicates",
+                    "description": (
+                        "Golden record: znajdź / scal duplikaty profili firm "
+                        "(domyślnie dry_run=true)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "dry_run": {"type": "boolean", "default": True},
+                            "threshold": {"type": "number", "default": 0.92},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_run_metrics",
+                    "description": "Ostatnie metryki runów (knowledge counts, new_items, mode).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"limit": {"type": "integer", "default": 15}},
                     },
                 },
             },
@@ -3994,6 +4081,75 @@ class ToolRegistry:
             min_opportunity=float(args.get("min_opportunity") or 60),
             limit=int(args.get("limit") or 20),
         )
+
+    def push_crm_to_notion(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.crm_tasks import push_crm_tasks_to_notion
+
+        return push_crm_tasks_to_notion(
+            self.config,
+            only_hot=bool(args.get("only_hot", True)),
+            limit=int(args.get("limit") or 20),
+            dry_run=bool(args.get("dry_run", False)),
+        )
+
+    def list_suppliers(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.suppliers import SupplierRegistry
+
+        reg = SupplierRegistry(self._get_profiles())
+        rows = reg.list_suppliers(
+            q=str(args.get("q") or "").strip() or None,
+            limit=int(args.get("limit") or 30),
+        )
+        return {
+            "ok": True,
+            "count": len(rows),
+            "suppliers": [
+                {
+                    "company": p.company,
+                    "roles": p.roles,
+                    "country": p.country,
+                    "supplier_overall": (p.scores or {}).get("supplier_overall"),
+                    "customers": (p.network or {}).get("customers") or [],
+                    "scores": {
+                        k: (p.scores or {}).get(k)
+                        for k in ("supplier_overall", "completeness", "identity_trust", "digital_commerce")
+                    },
+                }
+                for p in rows
+            ],
+        }
+
+    def supplier_scoreboard(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.suppliers import SupplierRegistry
+
+        reg = SupplierRegistry(self._get_profiles())
+        return {"ok": True, "scoreboard": reg.scoreboard(limit=int(args.get("limit") or 25))}
+
+    def score_suppliers(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.suppliers import SupplierRegistry
+
+        reg = SupplierRegistry.load(self.config.data_path)
+        result = reg.refresh_and_save(self.config.data_path)
+        self._profiles = reg.profiles
+        return result
+
+    def resolve_firm_duplicates(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.entity_resolution import resolve_golden_records
+
+        result = resolve_golden_records(
+            self.config.data_path,
+            threshold=float(args.get("threshold") or 0.92),
+            dry_run=bool(args.get("dry_run", True)),
+        )
+        if not result.get("dry_run"):
+            self._profiles = None
+        return result
+
+    def list_run_metrics(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.metrics import recent_metrics
+
+        rows = recent_metrics(self.config.data_path, limit=int(args.get("limit") or 15))
+        return {"ok": True, "count": len(rows), "metrics": rows}
 
     def discover_new_firms(self, args: dict[str, Any]) -> dict[str, Any]:
         limit = int(args.get("limit") or 25)

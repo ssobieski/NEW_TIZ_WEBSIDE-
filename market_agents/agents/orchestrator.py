@@ -96,6 +96,21 @@ class Orchestrator:
         except Exception as exc:  # noqa: BLE001
             enrich_meta = {"ok": False, "error": str(exc)[:200]}
 
+        metrics_row: dict = {}
+        try:
+            from market_agents.metrics import record_run_metrics
+
+            metrics_row = record_run_metrics(
+                self.config.data_path,
+                mode=mode,
+                new_items=len(items),
+                report_path=str(md_path),
+                trace_path=str(trace_path) if trace_path else None,
+                post_enrich=enrich_meta,
+            )
+        except Exception as exc:  # noqa: BLE001
+            metrics_row = {"ok": False, "error": str(exc)[:200]}
+
         self.storage.export_snapshot(
             {
                 "industry": self.config.industry.name,
@@ -104,6 +119,7 @@ class Orchestrator:
                 "report_md": str(md_path),
                 "trace": str(trace_path) if trace_path else None,
                 "post_enrich": enrich_meta,
+                "metrics": {"ts": metrics_row.get("ts"), "knowledge_counts": metrics_row.get("knowledge_counts")},
             }
         )
         return RunResult(
@@ -117,7 +133,7 @@ class Orchestrator:
         )
 
     def _post_enrich(self) -> dict:
-        """Odśwież firm profiles + CRM tasks po cyklu (offline knowledge)."""
+        """Odśwież firm profiles, suppliers, opcjonalnie golden records + CRM."""
         out: dict = {"ok": True}
         data_dir = self.config.data_path
         if getattr(self.config.agents, "post_enrich_profiles", True):
@@ -133,6 +149,14 @@ class Orchestrator:
                 "count": built.get("count"),
                 "path": built.get("path"),
             }
+        if getattr(self.config.agents, "post_enrich_resolve_duplicates", False):
+            from market_agents.entity_resolution import resolve_golden_records
+
+            out["entity_resolution"] = resolve_golden_records(data_dir, dry_run=False)
+        if getattr(self.config.agents, "post_enrich_suppliers", True):
+            from market_agents.suppliers import SupplierRegistry
+
+            out["suppliers"] = SupplierRegistry.load(data_dir).refresh_and_save(data_dir)
         if getattr(self.config.agents, "post_enrich_crm_tasks", True):
             from market_agents.crm_tasks import create_tasks_from_prospect_scoreboard
 

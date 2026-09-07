@@ -55,6 +55,8 @@ class NotionConfig(BaseModel):
     known_firms_database: str | None = None
     # Baza „Pozycje” / literatura (book|paper|video|code) — Notion Type→local kind
     literature_database: str | None = None
+    # Parent page dla opcjonalnego push lokalnych CRM tasks → Notion
+    crm_parent_page: str | None = None
     # Opcjonalnie: query po tytule przy sync
     search_queries: list[str] = Field(default_factory=list)
     max_pages: int = 50
@@ -290,6 +292,9 @@ class AgentsConfig(BaseModel):
     # Po każdym run: odśwież profiles + CRM tasks z hot prospectów
     post_enrich_profiles: bool = True
     post_enrich_crm_tasks: bool = True
+    post_enrich_suppliers: bool = True
+    # Merge duplikatów firm — wyłączone domyślnie (bezpieczniej ręcznie / dry-run)
+    post_enrich_resolve_duplicates: bool = False
     crm_min_opportunity: float = 60.0
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)
