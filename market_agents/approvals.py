@@ -12,10 +12,34 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def normalize_host(value: str | None) -> str:
+    """Z URL lub hostname wyciągnij host bez www."""
+    raw = (value or "").strip().lower()
+    if not raw:
+        return ""
+    if "://" in raw or raw.startswith("//"):
+        host = (urlparse(raw if "://" in raw else f"https:{raw}").hostname or "").lower()
+    else:
+        # host_or_url może być "example.com/path" albo samym hostem
+        host = raw.split("/")[0].split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def host_matches(grant_host: str, request_host: str) -> bool:
+    g = normalize_host(grant_host)
+    r = normalize_host(request_host)
+    if not g or not r:
+        return False
+    return r == g or r.endswith("." + g) or g.endswith("." + r)
 
 
 @dataclass
@@ -36,13 +60,14 @@ class ApprovalGrant:
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> ApprovalGrant:
+        host = raw.get("host")
         return cls(
             id=str(raw.get("id") or uuid.uuid4().hex[:10]),
             tool=str(raw.get("tool") or "").strip(),
             approved_by=str(raw.get("approved_by") or "operator"),
             note=str(raw.get("note") or "")[:400],
             company=(str(raw["company"]) if raw.get("company") else None),
-            host=(str(raw["host"]) if raw.get("host") else None),
+            host=(normalize_host(str(host)) if host else None) or None,
             expires_at=(str(raw["expires_at"]) if raw.get("expires_at") else None),
             revoked=bool(raw.get("revoked")),
             created_at=str(raw.get("created_at") or utc_now_iso()),
@@ -104,13 +129,14 @@ class ApprovalStore:
         host: str | None = None,
         expires_at: str | None = None,
     ) -> ApprovalGrant:
+        host_n = normalize_host(host) if host else None
         grant = ApprovalGrant(
             id=uuid.uuid4().hex[:10],
             tool=tool.strip(),
             approved_by=approved_by,
             note=note,
-            company=company,
-            host=host,
+            company=company.strip() if company else None,
+            host=host_n or None,
             expires_at=expires_at,
         )
         self.grants.append(grant)
@@ -131,19 +157,24 @@ class ApprovalStore:
         host: str | None = None,
     ) -> ApprovalGrant | None:
         tool = (tool or "").strip()
+        req_host = normalize_host(host) if host else ""
+        req_company = (company or "").strip().lower()
+
+        # 1) scoped grants (host and/or company) — must match
         for g in reversed(self.grants):
             if not g.is_active() or g.tool != tool:
                 continue
-            if g.company and company and g.company.lower() != company.lower():
+            if not g.company and not g.host:
                 continue
-            if g.company and not company:
-                continue
-            if g.host and host and g.host.lower() not in host.lower():
-                continue
-            if g.host and not host:
-                continue
+            if g.company:
+                if not req_company or g.company.lower() != req_company:
+                    continue
+            if g.host:
+                if not req_host or not host_matches(g.host, req_host):
+                    continue
             return g
-        # also allow grants with no company/host scope
+
+        # 2) unscoped grants (tool-wide)
         for g in reversed(self.grants):
             if g.is_active() and g.tool == tool and not g.company and not g.host:
                 return g

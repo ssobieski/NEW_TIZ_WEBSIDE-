@@ -482,14 +482,20 @@ class GovernanceEngine:
             and not decision.allowed
             and self.mode == "enforce"
         ):
-            from market_agents.approvals import ApprovalStore
+            from market_agents.approvals import ApprovalStore, normalize_host
 
             store = ApprovalStore.load(self.audit_dir)
             company = None
             host = None
             if req.args:
-                company = str(req.args.get("company") or req.args.get("host_or_url") or "") or None
-                host = str(req.args.get("host_or_url") or req.args.get("host") or "") or None
+                company = str(req.args.get("company") or "").strip() or None
+                host_raw = str(
+                    req.args.get("host_or_url")
+                    or req.args.get("host")
+                    or req.args.get("url")
+                    or ""
+                ).strip()
+                host = normalize_host(host_raw) or host_raw or None
             grant = store.is_approved(req.tool or "", company=company, host=host)
             if grant:
                 decision = PolicyDecision(

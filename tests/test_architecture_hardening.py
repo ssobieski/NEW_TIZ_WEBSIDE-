@@ -223,6 +223,38 @@ def test_parsing_agent_prompt_mentions_profiles_prospects():
     assert "PROSPECTS" in src or "analyze_prospect" in src
     assert "build_firm_profiles" in src
     assert "create_crm_task" in src
+    assert "GUARDRAIL" in src
+    assert "tooling OEM" in src
+
+
+def test_approval_host_scope_matches_url(tmp_path: Path):
+    from market_agents.approvals import ApprovalStore, normalize_host, host_matches
+    from market_agents.governance import GovernanceEngine, load_policy_pack
+
+    assert normalize_host("https://www.Example.COM/a") == "example.com"
+    assert host_matches("example.com", "https://www.example.com/x")
+
+    audit = tmp_path / "gov"
+    pack = load_policy_pack("config/governance/tiz.policy.yaml")
+    engine = GovernanceEngine(
+        pack=pack, enabled=True, mode="enforce", audit_dir=audit, role="central"
+    )
+    store = ApprovalStore.load(audit)
+    store.approve("promote_host_skill", host="allowed.example", approved_by="test")
+    store.save(audit)
+
+    assert engine.authorize_tool(
+        "promote_host_skill", {"host_or_url": "https://evil.example/"}
+    ).allowed is False
+    ok = engine.authorize_tool(
+        "promote_host_skill", {"host_or_url": "https://www.allowed.example/skills"}
+    )
+    assert ok.allowed is True
+    rows = engine.recent_audit(limit=5)
+    assert any(
+        any(str(x).startswith("approval:") for x in (r.get("decision") or {}).get("matched_rules") or [])
+        for r in rows
+    )
 
 
 def test_crm_cli_store(tmp_path: Path):
