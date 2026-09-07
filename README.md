@@ -126,6 +126,27 @@ Założenia: `config/prospect_assumptions.json` · seed: `config/prospects.seed.
 Tooli: `analyze_prospect`, `list_prospects`, `get_prospect_profile`, `prospect_scoreboard`,
 `estimate_tooling_budget`, `ingest_prospect_seeds`.
 
+## MVP do testów (offline)
+
+Szybka ścieżka bez GPU / Notion / R2 / sieci — seed → profiles → prospect → CRM →
+suppliers → digest → export → fleet pack.
+
+```bash
+# jednorazowy smoke (pytest + bootstrap + worker pull)
+bash scripts/mvp_smoke.sh
+
+# albo ręcznie
+python -m market_agents init --profile mvp --force
+python -m market_agents mvp bootstrap --reset
+python -m market_agents mvp status
+python -m market_agents profiles --scoreboard --config config/mvp.example.yaml
+python -m market_agents prospects --scoreboard --config config/mvp.example.yaml
+python -m market_agents crm list --config config/mvp.example.yaml
+```
+
+Config: `config/mvp.example.yaml` · sample prospect: `config/mvp_prospect_sample.txt`  
+Artefakty: `data/mvp/` (knowledge, metrics, export, fleet).
+
 ## Architecture hardening (P0–P6)
 
 1. ParsingAgent procedura obejmuje **profiles + prospects + CRM tasks**

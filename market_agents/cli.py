@@ -39,7 +39,7 @@ def init_config(
     profile: str = typer.Option(
         "tiz",
         "--profile",
-        help="tiz (Notion+R2 tooling) | dell | basic | furniture",
+        help="tiz | mvp | worker | dell | basic | furniture",
     ),
 ) -> None:
     """Utwórz config/industry.yaml z profilu."""
@@ -48,6 +48,8 @@ def init_config(
         "basic": Path("config/industry.example.yaml"),
         "furniture": Path("config/furniture.pl.example.yaml"),
         "tiz": Path("config/tiz_cutting_tools.example.yaml"),
+        "mvp": Path("config/mvp.example.yaml"),
+        "worker": Path("config/tiz_worker.example.yaml"),
     }
     src = mapping.get(profile, mapping["dell"])
     dst = Path("config/industry.yaml")
@@ -941,6 +943,49 @@ def export_knowledge_cmd(
     cfg = load_config(path)
     result = export_knowledge_pack(cfg.data_path, out, limit=limit)
     console.print(result)
+
+
+@app.command("mvp")
+def mvp_cmd(
+    action: str = typer.Argument("bootstrap", help="bootstrap | status | smoke"),
+    config: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="Domyślnie config/mvp.example.yaml"
+    ),
+    data_dir: Optional[Path] = typer.Option(
+        None, "--data-dir", help="Nadpisz katalog danych (domyślnie z config)"
+    ),
+    reset: bool = typer.Option(False, "--reset", help="Wyczyść data_dir przed bootstrap"),
+) -> None:
+    """MVP offline do testów — bez GPU / Notion / sieci."""
+    from market_agents.mvp import bootstrap_mvp, mvp_status
+
+    cfg_path = config or Path("config/mvp.example.yaml")
+    if not cfg_path.exists():
+        console.print(f"[red]Brak config:[/red] {cfg_path}")
+        raise typer.Exit(1)
+    cfg = load_config(cfg_path)
+    target = Path(data_dir) if data_dir else cfg.data_path
+    act = (action or "bootstrap").lower().strip()
+
+    if act == "status":
+        console.print(mvp_status(target))
+        return
+
+    if act in {"bootstrap", "smoke"}:
+        result = bootstrap_mvp(
+            target, config_path=cfg_path, reset=reset or act == "smoke"
+        )
+        console.print_json(data=result)
+        if not result.get("ok"):
+            console.print("[red]MVP acceptance FAILED[/red]", result.get("acceptance"))
+            raise typer.Exit(1)
+        console.print(f"[green]MVP OK[/green] data_dir={target}")
+        if act == "smoke":
+            console.print("Smoke passed — profiles/CRM/digest/export/fleet ready.")
+        return
+
+    console.print("Użyj: mvp bootstrap | mvp status | mvp smoke")
+    raise typer.Exit(1)
 
 
 @app.command("social")

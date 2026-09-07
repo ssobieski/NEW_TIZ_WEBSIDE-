@@ -1,0 +1,97 @@
+# MVP offline — testy bez GPU / Notion / R2 / sieci
+# cp config/mvp.example.yaml config/industry.yaml
+# python -m market_agents mvp bootstrap
+# bash scripts/mvp_smoke.sh
+
+industry:
+  name: TIZ MVP (offline test)
+  language: pl
+  keywords:
+  - cutting tools
+  - narzędzia skrawające
+  - cnc
+  - frezowanie
+  exclude_keywords:
+  - oferta pracy
+  competitors:
+  - Sandvik Coromant
+  - Kennametal
+  - Iscar
+  - Hoffmann Group
+  - MAPAL
+  focus_questions:
+  - Którzy dystrybutorzy sprzedają tooling w PL?
+  - Jakie zakłady produkcyjne kupują narzędzia skrawające?
+
+sources:
+  rss: []
+  web: []
+  catalogs: []
+  media: []
+  social: []
+  literature: []
+  firm_discovery:
+    enabled: false
+  notion:
+    enabled: false
+  cloudflare_r2:
+    enabled: false
+
+llm:
+  provider: vllm
+  base_url: http://127.0.0.1:8000
+  model: unused-on-mvp
+  # MVP idzie --skip-llm
+
+agents:
+  max_items_per_source: 5
+  lookback_hours: 24
+  report_dir: reports/mvp
+  data_dir: data/mvp
+  min_relevance_score: 0.2
+  post_enrich_profiles: true
+  post_enrich_crm_tasks: true
+  post_enrich_suppliers: true
+  post_enrich_resolve_duplicates: false
+  post_enrich_crm_notion: false
+  post_enrich_digest: true
+  crm_min_opportunity: 50
+  agentic:
+    enabled: false
+    max_steps: 4
+    max_deep_parses: 2
+    learn_parse_rules: false
+    learn_parsing_skills: false
+  crawl:
+    enabled: false
+    block_private_networks: true
+  security:
+    enabled: true
+    allow_write_tools: true
+    allow_notion_tools: false
+    allow_r2_tools: false
+    strict_tool_mode: false
+    redact_traces: true
+  governance:
+    enabled: true
+    mode: enforce
+    policy_pack: config/governance/tiz.policy.yaml
+    audit_dir: data/mvp/governance
+    fail_closed: false
+    deny_require_approval: true
+  fleet:
+    role: central
+    sync_dir: data/mvp/fleet
+    auto_pull_before_run: false
+    auto_push_after_run: true
+    publish_known_firms: true
+    publish_relations: true
+    publish_ontology: true
+    publish_firm_profiles: true
+    publish_pricelists: true
+    publish_literature: true
+    publish_product_tech: true
+    publish_run_status: true
+
+schedule:
+  every_hours: 24
