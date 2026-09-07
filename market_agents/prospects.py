@@ -563,11 +563,19 @@ def compute_opportunity_scorecard(
     has_website: bool,
 ) -> dict[str, Any]:
     # Fit to TIZ cutting tools offering
-    process_fit = min(100, len(product_map.get("likely_processes") or []) * 20)
-    material_fit = min(100, len(product_map.get("likely_materials") or []) * 18)
+    process_fit = min(100, len(product_map.get("likely_processes") or []) * 18)
+    material_fit = min(100, len(product_map.get("likely_materials") or []) * 16)
+    tooling_depth = min(
+        100,
+        len(product_map.get("practical_tools") or product_map.get("likely_tool_families") or []) * 10
+        + len(product_map.get("product_families") or []) * 12
+        + len(product_map.get("peer_rules_applied") or []) * 8,
+    )
     equipment_score = {"premium": 90, "mid": 70, "mixed": 75, "economy": 45, "unknown": 25}.get(
         quality_tier_from_equipment(equipment), 25
     )
+    if product_map.get("equipment_categories"):
+        equipment_score = min(100, equipment_score + 8)
     supplier_displace = min(100, len(buys_from) * 12)  # zna tooling → da się wypierać
     stakeholder_access = min(100, sum(25 if s.get("influence_on_purchase") == "high" else 12 for s in stakeholders))
     budget_score = 30
@@ -589,18 +597,24 @@ def compute_opportunity_scorecard(
     )
 
     overall = round(
-        0.18 * process_fit
-        + 0.12 * material_fit
-        + 0.15 * equipment_score
-        + 0.12 * supplier_displace
-        + 0.15 * stakeholder_access
-        + 0.18 * budget_score
+        0.14 * process_fit
+        + 0.10 * material_fit
+        + 0.14 * tooling_depth
+        + 0.13 * equipment_score
+        + 0.11 * supplier_displace
+        + 0.13 * stakeholder_access
+        + 0.15 * budget_score
         + 0.05 * digital_presence
         + 0.05 * vertical_bonus
     )
     table = [
         {"dimension": "process_fit", "score": process_fit, "label": "Dopasowanie procesów skrawania"},
         {"dimension": "material_fit", "score": material_fit, "label": "Materiały obrabiane (ISO)"},
+        {
+            "dimension": "tooling_inference",
+            "score": tooling_depth,
+            "label": "Inferencja narzędzi (produkt/proces/sprzęt/peerzy)",
+        },
         {"dimension": "equipment_quality", "score": equipment_score, "label": "Poziom jakości parku maszyn"},
         {"dimension": "current_suppliers", "score": supplier_displace, "label": "Od kogo kupuje tooling dziś"},
         {"dimension": "stakeholder_access", "score": stakeholder_access, "label": "Wpływ osób na zakup"},
@@ -651,6 +665,44 @@ def analyze_prospect_text(
             "Procesy/materiały/narzędzia wyinferowane z treści publicznej — bez kopiowania cutting data"
         ),
     }
+    from market_agents.tooling_inference import infer_customer_tooling
+
+    tooling_inf = infer_customer_tooling(
+        text,
+        vertical=vertical,
+        brand_equipment=equipment,
+        process_hint=list(pm.get("likely_processes") or []),
+        material_hint=list(pm.get("likely_materials") or []),
+    )
+    # Merge inferred processes/materials/tools into product_map
+    product_map["product_families"] = tooling_inf.get("product_families") or []
+    product_map["theoretical_process"] = tooling_inf.get("theoretical_process") or []
+    product_map["practical_tools"] = list(
+        dict.fromkeys(
+            list(pm.get("likely_tool_families") or [])
+            + list(tooling_inf.get("practical_tools") or [])
+        )
+    )
+    product_map["workholding_fixturing"] = tooling_inf.get("workholding_fixturing") or []
+    product_map["equipment_categories"] = tooling_inf.get("equipment_categories") or []
+    product_map["peer_rules_applied"] = tooling_inf.get("peer_rules_applied") or []
+    product_map["inference_confidence"] = tooling_inf.get("inference_confidence")
+    product_map["inference_note"] = tooling_inf.get("method_note")
+    # Enrich process/material lists from inference
+    product_map["likely_processes"] = list(
+        dict.fromkeys(
+            list(product_map.get("likely_processes") or [])
+            + list(tooling_inf.get("likely_processes") or [])
+        )
+    )
+    product_map["likely_materials"] = list(
+        dict.fromkeys(
+            list(product_map.get("likely_materials") or [])
+            + list(tooling_inf.get("likely_materials") or [])
+        )
+    )
+    product_map["likely_tool_families"] = product_map["practical_tools"]
+
     quality = quality_tier_from_equipment(equipment)
     scorecard = compute_opportunity_scorecard(
         vertical=vertical,
@@ -675,13 +727,15 @@ def analyze_prospect_text(
         "equipment": equipment,
         "quality_tier": quality,
         "product_map": product_map,
+        "tooling_inference": tooling_inf,
         "stakeholders": stakeholders,
         "opportunity": scorecard,
         "website": website,
         "analyzed_at": utc_now_iso(),
         "disclaimer": (
             "Budżet 4–10% kosztów produkcji na tooling to założenie branżowe (heurystyka), "
-            "nie audyt finansowy. Dane wyłącznie z źródeł publicznych."
+            "nie audyt finansowy. Inferencja narzędzi z produktu/procesu/sprzętu/peerów — "
+            "dane wyłącznie z źródeł publicznych."
         ),
     }
 
@@ -785,6 +839,7 @@ def apply_prospect_to_profile(profile: FirmProfile, analysis: dict[str, Any]) ->
         "equipment": analysis.get("equipment") or [],
         "quality_tier": analysis.get("quality_tier"),
         "product_map": analysis.get("product_map") or {},
+        "tooling_inference": analysis.get("tooling_inference") or {},
         "stakeholders": analysis.get("stakeholders") or [],
         "opportunity": analysis.get("opportunity") or {},
         "disclaimer": analysis.get("disclaimer"),

@@ -126,6 +126,17 @@ Założenia: `config/prospect_assumptions.json` · seed: `config/prospects.seed.
 Tooli: `analyze_prospect`, `list_prospects`, `get_prospect_profile`, `prospect_scoreboard`,
 `estimate_tooling_budget`, `ingest_prospect_seeds`.
 
+### Inferencja tooling (produkt → proces → narzędzia)
+
+Przy `analyze_prospect` bot buduje w profilu:
+- **produkty** klienta i **rodzinę produktową** (formy, matryce, wały, korpusy…)
+- **teoretyczny proces** (how it's made)
+- **narzędzia praktyczne** + **oprzyrządowanie**
+- z **parku maszyn** (WWW / film / opis) dodatkowe rodziny narzędzi
+- **reguły peerów** (np. firmy produkujące formy → podobny zakres tooling)
+
+Reguły: `config/tooling_inference.rules.json` · silnik: `market_agents/tooling_inference.py`
+
 ## Przetargi / sygnały zakupu sprzętu
 
 Parsuj ogłoszenia przetargów oraz newsy, że firma **kupiła / zamierza kupić / planuje
