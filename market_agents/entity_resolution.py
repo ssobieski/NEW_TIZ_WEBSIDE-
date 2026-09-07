@@ -7,6 +7,7 @@ i przepisuje CRM + relacje na kanoniczną nazwę.
 
 from __future__ import annotations
 
+import json
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -85,6 +86,64 @@ def _alias_map_from_merges(merges: list[dict[str, Any]]) -> dict[str, str]:
     return mapping
 
 
+def _alias_map_path(data_dir: Path | str) -> Path:
+    return Path(data_dir) / "knowledge" / "firm_aliases.json"
+
+
+def load_alias_map(data_dir: Path | str) -> dict[str, str]:
+    path = _alias_map_path(data_dir)
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        if k and v:
+            out[str(k)] = str(v)
+    return out
+
+
+def save_alias_map(data_dir: Path | str, alias_map: dict[str, str]) -> Path:
+    """Accumulate normalized→canonical map so seed merges stay alias-aware on reload."""
+    data_dir = Path(data_dir)
+    path = _alias_map_path(data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    merged = load_alias_map(data_dir)
+    for k, v in (alias_map or {}).items():
+        if k and v:
+            merged[str(k)] = str(v)
+    # Follow chains: alias → mid → keep becomes alias → keep
+    changed = True
+    while changed:
+        changed = False
+        for k, v in list(merged.items()):
+            nxt = merged.get(normalize_firm_name(v))
+            if nxt and nxt != v:
+                merged[k] = nxt
+                changed = True
+    path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def canonicalize_edge_endpoints(edge: dict[str, Any], alias_map: dict[str, str]) -> dict[str, Any]:
+    """Return a copy of edge with source/target remapped via alias_map."""
+    if not alias_map or not isinstance(edge, dict):
+        return dict(edge) if isinstance(edge, dict) else {}
+    row = dict(edge)
+    for field in ("source", "target", "from_company", "to_company"):
+        raw = str(row.get(field) or "")
+        if not raw:
+            continue
+        canon = alias_map.get(normalize_firm_name(raw))
+        if canon and canon != raw:
+            row[field] = canon
+    return row
+
+
 def rewrite_crm_companies(data_dir: Path | str, alias_map: dict[str, str]) -> int:
     from market_agents.crm_tasks import CrmTaskStore
 
@@ -112,18 +171,23 @@ def rewrite_relation_endpoints(data_dir: Path | str, alias_map: dict[str, str]) 
     if not alias_map:
         return 0
     # Include seed so endpoints that only exist in seed are canonicalized into cache.
-    g = FirmRelationsGraph.load(data_dir, include_seed=True)
+    # Pass alias_map so seed merge itself is already canonical (no alias reintroduction).
+    g = FirmRelationsGraph.load(data_dir, include_seed=True, alias_map=alias_map)
     n = 0
+    rewritten: list[dict[str, Any]] = []
     for edge in g.edges:
+        row = dict(edge)
         for field, norm_field in (("source", "normalized_source"), ("target", "normalized_target")):
-            raw = str(edge.get(field) or "")
+            raw = str(row.get(field) or "")
             canon = alias_map.get(normalize_firm_name(raw))
             if canon and canon != raw:
-                edge[field] = canon
-                edge[norm_field] = normalize_firm_name(canon)
+                row[field] = canon
+                row[norm_field] = normalize_firm_name(canon)
                 n += 1
-    if n:
-        g.save(data_dir)
+        rewritten.append(row)
+    # Rebuild graph so _keys match canonical endpoints (in-place mutate leaves stale keys).
+    FirmRelationsGraph(rewritten).save(data_dir)
+    save_alias_map(data_dir, alias_map)
     return n
 
 
@@ -174,6 +238,9 @@ def resolve_golden_records(
     if not dry_run and merges:
         path = str(reg.save(data_dir))
         alias_map = _alias_map_from_merges(merges)
+        # Merge with any prior aliases so seed remaps stay complete across runs.
+        prior = load_alias_map(data_dir)
+        alias_map = {**prior, **alias_map}
         crm_rewritten = rewrite_crm_companies(data_dir, alias_map)
         relations_rewritten = rewrite_relation_endpoints(data_dir, alias_map)
     return {

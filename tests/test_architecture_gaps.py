@@ -120,7 +120,35 @@ def test_entity_resolve_rewrites_crm_and_relations(tmp_path: Path):
 
     rel = FirmRelationsGraph.load(tmp_path)
     sources = {e.get("source") for e in rel.edges}
-    assert "Sandvik Coromant AB" in sources
+    targets = {e.get("target") for e in rel.edges}
+    assert "Sandvik Coromant AB" in sources or "Sandvik Coromant AB" in targets
+    # Seed must not reintroduce the pre-merge alias after resolve+reload.
+    assert "Sandvik Coromant" not in sources
+    assert "Sandvik Coromant" not in targets
+    sandvik_distributor = [
+        e
+        for e in rel.edges
+        if e.get("relation_type") == "distributor_of"
+        and "sandvik" in str(e.get("source") or "").lower()
+        and "hoffmann" in str(e.get("target") or "").lower()
+    ]
+    assert len(sandvik_distributor) == 1
+    assert sandvik_distributor[0]["source"] == "Sandvik Coromant AB"
+
+
+def test_post_enrich_marks_step_ok_false(tmp_path: Path):
+    """Enabled step returning {ok: False} must fail overall post_enrich."""
+    cfg = _cfg(tmp_path)
+    cfg.agents.post_enrich_profiles = False
+    cfg.agents.post_enrich_crm_tasks = False
+    cfg.agents.post_enrich_suppliers = False
+    cfg.agents.post_enrich_digest = False
+    cfg.agents.post_enrich_crm_notion = True
+    orch = Orchestrator(cfg)
+    meta = orch._post_enrich()
+    assert meta.get("ok") is False
+    assert "crm_notion" in (meta.get("errors") or {})
+    assert (meta.get("crm_notion") or {}).get("ok") is False
 
 
 def test_absorb_items_tail(tmp_path: Path):

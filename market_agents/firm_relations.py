@@ -111,6 +111,7 @@ class FirmRelationsGraph:
         seed_path: Path | str = "config/firm_relations.seed.json",
         *,
         include_seed: bool = True,
+        alias_map: dict[str, str] | None = None,
     ) -> FirmRelationsGraph:
         data_dir = Path(data_dir or "data")
         cache = data_dir / "knowledge" / "firm_relations.json"
@@ -129,6 +130,18 @@ class FirmRelationsGraph:
                 payload = json.loads(seed.read_text(encoding="utf-8"))
                 seed_edges = payload.get("edges", payload if isinstance(payload, list) else [])
                 if isinstance(seed_edges, list):
+                    aliases = alias_map
+                    if aliases is None:
+                        try:
+                            from market_agents.entity_resolution import load_alias_map
+
+                            aliases = load_alias_map(data_dir)
+                        except Exception:  # noqa: BLE001
+                            aliases = {}
+                    if aliases:
+                        from market_agents.entity_resolution import canonicalize_edge_endpoints
+
+                        seed_edges = [canonicalize_edge_endpoints(e, aliases) for e in seed_edges]
                     graph.merge(seed_edges)
             except Exception:  # noqa: BLE001
                 pass

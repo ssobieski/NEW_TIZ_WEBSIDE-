@@ -181,7 +181,13 @@ class Orchestrator:
             if not enabled:
                 return
             try:
-                out[name] = fn()
+                result = fn()
+                out[name] = result
+                if isinstance(result, dict) and result.get("ok") is False:
+                    out["errors"][name] = str(
+                        result.get("error") or "step reported failure"
+                    )[:200]
+                    out["ok"] = False
             except Exception as exc:  # noqa: BLE001
                 out["errors"][name] = str(exc)[:200]
                 out["ok"] = False
