@@ -138,6 +138,8 @@ def test_entity_resolve_rewrites_crm_and_relations(tmp_path: Path):
 
 def test_flatten_alias_map_long_chain_rewrites_stores(tmp_path: Path):
     """Chains longer than 32 links must still resolve to the terminal canonical."""
+    from itertools import pairwise
+
     from market_agents.entity_resolution import (
         flatten_alias_map,
         rewrite_crm_companies,
@@ -148,7 +150,7 @@ def test_flatten_alias_map_long_chain_rewrites_stores(tmp_path: Path):
 
     names = [f"Alias{i} Co" for i in range(40)] + ["Canonical Co"]
     chain: dict[str, str] = {}
-    for a, b in zip(names, names[1:]):
+    for a, b in pairwise(names):
         chain[normalize_firm_name(a)] = b
     flat = flatten_alias_map(chain)
     assert flat[normalize_firm_name("Alias0 Co")] == "Canonical Co"
