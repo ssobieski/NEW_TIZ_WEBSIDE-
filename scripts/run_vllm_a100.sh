@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start vLLM on Dell A100s — OpenAI-compatible API for market agents.
-# Requires: CUDA, vllm, model on disk / HF cache.
+# Requires: CUDA driver, vllm, model on disk / HF cache.
 # Note: attention heads must be divisible by tensor parallel size
 # (Qwen2.5-72B = 64 heads → TP ∈ {1,2,4,8,…}; with 3 GPUs use TP=2).
 set -euo pipefail
@@ -34,6 +34,49 @@ if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi >/dev/null 2>&1; then
   echo "Diag: bash scripts/dell_gpu_diagnose.sh"
   exit 1
 fi
+
+# FlashInfer JIT needs nvcc. Pip vLLM wheels ship nvidia-cuda-nvcc under
+# site-packages but do not create /usr/local/cuda. Point CUDA_HOME there,
+# and default-disable FlashInfer sampler JIT (native sampler is fine).
+# Override: VLLM_USE_FLASHINFER_SAMPLER=1 after installing a real toolkit.
+ensure_cuda_home() {
+  if [[ -n "${CUDA_HOME:-}" && -x "${CUDA_HOME}/bin/nvcc" ]]; then
+    return
+  fi
+  if [[ -x /usr/local/cuda/bin/nvcc ]]; then
+    export CUDA_HOME=/usr/local/cuda
+    return
+  fi
+  local site nvcc_bin cand
+  site="$("$PYTHON" -c 'import site; print(site.getsitepackages()[0])' 2>/dev/null || true)"
+  [[ -z "$site" ]] && return
+  for cand in \
+    "$site/nvidia/cu13" \
+    "$site/nvidia/cuda_nvcc" \
+    "$site/nvidia/cu12"; do
+    if [[ -x "$cand/bin/nvcc" ]]; then
+      export CUDA_HOME="$cand"
+      break
+    fi
+  done
+  # Older layout: nvidia/cuda_nvcc/bin without cu13 umbrella
+  if [[ -z "${CUDA_HOME:-}" ]]; then
+    nvcc_bin="$(find "$site/nvidia" -type f -name nvcc 2>/dev/null | head -n 1 || true)"
+    if [[ -n "$nvcc_bin" ]]; then
+      export CUDA_HOME="$(cd "$(dirname "$nvcc_bin")/.." && pwd)"
+    fi
+  fi
+}
+
+ensure_cuda_home
+if [[ -n "${CUDA_HOME:-}" ]]; then
+  export PATH="${CUDA_HOME}/bin:${PATH}"
+  echo "==> CUDA_HOME=$CUDA_HOME"
+else
+  echo "WARN: nvcc nie znaleziony — ustawiam VLLM_USE_FLASHINFER_SAMPLER=0"
+fi
+# Avoid FlashInfer sampler JIT crash when toolkit is incomplete / missing.
+export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
 
 MODEL="${MODEL:-Qwen/Qwen2.5-72B-Instruct-AWQ}"
 PORT="${PORT:-8000}"
@@ -71,7 +114,7 @@ if [[ "${REQUESTED_TP}" != "${TP}" ]]; then
   echo "WARN: TP=${REQUESTED_TP} niepasujący do GPU_COUNT=${GPU_COUNT} / heads=${ATTN_HEADS} — używam TP=${TP}"
 fi
 
-echo "==> vLLM model=$MODEL tp=$TP port=$PORT max_len=$MAX_LEN python=$PYTHON gpus=$GPU_COUNT heads=$ATTN_HEADS"
+echo "==> vLLM model=$MODEL tp=$TP port=$PORT max_len=$MAX_LEN python=$PYTHON gpus=$GPU_COUNT heads=$ATTN_HEADS flashinfer_sampler=${VLLM_USE_FLASHINFER_SAMPLER}"
 
 exec "$PYTHON" -m vllm.entrypoints.openai.api_server \
   --model "$MODEL" \
