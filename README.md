@@ -215,14 +215,31 @@ Eksport: `export-knowledge` / tool `export_knowledge_pack`.
 ## Uruchomienie na Dellu
 
 ```bash
-# terminal 1 — vLLM na 4x A100
+# terminal 1 — vLLM na 4x A100 (bind 0.0.0.0 pod VPN)
 bash scripts/run_vllm_a100.sh
 
-# terminal 2 — agenci
+# terminal 2 — agenci (na tym samym hoście)
 python -m market_agents doctor
 python -m market_agents run --agentic
 python -m market_agents schedule
 ```
+
+### Dell przez Cybertech VPN
+
+Gdy laptop / VPS jest w VPN Cybertech, a vLLM działa na Dellu:
+
+```bash
+# 1) VPN Cybertech ON
+# 2) na Dellu: bash scripts/run_vllm_a100.sh
+# 3) na kliencie — IP Dell w sieci VPN (nie commituj):
+export VLLM_BASE_URL=http://10.x.x.x:8000
+bash scripts/check_dell_vllm.sh
+python -m market_agents doctor
+python -m market_agents run --agentic
+```
+
+Aliasy env: `MARKET_AGENTS_LLM_BASE_URL`, `VLLM_MODEL`, `MARKET_AGENTS_LLM_API_KEY`.
+Profil: `config/dell_vpn.example.yaml` / `init-config --profile dell-vpn`.
 
 Tooli: `list_known_firms`, `get_firm_presentation`, `discover_new_firms`, `check_firm_known`,
 `list_relations`, `add_relation`, `discover_relations`, `firm_neighborhood`,

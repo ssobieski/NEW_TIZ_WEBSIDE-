@@ -1,0 +1,62 @@
+# Profil Dell przez Cybertech VPN (klient ≠ localhost na Dellu)
+#
+# Na Dellu (GPU):
+#   bash scripts/run_vllm_a100.sh          # bind 0.0.0.0:8000
+#
+# Na kliencie (laptop / VPS) z aktywnym Cybertech VPN:
+#   export VLLM_BASE_URL=http://<dell-vpn-ip>:8000
+#   # albo MARKET_AGENTS_LLM_BASE_URL=...
+#   python -m market_agents doctor
+#   python -m market_agents run --agentic
+#
+# Nie commituj prawdziwego IP — trzymaj w .env / shell profile.
+# cp config/dell_vpn.example.yaml config/industry.yaml   # opcjonalnie
+
+industry:
+  name: "Narzędzia skrawające / machining (TIZ)"
+  language: "pl"
+  keywords:
+    - "narzędzia skrawające"
+    - "CNC"
+    - "przetarg"
+  competitors: []
+  exclude_keywords:
+    - "oferta pracy"
+    - "rekrutacja"
+  focus_questions:
+    - "Jakie sygnały zakupu obrabiarek / tooling u klientów?"
+    - "Którzy peerzy w formach / aero potrzebują podobnego tooling?"
+
+sources:
+  rss: []
+  web: []
+
+llm:
+  provider: "vllm"
+  # Placeholder — nadpisz env: VLLM_BASE_URL=http://10.x.x.x:8000
+  base_url: "http://127.0.0.1:8000"
+  model: "Qwen/Qwen2.5-72B-Instruct-AWQ"
+  temperature: 0.1
+  timeout_seconds: 300
+  api_key: "EMPTY"
+  max_tokens: 4096
+  tensor_parallel_size: 4
+  gpu_memory_utilization: 0.90
+  max_model_len: 32768
+
+agents:
+  max_items_per_source: 20
+  lookback_hours: 72
+  report_dir: "reports"
+  data_dir: "data"
+  min_relevance_score: 0.3
+  agentic:
+    enabled: true
+    max_steps: 12
+    max_deep_parses: 8
+    parallel_fetches: 6
+    require_tool_use: true
+    trace_dir: "data/agent_traces"
+
+schedule:
+  every_hours: 4

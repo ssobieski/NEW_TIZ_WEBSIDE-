@@ -115,8 +115,10 @@ class LocalLLM:
                 "ok": False,
                 "error": str(exc),
                 "hint": (
-                    "Uruchom vLLM na Dellu: bash scripts/run_vllm_a100.sh "
-                    f"(TP={self.config.tensor_parallel_size})"
+                    "Uruchom vLLM na Dellu (VPN Cybertech): bash scripts/run_vllm_a100.sh "
+                    f"(TP={self.config.tensor_parallel_size}). "
+                    "Klient: export VLLM_BASE_URL=http://<dell-vpn-ip>:8000 "
+                    "&& python -m market_agents doctor"
                 ),
             }
 

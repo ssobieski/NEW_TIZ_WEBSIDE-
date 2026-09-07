@@ -44,7 +44,7 @@ python -m market_agents doctor
 
 ## Hardening rekomendowany operacyjnie
 
-1. vLLM: bind `127.0.0.1` / VPN; unikaj `--trust-remote-code` jeśli niepotrzebne.
+1. vLLM: bind `127.0.0.1` tylko lokalnie; przez **Cybertech VPN** bind `0.0.0.0` / interfejs VPN i ogranicz firewall do sieci VPN. Unikaj `--trust-remote-code` jeśli niepotrzebne. Klient: `VLLM_BASE_URL=http://<dell-vpn-ip>:8000` (nie commituj IP).
 2. Notion integration: minimalny share (tylko bazy TIZ).
 3. R2 IAM: tylko prefix `monitoring/` read.
 4. Fleet share (NFS/rsync): tylko zapis z centrali do `outbox/`, workery read-only.

@@ -353,7 +353,35 @@ def load_config(path: str | Path) -> AppConfig:
             "Skopiuj config/tiz_cutting_tools.example.yaml → config/industry.yaml"
         )
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    return AppConfig.model_validate(raw)
+    cfg = AppConfig.model_validate(raw)
+    _apply_llm_env_overrides(cfg)
+    return cfg
+
+
+def _apply_llm_env_overrides(cfg: AppConfig) -> None:
+    """Override LLM endpoint from env — for Dell over Cybertech VPN / remote vLLM.
+
+    MARKET_AGENTS_LLM_BASE_URL or VLLM_BASE_URL → llm.base_url
+    MARKET_AGENTS_LLM_MODEL or VLLM_MODEL → llm.model
+    MARKET_AGENTS_LLM_API_KEY → llm.api_key
+    """
+    base = (
+        os.environ.get("MARKET_AGENTS_LLM_BASE_URL")
+        or os.environ.get("VLLM_BASE_URL")
+        or ""
+    ).strip()
+    if base:
+        cfg.llm.base_url = base.rstrip("/")
+    model = (
+        os.environ.get("MARKET_AGENTS_LLM_MODEL")
+        or os.environ.get("VLLM_MODEL")
+        or ""
+    ).strip()
+    if model:
+        cfg.llm.model = model
+    api_key = os.environ.get("MARKET_AGENTS_LLM_API_KEY")
+    if api_key is not None and api_key != "":
+        cfg.llm.api_key = api_key
 
 
 def default_config_path() -> Path:

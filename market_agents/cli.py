@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Optional
@@ -39,12 +40,13 @@ def init_config(
     profile: str = typer.Option(
         "tiz",
         "--profile",
-        help="tiz | mvp | worker | dell | basic | furniture",
+        help="tiz | mvp | worker | dell | dell-vpn | basic | furniture",
     ),
 ) -> None:
     """Utwórz config/industry.yaml z profilu."""
     mapping = {
         "dell": Path("config/dell_a100.example.yaml"),
+        "dell-vpn": Path("config/dell_vpn.example.yaml"),
         "basic": Path("config/industry.example.yaml"),
         "furniture": Path("config/furniture.pl.example.yaml"),
         "tiz": Path("config/tiz_cutting_tools.example.yaml"),
@@ -82,8 +84,24 @@ def doctor(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> Non
     table.add_row("Notion", str(cfg.sources.notion.enabled))
     table.add_row("Cloudflare R2", str(cfg.sources.cloudflare_r2.enabled))
     table.add_row("LLM provider", cfg.llm.provider)
+    table.add_row("LLM base_url", cfg.llm.base_url)
     table.add_row("Model", cfg.llm.model)
     table.add_row("TP (A100)", str(cfg.llm.tensor_parallel_size))
+    if any(
+        os.environ.get(k)
+        for k in (
+            "MARKET_AGENTS_LLM_BASE_URL",
+            "VLLM_BASE_URL",
+            "MARKET_AGENTS_LLM_MODEL",
+            "VLLM_MODEL",
+        )
+    ):
+        table.add_row("LLM env override", "[cyan]active[/cyan] (VPN / remote Dell)")
+    else:
+        table.add_row(
+            "LLM env override",
+            "[dim]off[/dim] — ustaw VLLM_BASE_URL=http://<dell-vpn-ip>:8000",
+        )
     sec = getattr(cfg.agents, "security", None)
     if sec is not None:
         table.add_row(
