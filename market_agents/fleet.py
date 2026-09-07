@@ -356,6 +356,7 @@ class FleetSync:
         absorbed = 0
         merged_hosts = 0
         merged_rules = 0
+        signals_appended = 0
         for pack_meta in pending:
             pack = Path(str(pack_meta.get("path") or ""))
             if not pack.exists():
@@ -366,6 +367,11 @@ class FleetSync:
             rules_src = pack / "site_parse_rules.json"
             if rules_src.exists():
                 merged_rules += self._merge_parse_rules(rules_src)
+            tail = pack / "items_tail.jsonl"
+            if tail.exists():
+                signals_appended += self._absorb_items_tail(
+                    tail, worker_id=str(pack_meta.get("worker_id") or pack.parent.name)
+                )
             (pack / "ABSORBED").write_text(
                 json.dumps({"absorbed_at": time.time()}, indent=2),
                 encoding="utf-8",
@@ -376,7 +382,39 @@ class FleetSync:
             "absorbed_packs": absorbed,
             "merged_hosts": merged_hosts,
             "merged_rules": merged_rules,
+            "signals_appended": signals_appended,
         }
+
+    def _absorb_items_tail(self, src: Path, *, worker_id: str) -> int:
+        """Append worker signal metadata into data/fleet/inbox_signals.jsonl (dedupe by URL)."""
+        dest = self.sync_root / "inbox_signals.jsonl"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        seen: set[str] = set()
+        if dest.exists():
+            for line in dest.read_text(encoding="utf-8").splitlines()[-5000:]:
+                try:
+                    row = json.loads(line)
+                    url = str(row.get("url") or "")
+                    if url:
+                        seen.add(url)
+                except Exception:  # noqa: BLE001
+                    continue
+        appended = 0
+        with dest.open("a", encoding="utf-8") as fh:
+            for line in src.read_text(encoding="utf-8").splitlines():
+                try:
+                    row = json.loads(line)
+                except Exception:  # noqa: BLE001
+                    continue
+                url = str(row.get("url") or "").strip()
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                row["worker_id"] = worker_id
+                row["absorbed_at"] = time.time()
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                appended += 1
+        return appended
 
     def _merge_crawl_health(self, src: Path) -> int:
         dest = self.knowledge_dir / "crawl_health.json"

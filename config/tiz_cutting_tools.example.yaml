@@ -622,6 +622,14 @@ agents:
   report_dir: reports
   data_dir: data
   min_relevance_score: 0.25
+  # Post-run knowledge loops (central only — workers skip in code + yaml)
+  post_enrich_profiles: true
+  post_enrich_crm_tasks: true
+  post_enrich_suppliers: true
+  post_enrich_resolve_duplicates: false
+  post_enrich_crm_notion: false
+  post_enrich_digest: true
+  crm_min_opportunity: 60
   agentic:
     enabled: true
     max_steps: 14
@@ -678,6 +686,8 @@ agents:
     # central = ten serwer GPU uczy skills/rules i publikuje knowledge dla VPS
     role: central
     sync_dir: data/fleet
+    auto_pull_before_run: true
+    auto_push_after_run: true   # publish knowledge pack after each successful run
     publish_known_firms: true
     publish_relations: true
     publish_ontology: true
@@ -685,5 +695,6 @@ agents:
     publish_pricelists: true
     publish_literature: true
     publish_product_tech: true
+    publish_run_status: true
 schedule:
   every_hours: 6

@@ -83,23 +83,20 @@ class SupplierRegistry:
                 for p in rows
                 if ql in p.company.lower() or any(ql in a.lower() for a in p.aliases)
             ]
+        # Sort by live scorecard without mutating persisted profile.scores
+        scored: list[tuple[float, FirmProfile]] = []
         for p in rows:
             sc = compute_supplier_scorecard(p)
-            scores = dict(p.scores or {})
-            scores["supplier_overall"] = sc["overall"]
-            scores["supplier_table"] = sc["table"]
-            p.scores = scores
-        rows.sort(
-            key=lambda p: float((p.scores or {}).get("supplier_overall") or 0),
-            reverse=True,
-        )
-        return rows[:limit]
+            scored.append((float(sc["overall"]), p))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [p for _, p in scored[:limit]]
 
     def scoreboard(self, *, limit: int = 30) -> list[dict[str, Any]]:
-        out = []
-        for p in self.list_suppliers(limit=limit):
+        rows = [p for p in self.profiles.profiles.values() if _is_supplier_like(p)]
+        board: list[dict[str, Any]] = []
+        for p in rows:
             sc = compute_supplier_scorecard(p)
-            out.append(
+            board.append(
                 {
                     "company": p.company,
                     "id": p.id,
@@ -112,7 +109,8 @@ class SupplierRegistry:
                     "brands": sc.get("brands") or [],
                 }
             )
-        return out
+        board.sort(key=lambda r: float(r.get("supplier_overall") or 0), reverse=True)
+        return board[:limit]
 
     def refresh_and_save(self, data_dir: Path | str) -> dict[str, Any]:
         """Policz scorecard i zapisz w profile.scores."""

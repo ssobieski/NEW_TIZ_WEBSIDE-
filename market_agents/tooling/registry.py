@@ -4091,7 +4091,7 @@ class ToolRegistry:
         if not company:
             return {"ok": False, "error": "company required"}
         store = CrmTaskStore.load(self.config.data_path)
-        task = store.create(
+        task, _created = store.create(
             company=company,
             title=str(args.get("title") or "") or None,
             reason=str(args.get("reason") or ""),
@@ -4103,7 +4103,7 @@ class ToolRegistry:
             priority=args.get("priority"),  # type: ignore[arg-type]
         )
         store.save(self.config.data_path)
-        return {"ok": True, "task": task.to_dict()}
+        return {"ok": True, "task": task.to_dict(), "created": _created}
 
     def list_crm_tasks(self, args: dict[str, Any]) -> dict[str, Any]:
         store = CrmTaskStore.load(self.config.data_path)
@@ -4132,7 +4132,7 @@ class ToolRegistry:
         )
 
     def list_suppliers(self, args: dict[str, Any]) -> dict[str, Any]:
-        from market_agents.suppliers import SupplierRegistry
+        from market_agents.suppliers import SupplierRegistry, compute_supplier_scorecard
 
         reg = SupplierRegistry(self._get_profiles())
         rows = reg.list_suppliers(
@@ -4147,11 +4147,11 @@ class ToolRegistry:
                     "company": p.company,
                     "roles": p.roles,
                     "country": p.country,
-                    "supplier_overall": (p.scores or {}).get("supplier_overall"),
+                    "supplier_overall": compute_supplier_scorecard(p)["overall"],
                     "customers": (p.network or {}).get("customers") or [],
                     "scores": {
                         k: (p.scores or {}).get(k)
-                        for k in ("supplier_overall", "completeness", "identity_trust", "digital_commerce")
+                        for k in ("completeness", "identity_trust", "digital_commerce")
                     },
                 }
                 for p in rows

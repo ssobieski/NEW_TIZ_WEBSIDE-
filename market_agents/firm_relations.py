@@ -109,6 +109,8 @@ class FirmRelationsGraph:
         cls,
         data_dir: Path | str | None = None,
         seed_path: Path | str = "config/firm_relations.seed.json",
+        *,
+        include_seed: bool = True,
     ) -> FirmRelationsGraph:
         data_dir = Path(data_dir or "data")
         cache = data_dir / "knowledge" / "firm_relations.json"
@@ -122,7 +124,7 @@ class FirmRelationsGraph:
                 edges = []
         graph = cls(edges)
         # seed zawsze dołączany (aktualizacje seed nie giną pod starym cache)
-        if seed.exists():
+        if include_seed and seed.exists():
             try:
                 payload = json.loads(seed.read_text(encoding="utf-8"))
                 seed_edges = payload.get("edges", payload if isinstance(payload, list) else [])

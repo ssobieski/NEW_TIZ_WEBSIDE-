@@ -1,7 +1,8 @@
 """
 Golden record / entity resolution dla firm.
 
-Łączy duplikaty profili o tej samej znormalizowanej nazwie (aliasy, literówki).
+Łączy duplikaty profili o tej samej znormalizowanej nazwie (aliasy, literówki)
+i przepisuje CRM + relacje na kanoniczną nazwę.
 """
 
 from __future__ import annotations
@@ -53,7 +54,6 @@ def find_duplicate_groups(
 
 def merge_profiles(primary: FirmProfile, *others: FirmProfile) -> FirmProfile:
     """Scal others do primary (reużywa FirmProfileRegistry._merge)."""
-    reg = FirmProfileRegistry()
     cur = primary
     for o in others:
         cur = FirmProfileRegistry._merge(cur, o)
@@ -70,6 +70,59 @@ def merge_profiles(primary: FirmProfile, *others: FirmProfile) -> FirmProfile:
         # drop self-alias
         cur.aliases = [a for a in cur.aliases if normalize_firm_name(a) != normalize_firm_name(cur.company)]
     return cur
+
+
+def _alias_map_from_merges(merges: list[dict[str, Any]]) -> dict[str, str]:
+    """normalized old name → canonical company display name."""
+    mapping: dict[str, str] = {}
+    for m in merges:
+        keep = str(m.get("keep") or "")
+        if not keep:
+            continue
+        mapping[normalize_firm_name(keep)] = keep
+        for name in m.get("merge") or []:
+            mapping[normalize_firm_name(str(name))] = keep
+    return mapping
+
+
+def rewrite_crm_companies(data_dir: Path | str, alias_map: dict[str, str]) -> int:
+    from market_agents.crm_tasks import CrmTaskStore
+
+    if not alias_map:
+        return 0
+    store = CrmTaskStore.load(data_dir)
+    n = 0
+    for t in store.tasks:
+        key = normalize_firm_name(t.company)
+        canon = alias_map.get(key)
+        if canon and canon != t.company:
+            t.company = canon
+            t.updated_at = t.updated_at  # keep; touch via meta
+            t.meta = dict(t.meta or {})
+            t.meta["canonicalized"] = True
+            n += 1
+    if n:
+        store.save(data_dir)
+    return n
+
+
+def rewrite_relation_endpoints(data_dir: Path | str, alias_map: dict[str, str]) -> int:
+    from market_agents.firm_relations import FirmRelationsGraph
+
+    if not alias_map:
+        return 0
+    g = FirmRelationsGraph.load(data_dir, include_seed=False)
+    n = 0
+    for edge in g.edges:
+        for field in ("source", "target"):
+            raw = str(edge.get(field) or "")
+            canon = alias_map.get(normalize_firm_name(raw))
+            if canon and canon != raw:
+                edge[field] = canon
+                n += 1
+    if n:
+        g.save(data_dir)
+    return n
 
 
 def resolve_golden_records(
@@ -114,8 +167,13 @@ def resolve_golden_records(
         reg.upsert(merged)
 
     path = None
+    crm_rewritten = 0
+    relations_rewritten = 0
     if not dry_run and merges:
         path = str(reg.save(data_dir))
+        alias_map = _alias_map_from_merges(merges)
+        crm_rewritten = rewrite_crm_companies(data_dir, alias_map)
+        relations_rewritten = rewrite_relation_endpoints(data_dir, alias_map)
     return {
         "ok": True,
         "duplicate_groups": len(groups),
@@ -123,6 +181,8 @@ def resolve_golden_records(
         "dry_run": dry_run,
         "path": path,
         "profiles_after": len(reg.profiles),
+        "crm_rewritten": crm_rewritten,
+        "relations_rewritten": relations_rewritten,
     }
 
 

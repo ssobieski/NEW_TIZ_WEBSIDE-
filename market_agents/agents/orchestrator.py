@@ -48,6 +48,10 @@ class Orchestrator:
         h["gpus_hint"] = f"tensor_parallel_size={self.config.llm.tensor_parallel_size}"
         return h
 
+    def _fleet_role(self) -> str:
+        fleet = getattr(self.config.agents, "fleet", None)
+        return str(getattr(fleet, "role", "central") or "central").lower()
+
     def run(self, skip_llm: bool = False, agentic: bool | None = None) -> RunResult:
         use_agentic = self.config.agents.agentic.enabled if agentic is None else agentic
         if skip_llm:
@@ -56,15 +60,16 @@ class Orchestrator:
         items = self.collector.run()
         agentic_result: AgenticResult | None = None
 
-        # Upewnij się że ontology DB istnieje (kontekst dla botów)
-        try:
-            from market_agents.ontology import MachiningOntology
+        # Ontology rebuild — tylko centrala (worker nie mutuje knowledge graph)
+        if self._fleet_role() != "worker":
+            try:
+                from market_agents.ontology import MachiningOntology
 
-            ont = MachiningOntology.load(self.config.data_path)
-            if len(ont.nodes) < 10:
-                ont.build_from_knowledge(self.config.data_path)
-        except Exception:  # noqa: BLE001
-            pass
+                ont = MachiningOntology.load(self.config.data_path)
+                if len(ont.nodes) < 10:
+                    ont.build_from_knowledge(self.config.data_path)
+            except Exception:  # noqa: BLE001
+                pass
 
         if use_agentic and items:
             agentic_result = self.parsing_agent.run(items)
@@ -111,6 +116,12 @@ class Orchestrator:
         except Exception as exc:  # noqa: BLE001
             metrics_row = {"ok": False, "error": str(exc)[:200]}
 
+        fleet_meta: dict = {}
+        try:
+            fleet_meta = self._maybe_fleet_publish(mode=mode)
+        except Exception as exc:  # noqa: BLE001
+            fleet_meta = {"ok": False, "error": str(exc)[:200]}
+
         self.storage.export_snapshot(
             {
                 "industry": self.config.industry.name,
@@ -119,7 +130,11 @@ class Orchestrator:
                 "report_md": str(md_path),
                 "trace": str(trace_path) if trace_path else None,
                 "post_enrich": enrich_meta,
-                "metrics": {"ts": metrics_row.get("ts"), "knowledge_counts": metrics_row.get("knowledge_counts")},
+                "metrics": {
+                    "ts": metrics_row.get("ts"),
+                    "knowledge_counts": metrics_row.get("knowledge_counts"),
+                },
+                "fleet": fleet_meta,
             }
         )
         return RunResult(
@@ -132,8 +147,32 @@ class Orchestrator:
             trace_path=trace_path,
         )
 
+    def _maybe_fleet_publish(self, *, mode: str) -> dict:
+        """Centrala: auto-publish knowledge pack po run gdy auto_push_after_run."""
+        fleet = getattr(self.config.agents, "fleet", None)
+        role = self._fleet_role()
+        if role not in {"central", "both"}:
+            return {"skipped": True, "reason": f"role={role}"}
+        if not bool(getattr(fleet, "auto_push_after_run", True)):
+            return {"skipped": True, "reason": "auto_push_after_run=false"}
+        from market_agents.fleet import FleetSync, fleet_config_from_app
+
+        sync = FleetSync(self.config.data_path, fleet_config_from_app(self.config))
+        return sync.publish_knowledge(notes=f"auto after {mode}")
+
     def _post_enrich(self) -> dict:
-        """Odśwież firm profiles, suppliers, opcjonalnie golden records + CRM."""
+        """Odśwież firm profiles, suppliers, opcjonalnie golden records + CRM.
+
+        Worker VPS: NIE mutuje knowledge (governance: tylko collect/feedback).
+        """
+        role = self._fleet_role()
+        if role == "worker":
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "fleet.role=worker — post_enrich disabled (central owns knowledge writes)",
+            }
+
         out: dict = {"ok": True}
         data_dir = self.config.data_path
         if getattr(self.config.agents, "post_enrich_profiles", True):

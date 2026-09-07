@@ -50,6 +50,13 @@ agents:
   report_dir: reports
   data_dir: data
   min_relevance_score: 0.25
+  # Central owns knowledge writes; worker must NOT rebuild profiles/CRM
+  post_enrich_profiles: false
+  post_enrich_crm_tasks: false
+  post_enrich_suppliers: false
+  post_enrich_resolve_duplicates: false
+  post_enrich_crm_notion: false
+  post_enrich_digest: false
   agentic:
     enabled: false
     parallel_fetches: 2

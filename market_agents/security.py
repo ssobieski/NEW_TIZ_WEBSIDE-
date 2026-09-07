@@ -206,7 +206,6 @@ SAFE_TOOLS = frozenset(
         "list_suppliers",
         "supplier_scoreboard",
         "list_run_metrics",
-        "refresh_change_digest",
         "list_parse_rules",
         "list_parsing_skills",
         "match_parsing_skills",
@@ -271,6 +270,7 @@ WRITE_TOOLS = frozenset(
         "score_suppliers",
         "resolve_firm_duplicates",
         "export_knowledge_pack",
+        "refresh_change_digest",
     }
 )
 
@@ -279,6 +279,7 @@ SENSITIVE_CLOUD_TOOLS = frozenset(
     {
         "search_notion",
         "fetch_notion_page",
+        "push_crm_to_notion",
         "search_r2",
         "fetch_r2_object",
     }
@@ -311,7 +312,11 @@ class SecurityPolicy:
         if name in SAFE_TOOLS or name in FETCH_TOOLS:
             return True, ""
         if name in SENSITIVE_CLOUD_TOOLS:
-            if name.startswith("search_notion") or name.startswith("fetch_notion"):
+            if (
+                name.startswith("search_notion")
+                or name.startswith("fetch_notion")
+                or name == "push_crm_to_notion"
+            ):
                 if not self.allow_notion_tools:
                     return False, "Notion tools disabled by security policy"
             if "r2" in name and not self.allow_r2_tools:
@@ -319,6 +324,9 @@ class SecurityPolicy:
             if self.strict_tool_mode and name in SENSITIVE_CLOUD_TOOLS:
                 if not (self.allow_notion_tools or self.allow_r2_tools):
                     return False, "cloud tools disabled in strict mode"
+            # Notion CRM push also requires write permission
+            if name == "push_crm_to_notion" and not self.allow_write_tools:
+                return False, "write tools disabled by security policy"
             return True, ""
         if name in WRITE_TOOLS:
             if not self.allow_write_tools:

@@ -264,8 +264,11 @@ def test_approval_host_scope_matches_url(tmp_path: Path):
 
 def test_crm_cli_store(tmp_path: Path):
     store = CrmTaskStore.load(tmp_path)
-    t = store.create(company="Acme", opportunity_score=80, reason="hot lead")
+    t, created = store.create(company="Acme", opportunity_score=80, reason="hot lead")
+    assert created is True
     assert t.priority == "hot"
     store.save(tmp_path)
     again = CrmTaskStore.load(tmp_path)
     assert again.list(status="open")
+    _, created2 = again.create(company="Acme", opportunity_score=85, reason="hot lead")
+    assert created2 is False

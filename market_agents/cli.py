@@ -808,18 +808,20 @@ def suppliers_cmd(
         ql = q.lower()
         rows = [r for r in rows if ql in str(r.get("company") or "").lower()]
     if not rows:
-        # still list without forcing scoreboard flag
+        from market_agents.suppliers import compute_supplier_scorecard
+
         for p in reg.list_suppliers(q=q, limit=limit):
+            sc = compute_supplier_scorecard(p)
             rows.append(
                 {
                     "company": p.company,
                     "roles": p.roles,
                     "country": p.country,
-                    "supplier_overall": (p.scores or {}).get("supplier_overall"),
-                    "brand_coverage": None,
-                    "channel_reach": None,
+                    "supplier_overall": sc["overall"],
+                    "brand_coverage": sc["table"][0]["score"],
+                    "channel_reach": sc["table"][1]["score"],
                     "customers": len((p.network or {}).get("customers") or []),
-                    "brands": [],
+                    "brands": sc.get("brands") or [],
                 }
             )
     if not rows:

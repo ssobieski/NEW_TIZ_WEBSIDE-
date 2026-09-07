@@ -104,7 +104,8 @@ class CrmTaskStore:
         priority: TaskPriority | None = None,
         owner: str = "",
         meta: dict[str, Any] | None = None,
-    ) -> CrmTask:
+    ) -> tuple[CrmTask, bool]:
+        """Zwraca (task, created) — created=False gdy zaktualizowano istniejący open task."""
         company = (company or "").strip()
         if not company:
             raise ValueError("company required")
@@ -127,7 +128,7 @@ class CrmTaskStore:
                     t.opportunity_score = opportunity_score
                 if reason:
                     t.reason = reason[:800]
-                return t
+                return t, False
         task = CrmTask(
             id=uuid.uuid4().hex[:12],
             title=title or f"Follow-up: {company}",
@@ -139,7 +140,7 @@ class CrmTaskStore:
             meta=dict(meta or {}),
         )
         self.tasks.insert(0, task)
-        return task
+        return task, True
 
     def list(
         self,
@@ -177,11 +178,12 @@ def create_tasks_from_prospect_scoreboard(
     store = CrmTaskStore.load(data_dir)
     pr = ProspectRegistry.load(data_dir)
     created = 0
+    updated = 0
     for row in pr.scoreboard(limit=limit):
         opp = float(row.get("opportunity") or 0)
         if opp < min_opportunity:
             continue
-        store.create(
+        _task, was_created = store.create(
             company=str(row["company"]),
             title=f"Prospect outreach: {row['company']}",
             reason=f"vertical={row.get('vertical')} quality={row.get('quality_tier')} "
@@ -189,9 +191,19 @@ def create_tasks_from_prospect_scoreboard(
             opportunity_score=opp,
             meta={"processes": row.get("processes") or []},
         )
-        created += 1
+        if was_created:
+            created += 1
+        else:
+            updated += 1
     path = store.save(data_dir)
-    return {"ok": True, "created_or_updated": created, "path": str(path), "open": len(store.list(status="open"))}
+    return {
+        "ok": True,
+        "created": created,
+        "updated": updated,
+        "created_or_updated": created + updated,
+        "path": str(path),
+        "open": len(store.list(status="open")),
+    }
 
 
 def push_crm_tasks_to_notion(
@@ -263,8 +275,11 @@ def push_crm_tasks_to_notion(
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{t.id}:{exc}"[:160])
     path = store.save(data_dir)
+    ok = pushed > 0 or not errors
+    if not rows and not errors:
+        ok = True  # nothing to push
     return {
-        "ok": True,
+        "ok": ok,
         "pushed": pushed,
         "errors": errors[:10],
         "path": str(path),

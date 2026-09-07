@@ -1,0 +1,145 @@
+"""Architecture gap fixes: worker enrich gate, fleet auto-publish, absorb signals, resolve rewrites."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from market_agents.agents.orchestrator import Orchestrator
+from market_agents.config import (
+    AgentsConfig,
+    AppConfig,
+    FleetConfig,
+    IndustryConfig,
+    SecurityConfig,
+    SourcesConfig,
+)
+from market_agents.crm_tasks import CrmTaskStore
+from market_agents.entity_resolution import resolve_golden_records
+from market_agents.firm_profiles import FirmProfile, FirmProfileRegistry
+from market_agents.firm_relations import FirmRelationsGraph
+from market_agents.fleet import FleetConfig as SyncFleetConfig
+from market_agents.fleet import FleetSync
+from market_agents.security import SAFE_TOOLS, WRITE_TOOLS, SENSITIVE_CLOUD_TOOLS, SecurityPolicy
+
+
+def _cfg(tmp: Path, *, role: str = "central", **agent_kw) -> AppConfig:
+    agents = AgentsConfig(
+        data_dir=str(tmp),
+        report_dir=str(tmp / "reports"),
+        post_enrich_profiles=True,
+        post_enrich_crm_tasks=True,
+        post_enrich_suppliers=True,
+        post_enrich_digest=True,
+        fleet=FleetConfig(role=role, sync_dir=str(tmp / "fleet"), auto_push_after_run=True),
+        security=SecurityConfig(allow_notion_tools=False, allow_write_tools=True),
+    )
+    for k, v in agent_kw.items():
+        if hasattr(agents, k):
+            setattr(agents, k, v)
+    return AppConfig(
+        industry=IndustryConfig(name="Test", keywords=["cnc"], competitors=[]),
+        sources=SourcesConfig(),
+        agents=agents,
+    )
+
+
+def test_worker_skips_post_enrich(tmp_path: Path):
+    cfg = _cfg(tmp_path, role="worker")
+    # seed a marker file that enrich would overwrite if it ran build
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir(parents=True)
+    marker = {"profiles": [{"id": "only", "company": "OnlyFirm", "roles": ["competitor"]}], "count": 1}
+    (knowledge / "firm_profiles.json").write_text(json.dumps(marker), encoding="utf-8")
+    before = (knowledge / "firm_profiles.json").read_text(encoding="utf-8")
+
+    orch = Orchestrator(cfg)
+    meta = orch._post_enrich()
+    assert meta.get("skipped") is True
+    assert (knowledge / "firm_profiles.json").read_text(encoding="utf-8") == before
+
+    orch.run(skip_llm=True)
+    assert (knowledge / "firm_profiles.json").read_text(encoding="utf-8") == before
+    # metrics still written
+    assert (tmp_path / "metrics" / "latest.json").is_file()
+
+
+def test_central_auto_fleet_publish(tmp_path: Path):
+    cfg = _cfg(tmp_path, role="central")
+    orch = Orchestrator(cfg)
+    orch.run(skip_llm=True)
+    fleet_root = tmp_path / "fleet"
+    assert (fleet_root / "latest.json").is_file()
+    latest = json.loads((fleet_root / "latest.json").read_text(encoding="utf-8"))
+    assert latest.get("pack_id")
+
+
+def test_digest_is_write_tool_and_notion_push_gated():
+    assert "refresh_change_digest" in WRITE_TOOLS
+    assert "refresh_change_digest" not in SAFE_TOOLS
+    assert "push_crm_to_notion" in SENSITIVE_CLOUD_TOOLS
+    pol = SecurityPolicy(allow_notion_tools=False, allow_write_tools=True)
+    ok, reason = pol.tool_allowed("push_crm_to_notion")
+    assert ok is False
+    assert "Notion" in reason
+
+
+def test_entity_resolve_rewrites_crm_and_relations(tmp_path: Path):
+    reg = FirmProfileRegistry()
+    a = FirmProfile(id="sandvik-a", company="Sandvik Coromant", roles=["competitor"], sources=["seed"])
+    b = FirmProfile(
+        id="sandvik-b",
+        company="Sandvik Coromant AB",
+        roles=["competitor"],
+        aliases=["Sandvik Coromant"],
+        sources=["web"],
+        websites=[{"url": "https://www.sandvik.coromant.com", "primary": True}],
+    )
+    reg.profiles[a.id] = a
+    reg.profiles[b.id] = b
+    reg.save(tmp_path)
+
+    store = CrmTaskStore.load(tmp_path)
+    # Loser name (fewer websites) — must be rewritten to golden record
+    store.create(company="Sandvik Coromant", title="Check", opportunity_score=70)
+    store.save(tmp_path)
+
+    g = FirmRelationsGraph()
+    g.add_relation("Sandvik Coromant", "Hoffmann Group", "distributor_of", confidence=0.8)
+    g.save(tmp_path)
+
+    result = resolve_golden_records(tmp_path, dry_run=False)
+    assert result["duplicate_groups"] >= 1
+    assert result["crm_rewritten"] >= 1
+    assert result["relations_rewritten"] >= 1
+
+    again = CrmTaskStore.load(tmp_path)
+    companies = {t.company for t in again.tasks}
+    assert "Sandvik Coromant" not in companies
+    assert any("Sandvik Coromant AB" == c for c in companies)
+
+    rel = FirmRelationsGraph.load(tmp_path)
+    sources = {e.get("source") for e in rel.edges}
+    assert "Sandvik Coromant AB" in sources
+
+
+def test_absorb_items_tail(tmp_path: Path):
+    sync_dir = tmp_path / "fleet"
+    central = tmp_path / "central"
+    worker = tmp_path / "worker"
+    (central / "knowledge").mkdir(parents=True)
+    (worker / "knowledge").mkdir(parents=True)
+    (worker / "items.jsonl").write_text(
+        json.dumps({"title": "News", "url": "https://example.com/a", "source": "rss"}) + "\n",
+        encoding="utf-8",
+    )
+    w = FleetSync(worker, SyncFleetConfig(role="worker", worker_id="vps-test", sync_dir=str(sync_dir)))
+    pushed = w.push_feedback()
+    assert "items_tail.jsonl" in pushed["files"]
+
+    c = FleetSync(central, SyncFleetConfig(role="central", sync_dir=str(sync_dir)))
+    absorbed = c.absorb_feedback()
+    assert absorbed["signals_appended"] >= 1
+    signals = sync_dir / "inbox_signals.jsonl"
+    assert signals.is_file()
+    assert "example.com/a" in signals.read_text(encoding="utf-8")
