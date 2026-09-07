@@ -194,6 +194,10 @@ SAFE_TOOLS = frozenset(
         "check_firm_known",
         "list_relations",
         "firm_neighborhood",
+        "list_firm_profiles",
+        "get_firm_profile",
+        "score_firm_profile",
+        "firm_scoreboard",
         "list_parse_rules",
         "list_parsing_skills",
         "match_parsing_skills",
@@ -225,6 +229,7 @@ FETCH_TOOLS = frozenset(
         "discover_new_firms",
         "discover_relations",
         "extract_domain_context",
+        "enrich_firm_profile",
     }
 )
 
@@ -246,6 +251,9 @@ WRITE_TOOLS = frozenset(
         "add_ontology_edge",
         "build_ontology",
         "sync_notion_literature",
+        "build_firm_profiles",
+        "upsert_firm_profile",
+        "register_social_mention",
     }
 )
 
@@ -324,6 +332,7 @@ FLEET_ALLOWED_KNOWLEDGE = frozenset(
         "product_tech.json",
         "literature.json",
         "ontology.json",
+        "firm_profiles.json",
         "manifest.json",
         "fleet_pulled.json",
     }

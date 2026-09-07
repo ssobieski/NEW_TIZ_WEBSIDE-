@@ -24,6 +24,13 @@ from market_agents.firm_relations import (
     FirmRelationsGraph,
     extract_relation_candidates,
 )
+from market_agents.firm_profiles import (
+    FirmProfile,
+    FirmProfileRegistry,
+    extract_contacts_from_html,
+    firm_id_from_name,
+    score_sentiment,
+)
 from market_agents.firms import KnownFirmsIndex, extract_candidate_firm_names, filter_new_firms
 from market_agents.literature import LITERATURE_KINDS, LiteratureRegistry, classify_literature_kind
 from market_agents.memory import MarketMemory
@@ -137,6 +144,14 @@ class ToolRegistry:
             "add_relation": self.add_relation,
             "discover_relations": self.discover_relations,
             "firm_neighborhood": self.firm_neighborhood,
+            "list_firm_profiles": self.list_firm_profiles,
+            "get_firm_profile": self.get_firm_profile,
+            "score_firm_profile": self.score_firm_profile,
+            "firm_scoreboard": self.firm_scoreboard,
+            "build_firm_profiles": self.build_firm_profiles,
+            "upsert_firm_profile": self.upsert_firm_profile,
+            "enrich_firm_profile": self.enrich_firm_profile,
+            "register_social_mention": self.register_social_mention,
             "list_parse_rules": self.list_parse_rules,
             "upsert_parse_rule": self.upsert_parse_rule,
             "rate_parse": self.rate_parse,
@@ -159,6 +174,12 @@ class ToolRegistry:
         self._known: KnownFirmsIndex | None = None
         self._relations: FirmRelationsGraph | None = None
         self._ontology: MachiningOntology | None = None
+        self._profiles: FirmProfileRegistry | None = None
+
+    def _get_profiles(self) -> FirmProfileRegistry:
+        if self._profiles is None:
+            self._profiles = FirmProfileRegistry.load(self.config.data_path)
+        return self._profiles
 
     @staticmethod
     def _build_security_policy(config: AppConfig) -> SecurityPolicy:
@@ -1294,7 +1315,7 @@ class ToolRegistry:
                     "name": "firm_neighborhood",
                     "description": (
                         "Sąsiedztwo firmy w siatce powiązań (1–2 hop): dystrybutorzy, "
-                        "marki, spółki w grupie OEM."
+                        "marki, spółki w grupie OEM, klienci, dostawcy."
                     ),
                     "parameters": {
                         "type": "object",
@@ -1306,6 +1327,169 @@ class ToolRegistry:
                                 "minimum": 1,
                                 "maximum": 2,
                             },
+                        },
+                        "required": ["company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_firm_profiles",
+                    "description": (
+                        "Lista profili firm (konkurenci/dostawcy): role, scorecard, kraj. "
+                        "Filtrowanie po roli i zapytaniu."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "role": {
+                                "type": "string",
+                                "enum": [
+                                    "competitor",
+                                    "supplier",
+                                    "distributor",
+                                    "dealer",
+                                    "customer",
+                                    "partner",
+                                    "unknown",
+                                ],
+                            },
+                            "q": {"type": "string"},
+                            "sort": {
+                                "type": "string",
+                                "enum": [
+                                    "overall",
+                                    "completeness",
+                                    "identity_trust",
+                                    "distribution_reach",
+                                    "digital_commerce",
+                                    "pr_presence",
+                                    "company",
+                                ],
+                                "default": "overall",
+                            },
+                            "limit": {"type": "integer", "default": 30},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_firm_profile",
+                    "description": (
+                        "Pełny profil firmy: tożsamość (adres/tel/email/web + weryfikacja), "
+                        "finanse (sygnały publiczne), PR/social, katalogi/cenniki/e-shop, sieć, scorecard."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"company": {"type": "string"}},
+                        "required": ["company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "firm_scoreboard",
+                    "description": "Tabela ocen firm (scorecard) posortowana po overall.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"limit": {"type": "integer", "default": 25}},
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "score_firm_profile",
+                    "description": "Przelicz scorecard dla firmy i zapisz.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"company": {"type": "string"}},
+                        "required": ["company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "build_firm_profiles",
+                    "description": (
+                        "Zbuduj/odśwież profile z known_firms + firm_relations + cenniki + literatura + social."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "default_role": {
+                                "type": "string",
+                                "default": "competitor",
+                            }
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "upsert_firm_profile",
+                    "description": "Ręcznie uzupełnij atrybuty profilu firmy (kontakty, role, finanse).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "company": {"type": "string"},
+                            "roles": {"type": "array", "items": {"type": "string"}},
+                            "country": {"type": "string"},
+                            "email": {"type": "string"},
+                            "phone": {"type": "string"},
+                            "address": {"type": "string"},
+                            "website": {"type": "string"},
+                            "product_focus": {"type": "string"},
+                            "notes": {"type": "string"},
+                            "financial_note": {"type": "string"},
+                        },
+                        "required": ["company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "enrich_firm_profile",
+                    "description": (
+                        "Pobierz publiczną stronę firmy (contact/about) i wyciągnij "
+                        "e-mail, telefon, adres, sygnały finansowe; zweryfikuj atrybuty."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "company": {"type": "string"},
+                            "url": {
+                                "type": "string",
+                                "description": "Opcjonalny URL; domyślnie primary website z profilu",
+                            },
+                        },
+                        "required": ["company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "register_social_mention",
+                    "description": (
+                        "Dodaj publiczną wzmiankę social/PR o firmie (tytuł, snippet, platforma) "
+                        "i odśwież sentiment w profilu."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "company": {"type": "string"},
+                            "platform": {"type": "string"},
+                            "title": {"type": "string"},
+                            "snippet": {"type": "string"},
+                            "url": {"type": "string"},
                         },
                         "required": ["company"],
                     },
@@ -3262,6 +3446,234 @@ class ToolRegistry:
         graph = self._get_relations()
         nb = graph.neighborhood(company, depth=depth)
         return {"ok": True, **nb}
+
+    def list_firm_profiles(self, args: dict[str, Any]) -> dict[str, Any]:
+        reg = self._get_profiles()
+        rows = reg.list(
+            role=str(args.get("role") or "").strip() or None,
+            q=str(args.get("q") or "").strip() or None,
+            sort=str(args.get("sort") or "overall"),
+            limit=int(args.get("limit") or 30),
+        )
+        return {
+            "ok": True,
+            "count": len(rows),
+            "profiles": [
+                {
+                    "id": p.id,
+                    "company": p.company,
+                    "roles": p.roles,
+                    "country": p.country,
+                    "scores": {
+                        k: (p.scores or {}).get(k)
+                        for k in (
+                            "overall",
+                            "completeness",
+                            "identity_trust",
+                            "distribution_reach",
+                            "digital_commerce",
+                            "pr_presence",
+                        )
+                    },
+                    "websites": [w.get("url") for w in (p.websites or [])[:3]],
+                }
+                for p in rows
+            ],
+        }
+
+    def get_firm_profile(self, args: dict[str, Any]) -> dict[str, Any]:
+        company = str(args.get("company") or "").strip()
+        if not company:
+            return {"ok": False, "error": "company required"}
+        reg = self._get_profiles()
+        p = reg.get(company)
+        if not p:
+            return {
+                "ok": False,
+                "error": f"brak profilu: {company}",
+                "hint": "Uruchom build_firm_profiles / sync-profiles",
+            }
+        return {"ok": True, "profile": p.to_dict()}
+
+    def firm_scoreboard(self, args: dict[str, Any]) -> dict[str, Any]:
+        reg = self._get_profiles()
+        limit = int(args.get("limit") or 25)
+        return {"ok": True, "scoreboard": reg.scoreboard(limit=limit)}
+
+    def score_firm_profile(self, args: dict[str, Any]) -> dict[str, Any]:
+        company = str(args.get("company") or "").strip()
+        if not company:
+            return {"ok": False, "error": "company required"}
+        reg = self._get_profiles()
+        p = reg.get(company)
+        if not p:
+            return {"ok": False, "error": f"brak profilu: {company}"}
+        p = reg.upsert(p)
+        reg.save(self.config.data_path)
+        return {"ok": True, "company": p.company, "scores": p.scores}
+
+    def build_firm_profiles(self, args: dict[str, Any]) -> dict[str, Any]:
+        reg = self._get_profiles()
+        result = reg.build_from_ecosystem(
+            self.config.data_path,
+            competitors=list(self.config.industry.competitors or []),
+            default_role=str(args.get("default_role") or "competitor"),
+        )
+        self._profiles = reg
+        self.memory.add(
+            "build_firm_profiles",
+            f"profiles={result.get('count')}",
+            meta=result,
+        )
+        return result
+
+    def upsert_firm_profile(self, args: dict[str, Any]) -> dict[str, Any]:
+        company = str(args.get("company") or "").strip()
+        if not company:
+            return {"ok": False, "error": "company required"}
+        reg = self._get_profiles()
+        p = reg.get(company) or FirmProfile(
+            id=firm_id_from_name(company),
+            company=company,
+            roles=["unknown"],
+            origin="manual",
+        )
+        if args.get("roles"):
+            p.roles = [str(r) for r in args["roles"]]
+        if args.get("country"):
+            p.country = str(args["country"])
+        if args.get("product_focus"):
+            p.product_focus = str(args["product_focus"])
+        if args.get("notes"):
+            p.notes = str(args["notes"])[:4000]
+        if args.get("website"):
+            p.websites = list(p.websites) + [
+                {
+                    "url": str(args["website"]),
+                    "primary": True,
+                    "verified": False,
+                    "status": "manual",
+                    "source": "manual",
+                }
+            ]
+        if args.get("email"):
+            p.emails = list(p.emails) + [
+                {"value": str(args["email"]), "verified": False, "status": "manual", "source": "manual"}
+            ]
+        if args.get("phone"):
+            p.phones = list(p.phones) + [
+                {"value": str(args["phone"]), "verified": False, "status": "manual", "source": "manual"}
+            ]
+        if args.get("address"):
+            p.addresses = list(p.addresses) + [
+                {"raw": str(args["address"]), "verified": False, "status": "manual", "source": "manual"}
+            ]
+        if args.get("financial_note"):
+            fin = dict(p.financial or {})
+            fin["notes"] = str(args["financial_note"])[:500]
+            p.financial = fin
+        if "manual" not in p.sources:
+            p.sources.append("manual")
+        p = reg.upsert(p)
+        reg.save(self.config.data_path)
+        return {"ok": True, "profile": p.to_dict()}
+
+    def enrich_firm_profile(self, args: dict[str, Any]) -> dict[str, Any]:
+        company = str(args.get("company") or "").strip()
+        if not company:
+            return {"ok": False, "error": "company required"}
+        reg = self._get_profiles()
+        p = reg.get(company)
+        if not p:
+            # stub from known firms
+            known = self._get_known().match(company)
+            if known:
+                from market_agents.firm_profiles import profile_from_known_row
+
+                p = profile_from_known_row(known)
+                reg.upsert(p)
+            else:
+                p = FirmProfile(id=firm_id_from_name(company), company=company, roles=["competitor"])
+                reg.upsert(p)
+        url = str(args.get("url") or "").strip()
+        if not url:
+            for w in p.websites or []:
+                if w.get("url"):
+                    url = str(w["url"])
+                    break
+        if not url:
+            return {"ok": False, "error": "brak URL — podaj url lub website w profilu"}
+        try:
+            resp = self._fetcher.get(url)
+            html = resp.text or ""
+            final_url = str(resp.url) if resp.url else url
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": safe_error(exc), "url": url}
+        extracted = extract_contacts_from_html(str(html), base_url=str(final_url), company=company)
+        p = reg.apply_enrichment(p, extracted)
+        reg.save(self.config.data_path)
+        return {
+            "ok": True,
+            "company": p.company,
+            "url": final_url,
+            "extracted": {
+                "emails": len(extracted.get("emails") or []),
+                "phones": len(extracted.get("phones") or []),
+                "addresses": len(extracted.get("addresses") or []),
+                "financial_signals": len(extracted.get("financial_signals") or []),
+            },
+            "scores": p.scores,
+            "verification": p.verification,
+        }
+
+    def register_social_mention(self, args: dict[str, Any]) -> dict[str, Any]:
+        company = str(args.get("company") or "").strip()
+        if not company:
+            return {"ok": False, "error": "company required"}
+        mention = {
+            "company": company,
+            "platform": str(args.get("platform") or "web"),
+            "title": str(args.get("title") or "")[:300],
+            "snippet": str(args.get("snippet") or "")[:800],
+            "url": str(args.get("url") or ""),
+        }
+        path = self.config.data_path / "knowledge" / "social_mentions.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows: list[dict[str, Any]] = []
+        if path.is_file():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                rows = raw if isinstance(raw, list) else list(raw.get("mentions") or [])
+            except Exception:  # noqa: BLE001
+                rows = []
+        rows.append(mention)
+        from market_agents.firm_profiles import utc_now_iso
+
+        path.write_text(
+            json.dumps(
+                {"mentions": rows[-500:], "updated_at": utc_now_iso()},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        reg = self._get_profiles()
+        p = reg.get(company) or FirmProfile(
+            id=firm_id_from_name(company), company=company, roles=["competitor"], origin="social"
+        )
+        mentions = list((p.public_relations or {}).get("mentions") or []) + [mention]
+        texts = [str(m.get("snippet") or m.get("title") or "") for m in mentions]
+        p.public_relations = {
+            "summary": f"{len(mentions)} publicznych wzmianek",
+            "themes": list((p.public_relations or {}).get("themes") or []),
+            "sentiment": score_sentiment(texts),
+            "mentions": mentions[-30:],
+        }
+        if "social" not in p.sources:
+            p.sources.append("social")
+        p = reg.upsert(p)
+        reg.save(self.config.data_path)
+        return {"ok": True, "company": p.company, "sentiment": p.public_relations.get("sentiment"), "scores": p.scores}
 
     def discover_new_firms(self, args: dict[str, Any]) -> dict[str, Any]:
         limit = int(args.get("limit") or 25)

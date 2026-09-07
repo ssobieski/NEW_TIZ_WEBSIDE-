@@ -83,6 +83,7 @@ export NOTION_TOKEN=secret_...
 # sync listy znanych firm + siatki powiązań + stron Notion
 python -m market_agents sync-firms
 python -m market_agents sync-relations
+python -m market_agents sync-profiles   # karty firm + scorecard
 python -m market_agents sync-notion
 # po włączeniu cloudflare_r2.enabled: true w YAML:
 # python -m market_agents sync-r2
@@ -90,6 +91,23 @@ python -m market_agents sync-notion
 
 Źródła: `sources.catalogs` + `industry.competitors` z indeksu Notion.
 Seed offline: `config/known_firms.seed.json`, `config/firm_relations.seed.json`.
+
+## Profilowanie konkurentów / dostawców
+
+Buduje karty firm: tożsamość (nazwa, adres, tel, e-mail, WWW + weryfikacja), sygnały finansowe
+z treści publicznych, PR/social, katalogi/cenniki/ulotki/e-shop, sieć dystrybucji/klientów,
+tabela ocen.
+
+```bash
+python -m market_agents sync-profiles
+python -m market_agents profiles --scoreboard
+python -m market_agents profiles --company "Sandvik Coromant"
+python -m market_agents profiles --role supplier
+```
+
+Tooli: `build_firm_profiles`, `list_firm_profiles`, `get_firm_profile`, `firm_scoreboard`,
+`upsert_firm_profile`, `enrich_firm_profile`, `register_social_mention`.
+Relacje: `customer_of`, `supplier_of`, `competes_with` (+ dystrybutor/dealer/OEM).
 
 ## Uruchomienie na Dellu
 
