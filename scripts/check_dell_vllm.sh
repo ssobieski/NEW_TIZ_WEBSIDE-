@@ -5,6 +5,13 @@
 #   bash scripts/check_dell_vllm.sh
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT/.env"
+  set +a
+fi
 BASE="${VLLM_BASE_URL:-${MARKET_AGENTS_LLM_BASE_URL:-http://127.0.0.1:8000}}"
 BASE="${BASE%/}"
 # OpenAI-compatible path

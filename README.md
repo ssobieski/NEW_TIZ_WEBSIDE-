@@ -240,6 +240,19 @@ python -m market_agents run --agentic
 
 Aliasy env: `MARKET_AGENTS_LLM_BASE_URL`, `VLLM_MODEL`, `MARKET_AGENTS_LLM_API_KEY`.
 Profil: `config/dell_vpn.example.yaml` / `init-config --profile dell-vpn`.
+Plik `.env` jest wczytywany automatycznie (bez nadpisywania zmiennych już ustawionych).
+
+**Fleet VPS ↔ Dell (rsync przez VPN):**
+
+```bash
+# .env: DELL_SSH=user@<dell-vpn-ip>
+bash scripts/fleet_rsync_vpn.sh status
+bash scripts/fleet_rsync_vpn.sh pull   # knowledge pack z Della
+python -m market_agents fleet-pull
+python -m market_agents worker --every-hours 6
+bash scripts/fleet_rsync_vpn.sh push   # inbox na Della
+# na Dellu: python -m market_agents fleet-absorb --republish
+```
 
 Tooli: `list_known_firms`, `get_firm_presentation`, `discover_new_firms`, `check_firm_known`,
 `list_relations`, `add_relation`, `discover_relations`, `firm_neighborhood`,

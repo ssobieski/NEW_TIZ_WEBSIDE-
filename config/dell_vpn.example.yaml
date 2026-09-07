@@ -1,16 +1,19 @@
-# Profil Dell przez Cybertech VPN (klient ≠ localhost na Dellu)
+# Profil CENTRALA: Dell 4×A100 przez Cybertech VPN
 #
-# Na Dellu (GPU):
-#   bash scripts/run_vllm_a100.sh          # bind 0.0.0.0:8000
-#
-# Na kliencie (laptop / VPS) z aktywnym Cybertech VPN:
-#   export VLLM_BASE_URL=http://<dell-vpn-ip>:8000
-#   # albo MARKET_AGENTS_LLM_BASE_URL=...
-#   python -m market_agents doctor
+# Na Dellu (GPU, w VPN):
+#   bash scripts/run_vllm_a100.sh
+#   python -m market_agents fleet-publish
 #   python -m market_agents run --agentic
 #
-# Nie commituj prawdziwego IP — trzymaj w .env / shell profile.
-# cp config/dell_vpn.example.yaml config/industry.yaml   # opcjonalnie
+# Na kliencie / VPS (VPN ON) — .env:
+#   VLLM_BASE_URL=http://<dell-vpn-ip>:8000
+#   DELL_SSH=user@<dell-vpn-ip>          # opcjonalnie do rsync fleet
+#
+# Sync fleet:
+#   bash scripts/fleet_rsync_vpn.sh pull   # VPS ← Dell
+#   bash scripts/fleet_rsync_vpn.sh push   # VPS → Dell inbox
+#
+# cp config/dell_vpn.example.yaml config/industry.yaml
 
 industry:
   name: "Narzędzia skrawające / machining (TIZ)"
@@ -19,6 +22,7 @@ industry:
     - "narzędzia skrawające"
     - "CNC"
     - "przetarg"
+    - "cutting tools"
   competitors: []
   exclude_keywords:
     - "oferta pracy"
@@ -33,7 +37,7 @@ sources:
 
 llm:
   provider: "vllm"
-  # Placeholder — nadpisz env: VLLM_BASE_URL=http://10.x.x.x:8000
+  # Lokalnie na Dellu: 127.0.0.1. Z innego hosta w VPN: VLLM_BASE_URL w .env
   base_url: "http://127.0.0.1:8000"
   model: "Qwen/Qwen2.5-72B-Instruct-AWQ"
   temperature: 0.1
@@ -50,6 +54,10 @@ agents:
   report_dir: "reports"
   data_dir: "data"
   min_relevance_score: 0.3
+  post_enrich_profiles: true
+  post_enrich_crm_tasks: true
+  post_enrich_suppliers: true
+  post_enrich_digest: true
   agentic:
     enabled: true
     max_steps: 12
@@ -57,6 +65,21 @@ agents:
     parallel_fetches: 6
     require_tool_use: true
     trace_dir: "data/agent_traces"
+  fleet:
+    role: central
+    sync_dir: data/fleet
+    auto_pull_before_run: true
+    auto_push_after_run: true
+    publish_known_firms: true
+    publish_relations: true
+    publish_ontology: true
+    publish_firm_profiles: true
+    publish_crm_tasks: false
+    publish_tenders: true
+    publish_pricelists: true
+    publish_literature: true
+    publish_product_tech: true
+    publish_run_status: true
 
 schedule:
   every_hours: 4

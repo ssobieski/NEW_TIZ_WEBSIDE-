@@ -352,10 +352,52 @@ def load_config(path: str | Path) -> AppConfig:
             f"Brak pliku konfiguracji: {config_path}. "
             "Skopiuj config/tiz_cutting_tools.example.yaml → config/industry.yaml"
         )
+    load_dotenv_files()
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     cfg = AppConfig.model_validate(raw)
     _apply_llm_env_overrides(cfg)
     return cfg
+
+
+def load_dotenv_files(*paths: str | Path) -> list[Path]:
+    """Load KEY=VALUE from .env files into os.environ (no overwrite of existing).
+
+    Looks for .env in CWD and repo root. Safe for Cybertech VPN secrets
+    (VLLM_BASE_URL, NOTION_TOKEN, …) without committing them.
+    """
+    candidates: list[Path] = []
+    if paths:
+        candidates.extend(Path(p) for p in paths)
+    else:
+        candidates.extend(
+            [
+                Path(".env"),
+                Path(__file__).resolve().parents[1] / ".env",
+            ]
+        )
+    loaded: list[Path] = []
+    seen: set[Path] = set()
+    for path in candidates:
+        path = path.resolve()
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            if not key or key in os.environ:
+                continue
+            val = val.strip().strip("'").strip('"')
+            os.environ[key] = val
+        loaded.append(path)
+    return loaded
 
 
 def _apply_llm_env_overrides(cfg: AppConfig) -> None:

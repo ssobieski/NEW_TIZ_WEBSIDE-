@@ -87,6 +87,17 @@ def doctor(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> Non
     table.add_row("LLM base_url", cfg.llm.base_url)
     table.add_row("Model", cfg.llm.model)
     table.add_row("TP (A100)", str(cfg.llm.tensor_parallel_size))
+    fleet = getattr(cfg.agents, "fleet", None)
+    if fleet is not None:
+        table.add_row(
+            "Fleet",
+            f"role={getattr(fleet, 'role', '?')} sync={getattr(fleet, 'sync_dir', '')}",
+        )
+    dell_ssh = os.environ.get("DELL_SSH") or ""
+    table.add_row(
+        "DELL_SSH",
+        "[green]set[/green]" if dell_ssh else "[dim]unset[/dim] (fleet_rsync_vpn.sh)",
+    )
     if any(
         os.environ.get(k)
         for k in (
@@ -100,7 +111,7 @@ def doctor(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> Non
     else:
         table.add_row(
             "LLM env override",
-            "[dim]off[/dim] — ustaw VLLM_BASE_URL=http://<dell-vpn-ip>:8000",
+            "[dim]off[/dim] — ustaw VLLM_BASE_URL=http://<dell-vpn-ip>:8000 w .env",
         )
     sec = getattr(cfg.agents, "security", None)
     if sec is not None:
