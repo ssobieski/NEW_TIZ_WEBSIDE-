@@ -126,6 +126,24 @@ Założenia: `config/prospect_assumptions.json` · seed: `config/prospects.seed.
 Tooli: `analyze_prospect`, `list_prospects`, `get_prospect_profile`, `prospect_scoreboard`,
 `estimate_tooling_budget`, `ingest_prospect_seeds`.
 
+## Przetargi / sygnały zakupu sprzętu
+
+Parsuj ogłoszenia przetargów oraz newsy, że firma **kupiła / zamierza kupić / planuje
+ogłosić przetarg** na CNC, tokarkę, frezarkę, EDM, tooling itd.
+
+```bash
+# parse + zapis (profil prospect + CRM follow-up)
+python -m market_agents tenders --text-file config/tender_sample.txt --ingest
+
+# lista / scoreboard
+python -m market_agents tenders --scoreboard
+python -m market_agents tenders --intent announced_tender
+```
+
+Intenty: `announced_tender` · `planned_tender` · `intends_to_buy` · `purchased` · `awarded`  
+Artefakt: `data/knowledge/tenders.json`  
+Tooli agentowe: `parse_tender`, `ingest_tender`, `list_tenders`, `tender_scoreboard`.
+
 ## MVP do testów (offline)
 
 Szybka ścieżka bez GPU / Notion / R2 / sieci — seed → profiles → prospect → CRM →

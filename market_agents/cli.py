@@ -423,6 +423,100 @@ def prospects_cmd(
     console.print(table)
 
 
+@app.command("tenders")
+def tenders_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    text_file: Optional[Path] = typer.Option(
+        None, "--text-file", help="Parsuj plik tekstowy (news / ogłoszenie)"
+    ),
+    text: Optional[str] = typer.Option(None, "--text", help="Parsuj tekst inline"),
+    company: Optional[str] = typer.Option(None, "--company"),
+    title: Optional[str] = typer.Option(None, "--title"),
+    intent: Optional[str] = typer.Option(
+        None,
+        "--intent",
+        help="announced_tender|planned_tender|intends_to_buy|purchased|awarded",
+    ),
+    scoreboard: bool = typer.Option(False, "--scoreboard"),
+    ingest: bool = typer.Option(
+        False, "--ingest", help="Zapisz sygnał + profil + CRM"
+    ),
+    q: Optional[str] = typer.Option(None, "--q", help="Filtr listy"),
+    limit: int = typer.Option(25, "--limit"),
+) -> None:
+    """Przetargi i sygnały zakupu sprzętu (CNC / obrabiarki / tooling)."""
+    from market_agents.tenders import (
+        TenderRegistry,
+        ingest_tender_analysis,
+        parse_tender_text,
+    )
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    body = ""
+    if text_file:
+        body = text_file.read_text(encoding="utf-8")
+    elif text:
+        body = text
+
+    if body.strip():
+        analysis = parse_tender_text(
+            body,
+            company=company,
+            title=title or "",
+            source="cli",
+        )
+        if ingest:
+            result = ingest_tender_analysis(analysis, cfg.data_path)
+            console.print_json(data=result)
+            if not result.get("ok"):
+                raise typer.Exit(1)
+            return
+        console.print_json(data=analysis)
+        return
+
+    reg = TenderRegistry.load(cfg.data_path)
+    if scoreboard:
+        rows = reg.scoreboard(limit=limit)
+        if not rows:
+            console.print("[yellow]Brak sygnałów przetargowych.[/yellow]")
+            raise typer.Exit(0)
+        table = Table(title="Tender / purchase signals")
+        table.add_column("Firma")
+        table.add_column("Intent")
+        table.add_column("Sprzęt")
+        table.add_column("Wartość EUR", justify="right")
+        table.add_column("Conf", justify="right")
+        table.add_column("Termin")
+        for row in rows:
+            table.add_row(
+                str(row.get("company") or ""),
+                str(row.get("intent") or ""),
+                ",".join(row.get("equipment") or [])[:40],
+                str(int(row["value_eur"])) if row.get("value_eur") else "—",
+                str(row.get("confidence") or ""),
+                str(row.get("deadline") or "—"),
+            )
+        console.print(table)
+        return
+
+    rows = reg.list(q=q, intent=intent, limit=limit)
+    if not rows:
+        console.print(
+            "[yellow]Brak sygnałów.[/yellow] "
+            "Użyj: tenders --text-file news.txt --ingest"
+        )
+        raise typer.Exit(0)
+    table = Table(title=f"Tenders ({len(rows)})")
+    table.add_column("Firma")
+    table.add_column("Intent")
+    table.add_column("Title")
+    table.add_column("Conf", justify="right")
+    for r in rows:
+        table.add_row(r.company, r.intent, (r.title or "")[:50], str(r.confidence))
+    console.print(table)
+
+
 @app.command("sync-r2")
 def sync_r2(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
     """Zsynchronizuj archiwum Cloudflare R2 → lokalny cache."""

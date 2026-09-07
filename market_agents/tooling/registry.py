@@ -164,6 +164,10 @@ class ToolRegistry:
             "get_prospect_profile": self.get_prospect_profile,
             "prospect_scoreboard": self.prospect_scoreboard,
             "analyze_prospect": self.analyze_prospect,
+            "parse_tender": self.parse_tender,
+            "ingest_tender": self.ingest_tender,
+            "list_tenders": self.list_tenders,
+            "tender_scoreboard": self.tender_scoreboard,
             "estimate_tooling_budget": self.estimate_tooling_budget_tool,
             "ingest_prospect_seeds": self.ingest_prospect_seeds,
             "create_crm_task": self.create_crm_task,
@@ -1584,6 +1588,87 @@ class ToolRegistry:
                             "persist": {"type": "boolean", "default": True},
                         },
                         "required": ["company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "parse_tender",
+                    "description": (
+                        "Parsuj ogłoszenie przetargu lub news o zakupie/zamiarze zakupu sprzętu "
+                        "(CNC, tokarka, frezarka, EDM, narzędzia). Z text lub URL."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "url": {"type": "string"},
+                            "company": {"type": "string"},
+                            "title": {"type": "string"},
+                            "persist": {
+                                "type": "boolean",
+                                "default": False,
+                                "description": "True = od razu ingest_tender (profil+CRM)",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "ingest_tender",
+                    "description": (
+                        "Zapisz sparsowany sygnał przetargowy/zakupowy do tenders.json, "
+                        "podłącz do profilu firmy i utwórz zadanie CRM."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "url": {"type": "string"},
+                            "company": {"type": "string"},
+                            "title": {"type": "string"},
+                            "create_crm": {"type": "boolean", "default": True},
+                            "update_profile": {"type": "boolean", "default": True},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_tenders",
+                    "description": "Lista sygnałów przetargowych / zakupowych sprzętu.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "q": {"type": "string"},
+                            "intent": {
+                                "type": "string",
+                                "enum": [
+                                    "announced_tender",
+                                    "planned_tender",
+                                    "intends_to_buy",
+                                    "purchased",
+                                    "awarded",
+                                    "other",
+                                ],
+                            },
+                            "limit": {"type": "integer", "default": 30},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "tender_scoreboard",
+                    "description": "Scoreboard przetargów i sygnałów zakupu sprzętu (confidence).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"limit": {"type": "integer", "default": 25}},
                     },
                 },
             },
@@ -4066,6 +4151,90 @@ class ToolRegistry:
                 "disclaimer": analysis.get("disclaimer"),
             }
         return {"ok": True, "analysis": analysis}
+
+    def parse_tender(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.tenders import ingest_tender_analysis, parse_tender_html, parse_tender_text
+
+        text = str(args.get("text") or "")
+        url = str(args.get("url") or "").strip()
+        company = str(args.get("company") or "").strip() or None
+        title = str(args.get("title") or "")
+        persist = bool(args.get("persist", False))
+        if text.strip():
+            analysis = parse_tender_text(
+                text, company=company, title=title, url=url, source="tool"
+            )
+        elif url:
+            try:
+                resp = self._fetcher.get(url)
+                html = resp.text or ""
+                final_url = str(resp.url) if resp.url else url
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": safe_error(exc), "url": url}
+            analysis = parse_tender_html(
+                html,
+                company=company,
+                title=title,
+                url=final_url,
+                source="tool",
+            )
+        else:
+            return {"ok": False, "error": "podaj text albo url"}
+        if persist and analysis.get("tender_relevant"):
+            return ingest_tender_analysis(
+                analysis,
+                self.config.data_path,
+                create_crm=True,
+                update_profile=True,
+            )
+        return analysis
+
+    def ingest_tender(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.tenders import ingest_tender_analysis, parse_tender_html, parse_tender_text
+
+        text = str(args.get("text") or "")
+        url = str(args.get("url") or "").strip()
+        company = str(args.get("company") or "").strip() or None
+        title = str(args.get("title") or "")
+        if text.strip():
+            analysis = parse_tender_text(
+                text, company=company, title=title, url=url, source="tool"
+            )
+        elif url:
+            try:
+                resp = self._fetcher.get(url)
+                html = resp.text or ""
+                final_url = str(resp.url) if resp.url else url
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": safe_error(exc), "url": url}
+            analysis = parse_tender_html(
+                html, company=company, title=title, url=final_url, source="tool"
+            )
+        else:
+            return {"ok": False, "error": "podaj text albo url"}
+        return ingest_tender_analysis(
+            analysis,
+            self.config.data_path,
+            create_crm=bool(args.get("create_crm", True)),
+            update_profile=bool(args.get("update_profile", True)),
+        )
+
+    def list_tenders(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.tenders import TenderRegistry
+
+        reg = TenderRegistry.load(self.config.data_path)
+        rows = reg.list(
+            q=str(args.get("q") or "") or None,
+            intent=str(args.get("intent") or "") or None,
+            limit=int(args.get("limit") or 30),
+        )
+        return {"ok": True, "count": len(rows), "signals": [r.to_dict() for r in rows]}
+
+    def tender_scoreboard(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.tenders import TenderRegistry
+
+        reg = TenderRegistry.load(self.config.data_path)
+        return {"ok": True, "scoreboard": reg.scoreboard(limit=int(args.get("limit") or 25))}
 
     def estimate_tooling_budget_tool(self, args: dict[str, Any]) -> dict[str, Any]:
         vertical = str(args.get("vertical") or "unknown").strip()

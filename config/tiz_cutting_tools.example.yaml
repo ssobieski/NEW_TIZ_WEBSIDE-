@@ -59,6 +59,17 @@ industry:
   - Tungaloy
   - Walter
   - YG-1
+  - przetarg
+  - zapytanie ofertowe
+  - zamówienie publiczne
+  - tender
+  - RFQ
+  - RFP
+  - zakup obrabiarki
+  - centrum obróbcze
+  - tokarka CNC
+  - frezarka CNC
+  - inwestycja w park maszynowy
   exclude_keywords:
   - oferta pracy
   - rekrutacja
@@ -118,6 +129,8 @@ industry:
   - Co firmy komunikują w mediach społecznościowych (YouTube/LinkedIn/X) o nowych produktach, katalogach, targach?
   - "Jakie książki / artykuły naukowe / wideo (literatura: dynamika obróbki, narzędzia) warto dodać do korpusu Pozycje?"
   - "Jaki jest kontekst technologiczny (materiały ISO P/M/K/N/S/H, maszyny, chłodziwo, procesy) w nowych handbookach / katalogach?"
+  - Które firmy ogłosiły / planują przetarg lub kupiły obrabiarki CNC / tooling?
+  - Jakie sygnały zakupowe sprzętu (tokarka, frezarka, EDM, centrum obróbcze) widać w newsach / BZP?
 sources:
   rss:
   - name: Google News — machining literature books papers
@@ -134,6 +147,10 @@ sources:
     url: https://news.google.com/rss/search?q=%28EMO+OR+AMB+OR+IMTS%29+%28exhibitor+OR+cutting+tools+OR+tooling%29&hl=en&gl=US&ceid=US:en
   - name: Google News — machining magazines
     url: https://news.google.com/rss/search?q=%28%22Modern+Machine+Shop%22+OR+%22Cutting+Tool+Engineering%22+OR+%22MM+Maschinenmarkt%22%29+%28tool+OR+tooling+OR+carbide%29&hl=en&gl=US&ceid=US:en
+  - name: Google News — przetargi / zakup obrabiarek CNC
+    url: https://news.google.com/rss/search?q=%28przetarg+OR+%22zapytanie+ofertowe%22+OR+tender%29+%28CNC+OR+obrabiarka+OR+%22centrum+obr%C3%B3bcze%22+OR+tokarka+OR+frezarka%29&hl=pl&gl=PL&ceid=PL:pl
+  - name: Google News — machine tool investment / purchase
+    url: https://news.google.com/rss/search?q=%28%22purchased+a%22+OR+%22invests+in%22+OR+%22new+CNC%22+OR+%22machining+center%22%29+%28CNC+OR+%22machine+tool%22%29&hl=en&gl=US&ceid=US:en
   web: []
   media:
   - name: EMO Hannover
@@ -693,6 +710,7 @@ agents:
     publish_ontology: true
     publish_firm_profiles: true
     publish_crm_tasks: false  # opt-in; CRM often needs human review before fleet share
+    publish_tenders: true
     publish_pricelists: true
     publish_literature: true
     publish_product_tech: true
