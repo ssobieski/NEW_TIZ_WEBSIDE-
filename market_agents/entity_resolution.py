@@ -111,14 +111,16 @@ def rewrite_relation_endpoints(data_dir: Path | str, alias_map: dict[str, str]) 
 
     if not alias_map:
         return 0
-    g = FirmRelationsGraph.load(data_dir, include_seed=False)
+    # Include seed so endpoints that only exist in seed are canonicalized into cache.
+    g = FirmRelationsGraph.load(data_dir, include_seed=True)
     n = 0
     for edge in g.edges:
-        for field in ("source", "target"):
+        for field, norm_field in (("source", "normalized_source"), ("target", "normalized_target")):
             raw = str(edge.get(field) or "")
             canon = alias_map.get(normalize_firm_name(raw))
             if canon and canon != raw:
                 edge[field] = canon
+                edge[norm_field] = normalize_firm_name(canon)
                 n += 1
     if n:
         g.save(data_dir)

@@ -88,6 +88,7 @@ agents:
     publish_relations: true
     publish_ontology: true
     publish_firm_profiles: true
+    publish_crm_tasks: false
     publish_pricelists: true
     publish_literature: true
     publish_product_tech: true

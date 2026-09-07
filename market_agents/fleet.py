@@ -76,6 +76,7 @@ class FleetConfig:
     publish_relations: bool = True
     publish_ontology: bool = True
     publish_firm_profiles: bool = True
+    publish_crm_tasks: bool = False
     publish_pricelists: bool = True
     publish_literature: bool = True
     publish_product_tech: bool = True
@@ -126,6 +127,7 @@ class FleetSync:
             files.append("ontology.json")
         if getattr(self.fleet, "publish_firm_profiles", True):
             files.append("firm_profiles.json")
+        if getattr(self.fleet, "publish_crm_tasks", False):
             files.append("crm_tasks.json")
         if getattr(self.fleet, "publish_pricelists", True):
             files.append("available_pricelists.json")
@@ -406,6 +408,8 @@ class FleetSync:
                     row = json.loads(line)
                 except Exception:  # noqa: BLE001
                     continue
+                if not isinstance(row, dict):
+                    continue
                 url = str(row.get("url") or "").strip()
                 if not url or url in seen:
                     continue
@@ -563,6 +567,7 @@ def fleet_config_from_app(config: Any) -> FleetConfig:
         publish_relations=bool(getattr(fleet, "publish_relations", True)),
         publish_ontology=bool(getattr(fleet, "publish_ontology", True)),
         publish_firm_profiles=bool(getattr(fleet, "publish_firm_profiles", True)),
+        publish_crm_tasks=bool(getattr(fleet, "publish_crm_tasks", False)),
         publish_pricelists=bool(getattr(fleet, "publish_pricelists", True)),
         publish_literature=bool(getattr(fleet, "publish_literature", True)),
         publish_product_tech=bool(getattr(fleet, "publish_product_tech", True)),

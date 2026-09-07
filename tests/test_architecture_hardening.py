@@ -68,10 +68,9 @@ def _cfg(tmp: Path, **agent_kw) -> AppConfig:
     )
 
 
-def test_tool_schema_handler_parity():
-    cfg = _cfg(Path("/tmp"))  # noqa: S108 — only for ToolRegistry init paths
-    # use real tmp via MarketMemory path that may not exist — ToolRegistry still builds handlers
-    tools = ToolRegistry(cfg, MarketMemory(Path("/tmp/ma-parity")))  # noqa: S108
+def test_tool_schema_handler_parity(tmp_path: Path):
+    cfg = _cfg(tmp_path)
+    tools = ToolRegistry(cfg, MarketMemory(tmp_path))
     schema_names = {
         (t.get("function") or {}).get("name")
         for t in tools.openai_tools_schema()
@@ -137,10 +136,40 @@ def test_fleet_publish_includes_ontology_and_profiles(tmp_path: Path):
     files = set(result.get("files") or [])
     assert "ontology.json" in files
     assert "firm_profiles.json" in files
+    assert "crm_tasks.json" not in files  # opt-in via publish_crm_tasks
     assert "available_pricelists.json" in files
     assert "literature.json" in files
     assert "product_tech.json" in files
     assert "run_status.json" in files
+
+
+def test_fleet_publish_crm_tasks_opt_in(tmp_path: Path):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir(parents=True)
+    for name in (
+        "firm_profiles.json",
+        "crm_tasks.json",
+        "site_parse_rules.json",
+        "parsing_skills.json",
+        "crawl_health.json",
+    ):
+        (knowledge / name).write_text("{}", encoding="utf-8")
+    cfg = _cfg(tmp_path)
+    cfg.agents.fleet.publish_crm_tasks = True
+    sync = FleetSync(tmp_path, fleet_config_from_app(cfg))
+    result = sync.publish_knowledge(notes="crm-opt-in")
+    files = set(result.get("files") or [])
+    assert "crm_tasks.json" in files
+    assert "firm_profiles.json" in files
+
+
+def test_approval_host_matches_is_directional():
+    from market_agents.approvals import host_matches
+
+    assert host_matches("example.com", "www.example.com")
+    assert host_matches("example.com", "docs.example.com")
+    assert not host_matches("docs.example.com", "example.com")
+    assert not host_matches("evil.com", "example.com")
 
 
 def test_smoke_e2e_registries_and_post_enrich(tmp_path: Path):

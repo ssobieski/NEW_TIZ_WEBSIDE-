@@ -178,3 +178,37 @@ def test_tools_profiles(tmp_path: Path):
     )
     assert social["ok"] is True
     assert "governance" not in social or social.get("ok")
+
+
+def test_merge_preserves_downloads_and_dedupes_signals():
+    old = FirmProfile(
+        id="acme",
+        company="Acme",
+        roles=["competitor"],
+        assets={
+            "downloads": [{"url": "https://ex.com/a.pdf", "title": "A"}],
+            "catalogs": [{"url": "https://ex.com/c.pdf"}],
+        },
+        financial={
+            "signals": [{"metric": "revenue", "value_text": "10m"}, {"metric": "employees", "value_text": "100"}]
+        },
+    )
+    new = FirmProfile(
+        id="acme",
+        company="Acme",
+        roles=["supplier"],
+        assets={
+            "catalogs": [{"url": "https://ex.com/c2.pdf"}],
+            "pricelists": [{"url": "https://ex.com/p.pdf"}],
+        },
+        financial={
+            "signals": [{"metric": "revenue", "value_text": "10m"}, {"metric": "revenue", "value_text": "12m"}]
+        },
+    )
+    merged = FirmProfileRegistry._merge(old, new)
+    assert any(d.get("url") == "https://ex.com/a.pdf" for d in merged.assets.get("downloads") or [])
+    assert len(merged.assets.get("catalogs") or []) == 2
+    signals = (merged.financial or {}).get("signals") or []
+    assert len(signals) == 3  # duplicate revenue|10m dropped
+    keys = {f"{s.get('metric')}|{s.get('value_text')}" for s in signals}
+    assert len(keys) == 3

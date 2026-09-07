@@ -143,3 +143,33 @@ def test_absorb_items_tail(tmp_path: Path):
     signals = sync_dir / "inbox_signals.jsonl"
     assert signals.is_file()
     assert "example.com/a" in signals.read_text(encoding="utf-8")
+
+
+def test_absorb_items_tail_skips_non_dict(tmp_path: Path):
+    sync_dir = tmp_path / "fleet"
+    central = tmp_path / "central"
+    (central / "knowledge").mkdir(parents=True)
+    pack = sync_dir / "inbox" / "vps-x" / "pack1"
+    pack.mkdir(parents=True)
+    (pack / "items_tail.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(["not", "a", "dict"]),
+                json.dumps("string-row"),
+                json.dumps({"title": "Ok", "url": "https://example.com/ok"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    # marker so absorb finds the pack
+    (pack / "manifest.json").write_text(
+        json.dumps({"pack_id": "pack1", "role": "worker", "worker_id": "vps-x", "files": ["items_tail.jsonl"]}),
+        encoding="utf-8",
+    )
+    c = FleetSync(central, SyncFleetConfig(role="central", sync_dir=str(sync_dir)))
+    n = c._absorb_items_tail(pack / "items_tail.jsonl", worker_id="vps-x")
+    assert n == 1
+    text = (sync_dir / "inbox_signals.jsonl").read_text(encoding="utf-8")
+    assert "example.com/ok" in text
+    assert "not" not in text or '"url"' in text

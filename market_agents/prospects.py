@@ -264,7 +264,7 @@ _EMPLOYEE_COUNT_RE = re.compile(
     r"(?i)(?:employ(?:ee)?s?|pracownik(?:ów|i)?|beschäftigte|mitarbeiter)\D{0,20}(\d[\d\s.,]{0,12})"
 )
 _REVENUE_NUM_RE = re.compile(
-    r"(?i)(?:revenue|turnover|sprzedaż|obrót|umsatz|net\s+sales)"
+    r"(?i)(?:revenue|turnover|sprzedaż|obrót|przychód|przychod|umsatz|net\s+sales)"
     r".{0,40}?"
     r"((?:[€$£]|EUR|USD|PLN|SEK|CHF)?\s?\d[\d\s.,]*)\s*"
     r"(mrd|mld|bn|billion|mln|million|m\.?|tys\.?|k)?"
@@ -304,8 +304,12 @@ def detect_vertical(text: str) -> tuple[str, float]:
 
 
 def _parse_money_to_eur(num_raw: str, unit: str | None, currency: str | None) -> float | None:
+    digits = re.sub(r"[^\d.,]", "", num_raw or "")
+    # Separator followed by exactly 3 digits → thousands separator
+    digits = re.sub(r"[.,](?=\d{3}(?:\D|$))", "", digits)
+    digits = digits.replace(",", ".")
     try:
-        n = float(re.sub(r"[^\d.]", "", (num_raw or "").replace(",", ".").replace(" ", "")) or "0")
+        n = float(digits or "0")
     except ValueError:
         return None
     if n <= 0:

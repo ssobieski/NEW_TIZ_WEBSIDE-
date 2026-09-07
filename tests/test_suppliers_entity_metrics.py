@@ -99,7 +99,8 @@ def test_entity_resolution_merges_duplicates(tmp_path: Path):
     applied = resolve_golden_records(tmp_path, dry_run=False)
     assert applied["duplicate_groups"] >= 1
     after = FirmProfileRegistry.load(tmp_path)
-    assert len(after.profiles) < 2 or applied["profiles_after"] == len(after.profiles)
+    assert applied["profiles_after"] == len(after.profiles)
+    assert len(after.profiles) == 1
     # one golden remains with alias
     companies = {p.company for p in after.profiles.values()}
     assert any("Sandvik" in c for c in companies)

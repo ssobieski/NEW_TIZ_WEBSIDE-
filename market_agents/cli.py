@@ -395,33 +395,32 @@ def prospects_cmd(
         console.print_json(data={"company": p.company, "prospect": p.prospect, "scores": p.scores})
         return
 
-    if scoreboard or True:  # default: scoreboard list
-        rows = pr.scoreboard(limit=limit)
-        if not rows:
-            console.print(
-                "[yellow]Brak prospectów.[/yellow] "
-                "Użyj: prospects --seed  albo  prospects --company X --analyze-url URL"
-            )
-            raise typer.Exit(0)
-        table = Table(title="Prospect opportunity scoreboard")
-        table.add_column("Firma")
-        table.add_column("Branża")
-        table.add_column("Jakość")
-        table.add_column("Opportunity", justify="right")
-        table.add_column("Budżet mid EUR", justify="right")
-        table.add_column("Dostawcy", justify="right")
-        table.add_column("Procesy")
-        for row in rows:
-            table.add_row(
-                str(row.get("company")),
-                str(row.get("vertical") or ""),
-                str(row.get("quality_tier") or ""),
-                str(row.get("opportunity") or 0),
-                str(int(row["budget_mid_eur"])) if row.get("budget_mid_eur") else "—",
-                str(row.get("buys_from_count") or 0),
-                ",".join(row.get("processes") or [])[:40],
-            )
-        console.print(table)
+    rows = pr.scoreboard(limit=limit)
+    if not rows:
+        console.print(
+            "[yellow]Brak prospectów.[/yellow] "
+            "Użyj: prospects --seed  albo  prospects --company X --analyze-url URL"
+        )
+        raise typer.Exit(0)
+    table = Table(title="Prospect opportunity scoreboard")
+    table.add_column("Firma")
+    table.add_column("Branża")
+    table.add_column("Jakość")
+    table.add_column("Opportunity", justify="right")
+    table.add_column("Budżet mid EUR", justify="right")
+    table.add_column("Dostawcy", justify="right")
+    table.add_column("Procesy")
+    for row in rows:
+        table.add_row(
+            str(row.get("company")),
+            str(row.get("vertical") or ""),
+            str(row.get("quality_tier") or ""),
+            str(row.get("opportunity") or 0),
+            str(int(row["budget_mid_eur"])) if row.get("budget_mid_eur") else "—",
+            str(row.get("buys_from_count") or 0),
+            ",".join(row.get("processes") or [])[:40],
+        )
+    console.print(table)
 
 
 @app.command("sync-r2")
@@ -639,7 +638,7 @@ def governance_cmd(
                 tool=tool,
                 role=role or engine.role,
                 url=url,
-                args={"url": url, "company": company, "host_or_url": host} if True else {},
+                args={"url": url, "company": company, "host_or_url": host},
             )
             # clean empty args
             req.args = {k: v for k, v in (req.args or {}).items() if v}
@@ -973,7 +972,7 @@ def mvp_cmd(
 
     if act in {"bootstrap", "smoke"}:
         result = bootstrap_mvp(
-            target, config_path=cfg_path, reset=reset or act == "smoke"
+            target, config_path=cfg_path, reset=reset
         )
         console.print_json(data=result)
         if not result.get("ok"):

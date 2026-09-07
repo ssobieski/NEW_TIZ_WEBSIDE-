@@ -164,6 +164,7 @@ class Orchestrator:
         """Odśwież firm profiles, suppliers, opcjonalnie golden records + CRM.
 
         Worker VPS: NIE mutuje knowledge (governance: tylko collect/feedback).
+        Każdy krok ma własny error boundary — awaria jednego nie blokuje reszty.
         """
         role = self._fleet_role()
         if role == "worker":
@@ -173,9 +174,19 @@ class Orchestrator:
                 "reason": "fleet.role=worker — post_enrich disabled (central owns knowledge writes)",
             }
 
-        out: dict = {"ok": True}
+        out: dict = {"ok": True, "errors": {}}
         data_dir = self.config.data_path
-        if getattr(self.config.agents, "post_enrich_profiles", True):
+
+        def _step(name: str, enabled: bool, fn) -> None:
+            if not enabled:
+                return
+            try:
+                out[name] = fn()
+            except Exception as exc:  # noqa: BLE001
+                out["errors"][name] = str(exc)[:200]
+                out["ok"] = False
+
+        def _profiles():
             from market_agents.firm_profiles import FirmProfileRegistry
 
             reg = FirmProfileRegistry.load(data_dir)
@@ -184,40 +195,58 @@ class Orchestrator:
                 competitors=list(self.config.industry.competitors or []),
                 default_role="competitor",
             )
-            out["profiles"] = {
-                "count": built.get("count"),
-                "path": built.get("path"),
-            }
-        if getattr(self.config.agents, "post_enrich_resolve_duplicates", False):
+            return {"count": built.get("count"), "path": built.get("path")}
+
+        def _resolve():
             from market_agents.entity_resolution import resolve_golden_records
 
-            out["entity_resolution"] = resolve_golden_records(data_dir, dry_run=False)
-        if getattr(self.config.agents, "post_enrich_suppliers", True):
+            return resolve_golden_records(data_dir, dry_run=False)
+
+        def _suppliers():
             from market_agents.suppliers import SupplierRegistry
 
-            out["suppliers"] = SupplierRegistry.load(data_dir).refresh_and_save(data_dir)
-        if getattr(self.config.agents, "post_enrich_crm_tasks", True):
+            return SupplierRegistry.load(data_dir).refresh_and_save(data_dir)
+
+        def _crm():
             from market_agents.crm_tasks import create_tasks_from_prospect_scoreboard
 
-            crm = create_tasks_from_prospect_scoreboard(
+            return create_tasks_from_prospect_scoreboard(
                 data_dir,
                 min_opportunity=float(
                     getattr(self.config.agents, "crm_min_opportunity", 60.0) or 60.0
                 ),
             )
-            out["crm"] = crm
-        if getattr(self.config.agents, "post_enrich_crm_notion", False):
+
+        def _crm_notion():
             from market_agents.crm_tasks import push_crm_tasks_to_notion
 
-            out["crm_notion"] = push_crm_tasks_to_notion(self.config, only_hot=True, limit=20)
-        if getattr(self.config.agents, "post_enrich_digest", True):
+            return push_crm_tasks_to_notion(self.config, only_hot=True, limit=20)
+
+        def _digest():
             from market_agents.change_digest import refresh_digest
 
             dig = refresh_digest(data_dir)
-            out["digest"] = {
+            return {
                 "ok": dig.get("ok"),
                 "score_deltas": len((dig.get("digest") or {}).get("score_deltas") or []),
                 "new_firms": len((dig.get("digest") or {}).get("new_firms") or []),
                 "path": dig.get("markdown_path"),
             }
+
+        _step("profiles", getattr(self.config.agents, "post_enrich_profiles", True), _profiles)
+        _step(
+            "entity_resolution",
+            getattr(self.config.agents, "post_enrich_resolve_duplicates", False),
+            _resolve,
+        )
+        _step("suppliers", getattr(self.config.agents, "post_enrich_suppliers", True), _suppliers)
+        _step("crm", getattr(self.config.agents, "post_enrich_crm_tasks", True), _crm)
+        _step(
+            "crm_notion",
+            getattr(self.config.agents, "post_enrich_crm_notion", False),
+            _crm_notion,
+        )
+        _step("digest", getattr(self.config.agents, "post_enrich_digest", True), _digest)
+        if not out["errors"]:
+            out.pop("errors", None)
         return out

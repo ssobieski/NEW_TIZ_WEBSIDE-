@@ -278,6 +278,7 @@ class FleetConfig(BaseModel):
     publish_relations: bool = True
     publish_ontology: bool = True
     publish_firm_profiles: bool = True
+    publish_crm_tasks: bool = False
     publish_pricelists: bool = True
     publish_literature: bool = True
     publish_product_tech: bool = True

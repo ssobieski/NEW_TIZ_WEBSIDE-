@@ -77,9 +77,17 @@ class CrmTaskStore:
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
             rows = raw.get("tasks") if isinstance(raw, dict) else raw
-            return cls([CrmTask.from_dict(r) for r in (rows or []) if isinstance(r, dict)])
         except Exception:  # noqa: BLE001
             return cls()
+        tasks: list[CrmTask] = []
+        for r in rows or []:
+            if not isinstance(r, dict):
+                continue
+            try:
+                tasks.append(CrmTask.from_dict(r))
+            except Exception:  # noqa: BLE001
+                continue
+        return cls(tasks)
 
     def save(self, data_dir: Path | str | None = None) -> Path:
         data_dir = Path(data_dir or "data")
@@ -271,6 +279,7 @@ def push_crm_tasks_to_notion(
             t.meta = dict(t.meta or {})
             t.meta["notion_id"] = created.get("id")
             t.updated_at = utc_now_iso()
+            store.save(data_dir)
             pushed += 1
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{t.id}:{exc}"[:160])

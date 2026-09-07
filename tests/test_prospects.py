@@ -66,6 +66,18 @@ def test_analyze_prospect_text_full():
     assert "purchasing" in people_roles or "production" in people_roles
 
 
+def test_parse_money_thousands_and_przychod():
+    from market_agents.prospects import _parse_money_to_eur, extract_revenue_estimate
+
+    assert _parse_money_to_eur("12,500", None, "EUR") == 12500.0
+    assert _parse_money_to_eur("12,500,000", None, "EUR") == 12_500_000.0
+    assert _parse_money_to_eur("12.5", "mln", "EUR") == 12_500_000.0
+
+    pl = extract_revenue_estimate("Przychód firmy wyniósł 48 mln EUR w 2024.")
+    assert pl is not None
+    assert pl["value_eur_approx"] >= 40_000_000
+
+
 def test_prospect_registry_persist(tmp_path: Path):
     pr = ProspectRegistry.load(tmp_path)
     analysis = analyze_prospect_text(SAMPLE, company="Acme Aerospace", website="https://acme.example")

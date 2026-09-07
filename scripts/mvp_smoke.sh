@@ -22,7 +22,7 @@ python -m pytest \
 
 echo ""
 echo "--- 2) CLI mvp smoke (bootstrap + acceptance) ---"
-python -m market_agents mvp smoke --config "$CFG" --data-dir "$DATA" | tee "$OUT/mvp-smoke.json"
+python -m market_agents mvp smoke --config "$CFG" --data-dir "$DATA" --reset | tee "$OUT/mvp-smoke.json"
 python - <<PY
 import json
 from pathlib import Path

@@ -35,11 +35,12 @@ def normalize_host(value: str | None) -> str:
 
 
 def host_matches(grant_host: str, request_host: str) -> bool:
+    """Grant for example.com matches www.example.com; grant for docs.x.com does NOT match x.com."""
     g = normalize_host(grant_host)
     r = normalize_host(request_host)
     if not g or not r:
         return False
-    return r == g or r.endswith("." + g) or g.endswith("." + r)
+    return r == g or r.endswith("." + g)
 
 
 @dataclass

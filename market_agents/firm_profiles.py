@@ -532,7 +532,25 @@ class FirmProfileRegistry:
                 out.append(row)
             return out
 
+        def merge_signals(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            seen: set[str] = set()
+            out: list[dict[str, Any]] = []
+            for row in list(a or []) + list(b or []):
+                k = f"{row.get('metric')}|{row.get('value_text')}"
+                if k in seen:
+                    continue
+                seen.add(k)
+                out.append(row)
+            return out[:20]
+
         roles = list(dict.fromkeys(list(old.roles) + list(new.roles)))
+        merged_assets = {**(old.assets or {}), **(new.assets or {})}
+        for bucket in ("catalogs", "pricelists", "leaflets", "eshops", "downloads"):
+            merged_assets[bucket] = merge_list(
+                (old.assets or {}).get(bucket, []),
+                (new.assets or {}).get(bucket, []),
+                "url",
+            )
         return FirmProfile(
             id=old.id,
             company=new.company or old.company,
@@ -546,35 +564,16 @@ class FirmProfileRegistry:
             websites=merge_list(old.websites, new.websites, "url"),
             verification=new.verification or old.verification,
             financial={
-                "signals": (old.financial or {}).get("signals", [])
-                + (new.financial or {}).get("signals", []),
+                "signals": merge_signals(
+                    (old.financial or {}).get("signals", []),
+                    (new.financial or {}).get("signals", []),
+                ),
                 "notes": (new.financial or {}).get("notes") or (old.financial or {}).get("notes") or "",
                 "tooling_budget": (new.financial or {}).get("tooling_budget")
                 or (old.financial or {}).get("tooling_budget"),
             },
             public_relations=new.public_relations or old.public_relations,
-            assets={
-                "catalogs": merge_list(
-                    (old.assets or {}).get("catalogs", []),
-                    (new.assets or {}).get("catalogs", []),
-                    "url",
-                ),
-                "pricelists": merge_list(
-                    (old.assets or {}).get("pricelists", []),
-                    (new.assets or {}).get("pricelists", []),
-                    "url",
-                ),
-                "leaflets": merge_list(
-                    (old.assets or {}).get("leaflets", []),
-                    (new.assets or {}).get("leaflets", []),
-                    "url",
-                ),
-                "eshops": merge_list(
-                    (old.assets or {}).get("eshops", []),
-                    (new.assets or {}).get("eshops", []),
-                    "url",
-                ),
-            },
+            assets=merged_assets,
             network={
                 k: list(
                     dict.fromkeys(
@@ -862,9 +861,18 @@ class FirmProfileRegistry:
                 raw = json.loads(path.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001
                 continue
-            items = raw.get("items") or raw.get("entries") or raw if isinstance(raw, list) else []
-            if isinstance(raw, dict) and not items:
-                items = raw.get("literature") or raw.get("documents") or []
+            if isinstance(raw, list):
+                items = raw
+            elif isinstance(raw, dict):
+                items = (
+                    raw.get("items")
+                    or raw.get("entries")
+                    or raw.get("literature")
+                    or raw.get("documents")
+                    or []
+                )
+            else:
+                items = []
             for row in items if isinstance(items, list) else []:
                 if not isinstance(row, dict):
                     continue
