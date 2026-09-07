@@ -882,8 +882,10 @@ def metrics_cmd(
     table.add_column("mode")
     table.add_column("new", justify="right")
     table.add_column("profiles", justify="right")
+    table.add_column("supp", justify="right")
+    table.add_column("prosp", justify="right")
     table.add_column("crm_open", justify="right")
-    table.add_column("relations", justify="right")
+    table.add_column("notion", justify="right")
     for row in reversed(rows):
         counts = row.get("knowledge_counts") or {}
         table.add_row(
@@ -891,10 +893,52 @@ def metrics_cmd(
             str(row.get("mode") or ""),
             str(row.get("new_items") or 0),
             str(counts.get("firm_profiles") or 0),
+            str(counts.get("suppliers") or 0),
+            str(counts.get("prospects") or 0),
             str(counts.get("crm_tasks_open") or 0),
-            str(counts.get("relations") or 0),
+            str(counts.get("crm_with_notion") or 0),
         )
     console.print(table)
+
+
+@app.command("digest")
+def digest_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    refresh: bool = typer.Option(True, "--refresh/--show", help="Przelicz vs pokaż ostatni"),
+    min_delta: float = typer.Option(5.0, "--min-delta"),
+    limit: int = typer.Option(25, "--limit"),
+) -> None:
+    """Zmiany scoreboardów między runami (bez LLM)."""
+    from market_agents.change_digest import refresh_digest
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    if refresh:
+        result = refresh_digest(cfg.data_path, min_delta=min_delta, limit=limit)
+        md_path = Path(result["markdown_path"])
+        console.print(md_path.read_text(encoding="utf-8"))
+        console.print(f"[dim]{md_path}[/dim]")
+        return
+    md = Path(cfg.data_path) / "metrics" / "digest_latest.md"
+    if not md.is_file():
+        console.print("[yellow]Brak digest — uruchom digest --refresh lub run.[/yellow]")
+        raise typer.Exit(0)
+    console.print(md.read_text(encoding="utf-8"))
+
+
+@app.command("export-knowledge")
+def export_knowledge_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    out: Path = typer.Option(Path("reports/knowledge_export"), "--out", help="Katalog wyjściowy"),
+    limit: int = typer.Option(30, "--limit"),
+) -> None:
+    """Eksport operatorski: scoreboards + CRM + digest → Markdown/JSON."""
+    from market_agents.knowledge_export import export_knowledge_pack
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    result = export_knowledge_pack(cfg.data_path, out, limit=limit)
+    console.print(result)
 
 
 @app.command("social")

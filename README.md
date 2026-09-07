@@ -143,6 +143,8 @@ python -m market_agents crm push-notion --dry-run
 python -m market_agents suppliers --refresh
 python -m market_agents resolve-firms --dry-run
 python -m market_agents metrics
+python -m market_agents digest
+python -m market_agents export-knowledge --out reports/knowledge_export
 ```
 
 ## Dostawcy (suppliers)
@@ -156,6 +158,8 @@ python -m market_agents suppliers --refresh
 
 Tooli: `list_suppliers`, `supplier_scoreboard`, `score_suppliers`.
 Golden record: `resolve-firms` / tool `resolve_firm_duplicates` (domyślnie dry-run).
+Digest zmian: `digest` / tool `refresh_change_digest`.
+Eksport: `export-knowledge` / tool `export_knowledge_pack`.
 
 ## Uruchomienie na Dellu
 

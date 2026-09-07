@@ -281,6 +281,7 @@ class FleetConfig(BaseModel):
     publish_pricelists: bool = True
     publish_literature: bool = True
     publish_product_tech: bool = True
+    publish_run_status: bool = True
 
 
 class AgentsConfig(BaseModel):
@@ -295,6 +296,9 @@ class AgentsConfig(BaseModel):
     post_enrich_suppliers: bool = True
     # Merge duplikatów firm — wyłączone domyślnie (bezpieczniej ręcznie / dry-run)
     post_enrich_resolve_duplicates: bool = False
+    # Opcjonalny push CRM → Notion (wymaga crm_parent_page + token); domyślnie OFF
+    post_enrich_crm_notion: bool = False
+    post_enrich_digest: bool = True
     crm_min_opportunity: float = 60.0
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)

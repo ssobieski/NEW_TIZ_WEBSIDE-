@@ -167,4 +167,18 @@ class Orchestrator:
                 ),
             )
             out["crm"] = crm
+        if getattr(self.config.agents, "post_enrich_crm_notion", False):
+            from market_agents.crm_tasks import push_crm_tasks_to_notion
+
+            out["crm_notion"] = push_crm_tasks_to_notion(self.config, only_hot=True, limit=20)
+        if getattr(self.config.agents, "post_enrich_digest", True):
+            from market_agents.change_digest import refresh_digest
+
+            dig = refresh_digest(data_dir)
+            out["digest"] = {
+                "ok": dig.get("ok"),
+                "score_deltas": len((dig.get("digest") or {}).get("score_deltas") or []),
+                "new_firms": len((dig.get("digest") or {}).get("new_firms") or []),
+                "path": dig.get("markdown_path"),
+            }
         return out

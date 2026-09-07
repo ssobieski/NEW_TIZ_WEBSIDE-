@@ -175,6 +175,8 @@ class ToolRegistry:
             "score_suppliers": self.score_suppliers,
             "resolve_firm_duplicates": self.resolve_firm_duplicates,
             "list_run_metrics": self.list_run_metrics,
+            "refresh_change_digest": self.refresh_change_digest,
+            "export_knowledge_pack": self.export_knowledge_pack_tool,
             "list_parse_rules": self.list_parse_rules,
             "upsert_parse_rule": self.upsert_parse_rule,
             "rate_parse": self.rate_parse,
@@ -1759,6 +1761,43 @@ class ToolRegistry:
                     "parameters": {
                         "type": "object",
                         "properties": {"limit": {"type": "integer", "default": 15}},
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "refresh_change_digest",
+                    "description": (
+                        "Porównaj scoreboardy firm/prospect/supplier z poprzednim runem "
+                        "(deltas bez LLM)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "min_delta": {"type": "number", "default": 5},
+                            "limit": {"type": "integer", "default": 25},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "export_knowledge_pack",
+                    "description": (
+                        "Eksport operatorski scoreboardów + CRM + digest do katalogu "
+                        "(Markdown + JSON)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "out_dir": {
+                                "type": "string",
+                                "description": "Domyślnie reports/knowledge_export pod data_dir parent",
+                            },
+                            "limit": {"type": "integer", "default": 30},
+                        },
                     },
                 },
             },
@@ -4150,6 +4189,26 @@ class ToolRegistry:
 
         rows = recent_metrics(self.config.data_path, limit=int(args.get("limit") or 15))
         return {"ok": True, "count": len(rows), "metrics": rows}
+
+    def refresh_change_digest(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.change_digest import refresh_digest
+
+        return refresh_digest(
+            self.config.data_path,
+            min_delta=float(args.get("min_delta") or 5),
+            limit=int(args.get("limit") or 25),
+        )
+
+    def export_knowledge_pack_tool(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.knowledge_export import export_knowledge_pack
+
+        out = str(args.get("out_dir") or "").strip()
+        out_path = Path(out) if out else Path(self.config.report_path) / "knowledge_export"
+        return export_knowledge_pack(
+            self.config.data_path,
+            out_path,
+            limit=int(args.get("limit") or 30),
+        )
 
     def discover_new_firms(self, args: dict[str, Any]) -> dict[str, Any]:
         limit = int(args.get("limit") or 25)

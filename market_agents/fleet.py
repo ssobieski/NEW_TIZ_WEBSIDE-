@@ -21,6 +21,7 @@ KNOWLEDGE_FILES = (
     "ontology.json",
     "firm_profiles.json",
     "crm_tasks.json",
+    "run_status.json",
 )
 
 FEEDBACK_FILES = (
@@ -78,6 +79,7 @@ class FleetConfig:
     publish_pricelists: bool = True
     publish_literature: bool = True
     publish_product_tech: bool = True
+    publish_run_status: bool = True
 
 
 class FleetSync:
@@ -131,6 +133,8 @@ class FleetSync:
             files.append("literature.json")
         if getattr(self.fleet, "publish_product_tech", True):
             files.append("product_tech.json")
+        if getattr(self.fleet, "publish_run_status", True):
+            files.append("run_status.json")
         # dedupe preserve order
         return list(dict.fromkeys(files))
 
@@ -524,4 +528,5 @@ def fleet_config_from_app(config: Any) -> FleetConfig:
         publish_pricelists=bool(getattr(fleet, "publish_pricelists", True)),
         publish_literature=bool(getattr(fleet, "publish_literature", True)),
         publish_product_tech=bool(getattr(fleet, "publish_product_tech", True)),
+        publish_run_status=bool(getattr(fleet, "publish_run_status", True)),
     )

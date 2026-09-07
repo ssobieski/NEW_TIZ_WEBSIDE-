@@ -126,6 +126,7 @@ def test_fleet_publish_includes_ontology_and_profiles(tmp_path: Path):
         "parsing_skills.json",
         "crawl_health.json",
         "crm_tasks.json",
+        "run_status.json",
     ):
         (knowledge / name).write_text("{}", encoding="utf-8")
 
@@ -139,6 +140,7 @@ def test_fleet_publish_includes_ontology_and_profiles(tmp_path: Path):
     assert "available_pricelists.json" in files
     assert "literature.json" in files
     assert "product_tech.json" in files
+    assert "run_status.json" in files
 
 
 def test_smoke_e2e_registries_and_post_enrich(tmp_path: Path):
@@ -226,6 +228,8 @@ def test_parsing_agent_prompt_mentions_profiles_prospects():
     assert "create_crm_task" in src
     assert "GUARDRAIL" in src
     assert "tooling OEM" in src
+    assert "SUPPLIERS" in src
+    assert "list_run_metrics" in src
 
 
 def test_approval_host_scope_matches_url(tmp_path: Path):
