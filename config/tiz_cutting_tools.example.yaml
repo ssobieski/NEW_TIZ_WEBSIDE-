@@ -1,0 +1,682 @@
+# Profil TIZ — narzędzia skrawające / machining
+# Fokus: info techniczne produktów (cutting data / handbook / ISO 13399),
+#        social (YouTube/LinkedIn/X), cenniki, e-catalog, PDF, publikacje, digital catalogue, e-shop,
+#        targi branżowe, czasopisma, portale WWW
+# Lista znanych firm = Notion „Katalogi konkurencji — indeks”
+# cp config/tiz_cutting_tools.example.yaml config/industry.yaml
+
+industry:
+  name: Narzędzia skrawające / machining (TIZ)
+  language: pl
+  keywords:
+  - narzędzia skrawające
+  - parametry skrawania
+  - ISO 13399
+  - e-catalog
+  - ecatalog
+  - katalog
+  - cennik
+  - cenniki
+  - price list
+  - pricelist
+  - Preisliste
+  - schnittwerte
+  - feeds and speeds
+  - technical datasheet
+  - Preise
+  - catalogue
+  - digital catalogue
+  - PDF
+  - handbook
+  - social media
+  - YouTube
+  - LinkedIn
+  - application guide
+  - cutting data
+  - webshop
+  - e-shop
+  - vc
+  - fz
+  - toczenie
+  - frezowanie
+  - wiercenie
+  - Ceratizit
+  - Dormer Pramet
+  - Emuge-Franken
+  - FRAISA
+  - Guehring
+  - HAIMER
+  - Hoffmann Group
+  - Iscar
+  - Kennametal
+  - Korloy
+  - MAPAL
+  - Mitsubishi Materials (MMC)
+  - OSG
+  - Paul Horn
+  - Sandvik Coromant
+  - Seco Tools
+  - Tungaloy
+  - Walter
+  - YG-1
+  exclude_keywords:
+  - oferta pracy
+  - rekrutacja
+  - OLX
+  competitors:
+  - BIG DAISHOWA
+  - botek
+  - Ceratizit
+  - Dormer Pramet
+  - DTS
+  - Emuge-Franken
+  - EROWA
+  - FRAISA
+  - GESAC
+  - Guehring
+  - HAIMER
+  - Hoffmann Group
+  - Ingersoll (IMC)
+  - Iscar
+  - Kennametal
+  - Korea Technics Co., Ltd.
+  - Korloy
+  - KTA Spindle Toolings
+  - LMT Tools
+  - MAPAL
+  - Mitsubishi Materials (MMC)
+  - MOLDINO
+  - Nikken
+  - Nusret Eroglu Präzisionswerkzeuge GmbH
+  - OKE Precision Cutting Tools Co., Ltd.
+  - OSG
+  - Parlec
+  - Paul Horn
+  - REGO-FIX
+  - Sandvik Coromant
+  - Seco Tools
+  - SmiCut AB
+  - Tungaloy
+  - VABS
+  - Walter
+  - YesTool
+  - YG-1
+  focus_questions:
+  - Jakie NOWE firmy / marki narzędzi skrawających pojawiają się poza listą known_firms?
+  - Która firma jest dystrybutorem / dealerem innej (siatka powiązań distributor_of / dealer_of)?
+  - Jakie marki własne (brand_of) i grupy OEM (oem_group / subsidiary_of) widać u konkurencji?
+  - Jakie nowe e-katalogi / PDF / digital catalogues wypuszczają znane firmy z indeksu?
+  - Jakie DOSTĘPNE źródła TECHNICZNE o produktach (cutting data / handbook / ISO 13399 / application guide) mają znane firmy — i jaki jest układ pól vc/fz/ap (bez kopiowania tabel do CutData)?
+  - Jakie DOSTĘPNE CENNIKI (price list / Preisliste / cennik PDF) publikują znane firmy — publiczne vs za loginem?
+  - Co zmienia się w e-shopach (asortyment, ceny, selektory)?
+  - Jakie publikacje / handbooki / application guides są nowe?
+  - Które firmy z listy znanych firm mają nowe Downloads / Site URL?
+  - Jak wyglądają kalkulatory / selektory online vs TIZ?
+  - Jakie standardy danych (ISO 13399 / DIN 4000 / GTC) są w ruchu?
+  - Którzy wystawcy pojawiają się na targach (EMO / AMB / IMTS) poza known_firms?
+  - Co piszą czasopisma i portale branżowe o nowych markach / katalogach / przejęciach?
+  - Co firmy komunikują w mediach społecznościowych (YouTube/LinkedIn/X) o nowych produktach, katalogach, targach?
+  - "Jakie książki / artykuły naukowe / wideo (literatura: dynamika obróbki, narzędzia) warto dodać do korpusu Pozycje?"
+  - "Jaki jest kontekst technologiczny (materiały ISO P/M/K/N/S/H, maszyny, chłodziwo, procesy) w nowych handbookach / katalogach?"
+sources:
+  rss:
+  - name: Google News — machining literature books papers
+    url: https://news.google.com/rss/search?q=%22cutting+tools%22+(book+OR+textbook+OR+%22research+paper%22+OR+webinar+OR+proceedings)&hl=en&gl=US&ceid=US:en
+  - name: Google News — cutting data / handbooks
+    url: https://news.google.com/rss/search?q=%22cutting+tools%22+(%22cutting+data%22+OR+handbook+OR+%22application+guide%22+OR+%22ISO+13399%22)&hl=pl&gl=PL&ceid=PL:pl
+  - name: Google News — cutting tools price lists
+    url: https://news.google.com/rss/search?q=%22cutting+tools%22+(%22price+list%22+OR+pricelist+OR+Preisliste+OR+cennik)&hl=pl&gl=PL&ceid=PL:pl
+  - name: Google News — tooling catalogs
+    url: https://news.google.com/rss/search?q=%22cutting+tools%22+catalog+OR+ecatalog+OR+%22digital+catalogue%22&hl=pl&gl=PL&ceid=PL:pl
+  - name: Google News — ISO 13399
+    url: https://news.google.com/rss/search?q=%22ISO+13399%22+OR+%22cutting+tool+data%22&hl=en&gl=US&ceid=US:en
+  - name: Google News — EMO / AMB / IMTS exhibitors
+    url: https://news.google.com/rss/search?q=%28EMO+OR+AMB+OR+IMTS%29+%28exhibitor+OR+cutting+tools+OR+tooling%29&hl=en&gl=US&ceid=US:en
+  - name: Google News — machining magazines
+    url: https://news.google.com/rss/search?q=%28%22Modern+Machine+Shop%22+OR+%22Cutting+Tool+Engineering%22+OR+%22MM+Maschinenmarkt%22%29+%28tool+OR+tooling+OR+carbide%29&hl=en&gl=US&ceid=US:en
+  web: []
+  media:
+  - name: EMO Hannover
+    kind: trade_fair
+    brand: EMO
+    url: https://emo-hannover.com/en/
+    extract_exhibitors: true
+    link_keywords: [exhibitor, exhibitors, aussteller, hall, booth]
+    max_links: 40
+  - name: AMB Stuttgart
+    kind: trade_fair
+    brand: AMB
+    url: https://www.messe-stuttgart.de/amb/en/
+    extract_exhibitors: true
+    link_keywords: [exhibitor, exhibitors, aussteller, hall]
+    max_links: 40
+  - name: IMTS
+    kind: trade_fair
+    brand: IMTS
+    url: https://www.imts.com/
+    extract_exhibitors: true
+    link_keywords: [exhibitor, exhibitors, booth, show]
+    max_links: 40
+  - name: Cutting Tool Engineering
+    kind: magazine
+    brand: CTE
+    url: https://www.ctemag.com/
+    link_keywords: [article, news, product, tooling, carbide]
+    max_links: 35
+  - name: Modern Machine Shop
+    kind: magazine
+    brand: MMS
+    url: https://www.mmsonline.com/
+    link_keywords: [article, news, machining, tooling, cutting]
+    max_links: 35
+  - name: MM Maschinenmarkt
+    kind: magazine
+    brand: MM
+    url: https://www.maschinenmarkt.vogel.de/
+    link_keywords: [artikel, news, werkzeug, zerspanung]
+    max_links: 30
+  - name: Production Machining
+    kind: portal
+    brand: Production Machining
+    url: https://www.productionmachining.com/
+    link_keywords: [article, news, tooling, cutting]
+    max_links: 30
+  - name: Canadian Metalworking
+    kind: portal
+    brand: Canadian Metalworking
+    url: https://www.canadianmetalworking.com/
+    link_keywords: [news, article, tooling]
+    max_links: 25
+  social:
+  # Publiczne profile — bez logowania. YouTube: najlepiej channel_id → RSS.
+  - name: Sandvik Coromant YouTube
+    platform: youtube
+    brand: Sandvik Coromant
+    url: https://www.youtube.com/@SandvikCoromant
+    link_keywords: [catalog, launch, cutting, tooling, EMO, AMB]
+    max_items: 15
+  - name: Seco Tools YouTube
+    platform: youtube
+    brand: Seco Tools
+    url: https://www.youtube.com/@SecoTools
+    link_keywords: [catalog, launch, cutting, tooling]
+    max_items: 15
+  - name: Walter Tools YouTube
+    platform: youtube
+    brand: Walter
+    url: https://www.youtube.com/@WalterTools
+    link_keywords: [catalog, launch, cutting, tooling]
+    max_items: 12
+  - name: Kennametal YouTube
+    platform: youtube
+    brand: Kennametal
+    url: https://www.youtube.com/@Kennametal
+    link_keywords: [catalog, launch, cutting, tooling]
+    max_items: 12
+  - name: Iscar LinkedIn
+    platform: linkedin
+    brand: Iscar
+    url: https://www.linkedin.com/company/iscar/
+    link_keywords: [catalog, launch, product, EMO, AMB]
+    max_items: 12
+  - name: MAPAL LinkedIn
+    platform: linkedin
+    brand: MAPAL
+    url: https://www.linkedin.com/company/mapal/
+    link_keywords: [catalog, launch, product, tooling]
+    max_items: 10
+  - name: Hoffmann Group LinkedIn
+    platform: linkedin
+    brand: Hoffmann Group
+    url: https://www.linkedin.com/company/hoffmann-group/
+    link_keywords: [catalog, launch, product]
+    max_items: 10
+  - name: Sandvik Coromant LinkedIn
+    platform: linkedin
+    brand: Sandvik Coromant
+    url: https://www.linkedin.com/company/sandvik-coromant/
+    link_keywords: [catalog, launch, product, cutting]
+    max_items: 12
+  literature:
+  # Książki / artykuły / wideo — korpus jak Notion „Pozycje” (book|paper|video)
+  - name: Cutting Tool Engineering
+    kind: article
+    publisher: CTE
+    url: https://www.ctemag.com/
+    link_keywords: [article, cutting, tooling, machining, carbide]
+    max_items: 25
+  - name: SME Manufacturing Engineering
+    kind: article
+    publisher: SME
+    url: https://www.sme.org/technologies/articles/
+    link_keywords: [machining, cutting, tooling, manufacturing]
+    max_items: 20
+  - name: arXiv — machining / cutting tools
+    kind: article
+    publisher: arXiv
+    url: https://arxiv.org/search/?query=machining+cutting+tool&searchtype=all&source=header
+    link_keywords: [pdf, abs, machining, cutting, chatter]
+    max_items: 20
+  - name: SpringerLink — machining books
+    kind: book
+    publisher: Springer
+    url: https://link.springer.com/search?query=machining+cutting+tools&facet-content-type=%22Book%22
+    link_keywords: [book, machining, cutting, manufacturing]
+    max_items: 15
+  - name: CIRP Annals overview
+    kind: proceedings
+    publisher: CIRP / Elsevier
+    url: https://www.sciencedirect.com/journal/cirp-annals
+    link_keywords: [article, volume, machining, cutting]
+    max_items: 15
+  - name: YouTube — machining dynamics / chatter
+    kind: video
+    publisher: YouTube
+    url: https://www.youtube.com/results?search_query=machining+dynamics+chatter+stability
+    link_keywords: [watch, machining, chatter, dynamics, lecture]
+    max_items: 15
+  - name: Sandvik Coromant knowledge — tech articles
+    kind: article
+    brand: Sandvik Coromant
+    publisher: Sandvik Coromant
+    url: https://www.sandvik.coromant.com/en-gb/knowledge
+    link_keywords: [article, machining, cutting, handbook, guide]
+    max_items: 20
+  catalogs:
+  - name: BIG DAISHOWA downloads
+    brand: BIG DAISHOWA
+    kind: digital_catalogue
+    url: https://www.big-daishowa.com/
+  - name: botek downloads
+    brand: botek
+    kind: digital_catalogue
+    url: https://www.botek.de/
+  - name: Ceratizit downloads
+    brand: Ceratizit
+    kind: ecatalog
+    url: https://www.ceratizit.com/int/en/services/downloads.html
+  - name: Ceratizit site
+    brand: Ceratizit
+    kind: digital_catalogue
+    url: https://www.ceratizit.com/
+  - name: Dormer Pramet downloads
+    brand: Dormer Pramet
+    kind: digital_catalogue
+    url: https://www.dormerpramet.com/
+  - name: DTS downloads
+    brand: DTS
+    kind: ecatalog
+    url: https://diamond-toolingsystems.com/downloads/
+  - name: DTS site
+    brand: DTS
+    kind: digital_catalogue
+    url: https://diamond-toolingsystems.com/
+  - name: Emuge-Franken downloads
+    brand: Emuge-Franken
+    kind: ecatalog
+    url: https://www.emuge-franken-group.com/de/en/brochures-catalogues/a/downloads
+  - name: Emuge-Franken site
+    brand: Emuge-Franken
+    kind: digital_catalogue
+    url: https://www.emuge-franken-group.com/
+  - name: EROWA downloads
+    brand: EROWA
+    kind: digital_catalogue
+    url: https://www.erowa.com/
+  - name: FRAISA downloads
+    brand: FRAISA
+    kind: digital_catalogue
+    url: https://www.fraisa.com/assets/media/blaetterkatalog/2025/fraeser/en/
+  - name: FRAISA site
+    brand: FRAISA
+    kind: digital_catalogue
+    url: https://fraisa.com/
+  - name: GESAC downloads
+    brand: GESAC
+    kind: ecatalog
+    url: https://www.gesac.com.cn/en/news_catalog/product-brochure/
+  - name: GESAC site
+    brand: GESAC
+    kind: digital_catalogue
+    url: https://www.gesac.com.cn/en/
+  - name: Guehring downloads
+    brand: Guehring
+    kind: ecatalog
+    url: https://www.guehring.com/en/products/online-catalogue
+  - name: Guehring site
+    brand: Guehring
+    kind: digital_catalogue
+    url: https://www.guehring.com/
+  - name: HAIMER downloads
+    brand: HAIMER
+    kind: digital_catalogue
+    url: https://www.haimer.com/
+  - name: Hoffmann Group downloads
+    brand: Hoffmann Group
+    kind: ecatalog
+    url: https://www.hoffmann-group.com/GB/en/houk/services/e-catalogue
+  - name: Hoffmann Group site
+    brand: Hoffmann Group
+    kind: digital_catalogue
+    url: https://www.hoffmann-group.com/
+  - name: Ingersoll (IMC) downloads
+    brand: Ingersoll (IMC)
+    kind: digital_catalogue
+    url: https://www.ingersoll-imc.de/product-lines
+  - name: Ingersoll (IMC) site
+    brand: Ingersoll (IMC)
+    kind: digital_catalogue
+    url: https://ingersoll-imc.de/
+  - name: Iscar downloads
+    brand: Iscar
+    kind: ecatalog
+    url: https://www.iscar.com/eCatalog/
+  - name: Iscar site
+    brand: Iscar
+    kind: digital_catalogue
+    url: https://www.iscar.com/
+  - name: Kennametal downloads
+    brand: Kennametal
+    kind: ecatalog
+    url: https://www.kennametal.com/us/en/resources/catalogs-literature.html
+  - name: Kennametal site
+    brand: Kennametal
+    kind: digital_catalogue
+    url: https://www.kennametal.com/
+  - name: Korea Technics Co., Ltd. downloads
+    brand: Korea Technics Co., Ltd.
+    kind: digital_catalogue
+    url: https://koreatechnics.com/
+  - name: Korloy downloads
+    brand: Korloy
+    kind: ecatalog
+    url: https://www.korloy.com/en/download/cata.do
+  - name: Korloy site
+    brand: Korloy
+    kind: digital_catalogue
+    url: https://korloy.com/
+  - name: KTA Spindle Toolings downloads
+    brand: KTA Spindle Toolings
+    kind: digital_catalogue
+    url: https://www.ktaspindletoolings.com/products/
+  - name: KTA Spindle Toolings site
+    brand: KTA Spindle Toolings
+    kind: digital_catalogue
+    url: https://www.ktaspindletoolings.com/
+  - name: LMT Tools downloads
+    brand: LMT Tools
+    kind: ecatalog
+    url: https://www.lmt-tools.com/en/downloads
+  - name: LMT Tools site
+    brand: LMT Tools
+    kind: digital_catalogue
+    url: https://www.lmt-tools.com/en
+  - name: MAPAL downloads
+    brand: MAPAL
+    kind: digital_catalogue
+    url: https://mapal.com/en/media
+  - name: MAPAL site
+    brand: MAPAL
+    kind: digital_catalogue
+    url: https://mapal.com/
+  - name: Mitsubishi Materials (MMC) downloads
+    brand: Mitsubishi Materials (MMC)
+    kind: ecatalog
+    url: https://www.mmc-carbide.com/en_jp/webcatalog
+  - name: Mitsubishi Materials (MMC) site
+    brand: Mitsubishi Materials (MMC)
+    kind: digital_catalogue
+    url: https://www.mmc-carbide.com/
+  - name: MOLDINO downloads
+    brand: MOLDINO
+    kind: ecatalog
+    url: https://www.moldino.com/en/products/catalog/
+  - name: MOLDINO site
+    brand: MOLDINO
+    kind: digital_catalogue
+    url: https://www.moldino.com/en/
+  - name: Nikken downloads
+    brand: Nikken
+    kind: ecatalog
+    url: https://www.nikken-kosakusho.co.jp/en/download/
+  - name: Nikken site
+    brand: Nikken
+    kind: digital_catalogue
+    url: https://www.nikken-kosakusho.co.jp/en/
+  - name: Nusret Eroglu Präzisionswerkzeuge GmbH downloads
+    brand: Nusret Eroglu Präzisionswerkzeuge GmbH
+    kind: digital_catalogue
+    url: https://www.eroglu.de/kataloge
+  - name: Nusret Eroglu Präzisionswerkzeuge GmbH site
+    brand: Nusret Eroglu Präzisionswerkzeuge GmbH
+    kind: digital_catalogue
+    url: https://www.eroglu.de/
+  - name: OKE Precision Cutting Tools Co., Ltd. downloads
+    brand: OKE Precision Cutting Tools Co., Ltd.
+    kind: ecatalog
+    url: https://www.oke-carbide.com.cn/Download.html
+  - name: OKE Precision Cutting Tools Co., Ltd. site
+    brand: OKE Precision Cutting Tools Co., Ltd.
+    kind: digital_catalogue
+    url: https://www.oke-carbide.com/
+  - name: OSG downloads
+    brand: OSG
+    kind: digital_catalogue
+    url: https://osgtool.com/
+  - name: OSG site
+    brand: OSG
+    kind: digital_catalogue
+    url: https://www.osg.co.jp/
+  - name: Parlec downloads
+    brand: Parlec
+    kind: digital_catalogue
+    url: https://www.parlec.com/
+  - name: Paul Horn downloads
+    brand: Paul Horn
+    kind: ecatalog
+    url: https://www.horn-group.com/us/service/download-area
+  - name: Paul Horn site
+    brand: Paul Horn
+    kind: digital_catalogue
+    url: https://horn-group.com/
+  - name: REGO-FIX downloads
+    brand: REGO-FIX
+    kind: digital_catalogue
+    url: https://www.rego-fix.com/
+  - name: Sandvik Coromant downloads
+    brand: Sandvik Coromant
+    kind: ecatalog
+    url: https://www.sandvik.coromant.com/en-gb/downloads
+  - name: Sandvik Coromant site
+    brand: Sandvik Coromant
+    kind: digital_catalogue
+    url: https://www.sandvik.coromant.com/
+  - name: Seco Tools downloads
+    brand: Seco Tools
+    kind: ecatalog
+    url: https://www.secotools.com/article/services/downloads
+  - name: Seco Tools site
+    brand: Seco Tools
+    kind: digital_catalogue
+    url: https://www.secotools.com/
+  - name: SmiCut AB downloads
+    brand: SmiCut AB
+    kind: ecatalog
+    url: https://smicut.com/en/catalogue/
+  - name: SmiCut AB site
+    brand: SmiCut AB
+    kind: digital_catalogue
+    url: https://smicut.com/
+  - name: Tungaloy downloads
+    brand: Tungaloy
+    kind: ecatalog
+    url: https://www.tungaloy.com/download/
+  - name: Tungaloy site
+    brand: Tungaloy
+    kind: digital_catalogue
+    url: https://www.tungaloy.com/
+  - name: VABS downloads
+    brand: VABS
+    kind: ecatalog
+    url: https://www.vabs.com/en/download/
+  - name: VABS site
+    brand: VABS
+    kind: digital_catalogue
+    url: https://www.vabs.com/
+  - name: Walter downloads
+    brand: Walter
+    kind: ecatalog
+    url: https://www.walter-tools.com/en-gb/downloads/catalogues
+  - name: Walter site
+    brand: Walter
+    kind: digital_catalogue
+    url: https://www.walter-tools.com/
+  - name: YesTool downloads
+    brand: YesTool
+    kind: ecatalog
+    url: https://yestool.kr/en/download/
+  - name: YesTool site
+    brand: YesTool
+    kind: digital_catalogue
+    url: https://yestool.kr/
+  - name: YG-1 downloads
+    brand: YG-1
+    kind: ecatalog
+    url: https://www.yg1.kr/support/catalog.asp
+  - name: YG-1 site
+    brand: YG-1
+    kind: digital_catalogue
+    url: https://www.yg1.kr/
+  notion:
+    enabled: true
+    token_env: NOTION_TOKEN
+    root_pages:
+    - 3c2bdd41-cccd-8176-bf12-f6efd37baacc
+    - 3c2bdd41-cccd-81dc-8c62-e9aa3ff740aa
+    - 3c2bdd41-cccd-816f-8171-c28e1128cf1c
+    - 3c2bdd41-cccd-8152-9e94-d21ca8f3e95b
+    - 308dfae4-647b-40e7-84a3-0b3f8406c769
+    - 3c1bdd41-cccd-8113-abfc-e4de309c512f
+    search_queries:
+    - katalogi konkurencji
+    - ecatalog PDF eshop
+    - znane firmy indeks
+    - ISO 13399
+    - handbook machining
+    - literatura dynamika obróbki
+    - książki artykuły wideo narzędzia
+    max_pages: 100
+    include_child_pages: true
+    # Notion = źródło prawdy: jakie firmy istnieją + ich przedstawienie
+    enrich_firm_presentations: true
+    presentation_max_chars: 4000
+    known_firms_database: 308dfae4-647b-40e7-84a3-0b3f8406c769
+    # Baza Pozycje (Type=book|paper|video|code) — paper→article
+    literature_database: 948d6c02-d3bb-4b30-8c0c-a26f873bf719
+  cloudflare_r2:
+    enabled: false
+    account_id_env: CF_ACCOUNT_ID
+    access_key_env: CF_R2_ACCESS_KEY_ID
+    secret_key_env: CF_R2_SECRET_ACCESS_KEY
+    bucket: tiz-market-intel
+    prefix: monitoring/
+    max_objects: 200
+    text_extensions:
+    - .json
+    - .jsonl
+    - .md
+    - .txt
+    - .html
+    - .csv
+    - .xml
+    - .pdf
+  firm_discovery:
+    enabled: true
+    language: en
+    region: US
+    max_items: 20
+    search_queries:
+    - '"cutting tools" (startup OR "new manufacturer" OR "new brand" OR debut OR "spin-off")'
+    - '"carbide tools" ("enters the market" OR "new company" OR exhibitor OR "first catalog")'
+    - '"tooling manufacturer" (launch OR unveils OR introduces) (catalog OR ecatalog)'
+    - '"narzędzia skrawające" (nowy producent OR debiut OR "nowa marka")'
+    - '"solid carbide" ("new brand" OR startup OR "new player")'
+    feed_urls: []
+    known_match_threshold: 0.88
+llm:
+  provider: vllm
+  base_url: http://127.0.0.1:8000
+  model: Qwen/Qwen2.5-72B-Instruct-AWQ
+  temperature: 0.1
+  timeout_seconds: 300
+  api_key: EMPTY
+  max_tokens: 4096
+  tensor_parallel_size: 4
+  gpu_memory_utilization: 0.9
+  max_model_len: 32768
+agents:
+  max_items_per_source: 20
+  lookback_hours: 168
+  report_dir: reports
+  data_dir: data
+  min_relevance_score: 0.25
+  agentic:
+    enabled: true
+    max_steps: 14
+    max_deep_parses: 10
+    parallel_fetches: 2
+    require_tool_use: true
+    trace_dir: data/agent_traces
+    learn_parse_rules: true
+    parse_rules_path: data/knowledge/site_parse_rules.json
+    learn_parsing_skills: true
+    parsing_skills_path: data/knowledge/parsing_skills.json
+    # safer default: nie auto-promuj reguł z VPS bez przeglądu
+    auto_promote_host_skills: false
+  crawl:
+    enabled: true
+    min_delay_seconds: 1.5
+    max_delay_seconds: 45
+    jitter_seconds: 0.5
+    per_host_concurrency: 1
+    global_concurrency: 2
+    max_retries: 3
+    backoff_factor: 2.0
+    respect_robots_txt: true
+    adaptive: true
+    cooldown_on_block_seconds: 900
+    timeout_seconds: 35
+    # SSRF: blokuj localhost / RFC1918 / metadata
+    block_private_networks: true
+    resolve_dns_for_ssrf: true
+    max_redirects: 3
+    max_response_bytes: 15000000
+    allowed_hosts: []
+  security:
+    enabled: true
+    block_private_networks: true
+    allow_write_tools: true
+    allow_notion_tools: true
+    allow_r2_tools: true
+    # strict_tool_mode: true  # tylko SAFE+FETCH tools
+    strict_tool_mode: false
+    redact_traces: true
+    trace_tool_result_max_chars: 4000
+    fleet_allowlist_only: true
+    enforce_r2_prefix: true
+    allowed_hosts: []
+  governance:
+    enabled: true
+    mode: enforce   # enforce | monitor
+    policy_pack: config/governance/tiz.policy.yaml
+    audit_dir: data/governance
+    fail_closed: false
+    deny_require_approval: true
+  fleet:
+    # central = ten serwer GPU uczy skills/rules i publikuje knowledge dla VPS
+    role: central
+    sync_dir: data/fleet
+    publish_known_firms: true
+    publish_relations: true
+schedule:
+  every_hours: 6

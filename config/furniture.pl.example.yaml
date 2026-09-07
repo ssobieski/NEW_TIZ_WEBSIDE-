@@ -1,0 +1,68 @@
+# Branża meblarska — przykład PL pod Dell 4x A100
+# cp config/furniture.pl.example.yaml config/industry.yaml
+
+industry:
+  name: "Meble i wyposażenie wnętrz"
+  language: "pl"
+  keywords:
+    - "meble"
+    - "wyposażenie wnętrz"
+    - "IKEA"
+    - "Black Red White"
+    - "Agata Meble"
+    - "design wnętrz"
+    - "meble biurowe"
+    - "e-commerce meble"
+  exclude_keywords:
+    - "oferta pracy"
+    - "rekrutacja"
+    - "ogłoszenie"
+    - "OLX"
+    - "za darmo"
+    - "Kupię"
+  competitors:
+    - "IKEA"
+    - "Black Red White"
+    - "Agata Meble"
+  focus_questions:
+    - "Jakie ruchy cenowe i ekspansyjne robi konkurencja?"
+    - "Co dzieje się w e-commerce meblowym?"
+
+sources:
+  rss:
+    - name: "Google News — meble"
+      url: "https://news.google.com/rss/search?q=meble+OR+%22wyposa%C5%BCenie+wn%C4%99trz%22&hl=pl&gl=PL&ceid=PL:pl"
+    - name: "Google News — IKEA PL"
+      url: "https://news.google.com/rss/search?q=IKEA+Polska&hl=pl&gl=PL&ceid=PL:pl"
+    - name: "Google News — Black Red White"
+      url: "https://news.google.com/rss/search?q=%22Black+Red+White%22+OR+BRW&hl=pl&gl=PL&ceid=PL:pl"
+  web: []
+
+llm:
+  provider: "vllm"
+  base_url: "http://127.0.0.1:8000"
+  model: "Qwen/Qwen2.5-72B-Instruct-AWQ"
+  temperature: 0.1
+  timeout_seconds: 300
+  api_key: "EMPTY"
+  max_tokens: 4096
+  tensor_parallel_size: 4
+  gpu_memory_utilization: 0.90
+  max_model_len: 32768
+
+agents:
+  max_items_per_source: 12
+  lookback_hours: 168
+  report_dir: "reports"
+  data_dir: "data"
+  min_relevance_score: 0.25
+  agentic:
+    enabled: true
+    max_steps: 12
+    max_deep_parses: 8
+    parallel_fetches: 6
+    require_tool_use: true
+    trace_dir: "data/agent_traces"
+
+schedule:
+  every_hours: 6

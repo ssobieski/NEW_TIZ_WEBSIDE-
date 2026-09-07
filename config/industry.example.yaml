@@ -1,0 +1,44 @@
+# Skopiuj do config/industry.yaml i dostosuj.
+
+industry:
+  name: "Twoja branża"
+  language: "pl"
+  keywords:
+    - "słowo kluczowe 1"
+    - "słowo kluczowe 2"
+  exclude_keywords:
+    - "reklama"
+    - "oferta pracy"
+    - "rekrutacja"
+  competitors: []
+  focus_questions: []
+
+sources:
+  rss:
+    - name: "Google News (branża)"
+      url: "https://news.google.com/rss/search?q=TWOJA+BRANZA&hl=pl&gl=PL&ceid=PL:pl"
+  web: []
+
+llm:
+  provider: "ollama"
+  base_url: "http://127.0.0.1:11434"
+  model: "llama3.2"
+  temperature: 0.2
+  timeout_seconds: 120
+
+agents:
+  max_items_per_source: 15
+  lookback_hours: 48
+  report_dir: "reports"
+  data_dir: "data"
+  min_relevance_score: 0.35
+  agentic:
+    enabled: true
+    max_steps: 8
+    max_deep_parses: 5
+    parallel_fetches: 4
+    require_tool_use: true
+    trace_dir: "data/agent_traces"
+
+schedule:
+  every_hours: 6
