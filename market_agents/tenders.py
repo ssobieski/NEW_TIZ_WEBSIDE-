@@ -669,15 +669,15 @@ def _maybe_create_crm(signal: TenderSignal, data_dir: Path | str) -> dict[str, A
         reason=reason,
         opportunity_score=score,
         priority=priority,  # type: ignore[arg-type]
+        source="tender",
+        dedupe_by_company=True,
         meta={"tender_id": signal.id, "intent": signal.intent, "url": signal.url},
     )
-    if created:
-        task.source = "tender"
-        task.updated_at = utc_now_iso()
     store.save(data_dir)
     return {
         "created": created,
         "task_id": task.id,
         "title": task.title,
         "priority": task.priority,
+        "sources": (task.meta or {}).get("sources") or [task.source],
     }

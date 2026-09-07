@@ -407,8 +407,11 @@ def prospects_cmd(
     table.add_column("Branża")
     table.add_column("Jakość")
     table.add_column("Opportunity", justify="right")
+    table.add_column("ToolingInf", justify="right")
     table.add_column("Budżet mid EUR", justify="right")
-    table.add_column("Dostawcy", justify="right")
+    table.add_column("Families")
+    table.add_column("Narzędzia")
+    table.add_column("Peer rules")
     table.add_column("Procesy")
     for row in rows:
         table.add_row(
@@ -416,9 +419,12 @@ def prospects_cmd(
             str(row.get("vertical") or ""),
             str(row.get("quality_tier") or ""),
             str(row.get("opportunity") or 0),
+            str(row.get("tooling_inference") or "—"),
             str(int(row["budget_mid_eur"])) if row.get("budget_mid_eur") else "—",
-            str(row.get("buys_from_count") or 0),
-            ",".join(row.get("processes") or [])[:40],
+            ",".join(row.get("product_families") or [])[:36] or "—",
+            ",".join(row.get("practical_tools") or [])[:40] or "—",
+            ",".join(row.get("peer_rules") or [])[:28] or "—",
+            ",".join(row.get("processes") or [])[:36],
         )
     console.print(table)
 

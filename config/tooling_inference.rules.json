@@ -173,6 +173,128 @@
         "face_mills"
       ],
       "workholding": ["vise", "chuck", "soft_jaws"]
+    },
+    "castings_machining": {
+      "label": "Obróbka odlewów / castings",
+      "keywords": ["odlew", "casting", "żeliwo", "cast iron", "aluminum casting", "odlewn"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "facing",
+        "boring",
+        "milling",
+        "drilling",
+        "tapping",
+        "deburring"
+      ],
+      "typical_materials": ["iso-k", "iso-n"],
+      "practical_tools": [
+        "face_mills",
+        "indexable_milling",
+        "boring_bars",
+        "drills",
+        "taps",
+        "ceramic_or_cBN_optional"
+      ],
+      "workholding": ["fixture_plate", "tombstone", "hydraulic_clamp"]
+    },
+    "sheet_metal": {
+      "label": "Blachy / sheet metal fabrication",
+      "keywords": ["blachar", "sheet metal", "laser cutting", "wycinanie laser", "gięcie", "press brake", "konstrukcje stalowe"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "cutting",
+        "bending",
+        "welding_optional",
+        "secondary_machining"
+      ],
+      "typical_materials": ["iso-p", "iso-n"],
+      "practical_tools": [
+        "end_mills",
+        "drills",
+        "taps",
+        "chamfer_mills",
+        "spot_welds_consumables"
+      ],
+      "workholding": ["vise", "clamps"]
+    },
+    "hydraulics_pneumatics": {
+      "label": "Hydraulika / pneumatyka / manifolds",
+      "keywords": ["hydraulik", "pneumatik", "manifold", "siłownik", "zawór", "valve body", "blok hydrauliczny"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "milling",
+        "deep_hole_drilling",
+        "boring",
+        "tapping",
+        "honing_optional"
+      ],
+      "typical_materials": ["iso-p", "iso-n"],
+      "practical_tools": [
+        "solid_carbide_end_mills",
+        "deep_hole_drills",
+        "gun_drills",
+        "boring_bars",
+        "taps",
+        "reamers"
+      ],
+      "workholding": ["vise", "custom_fixture"]
+    },
+    "plastics_machining": {
+      "label": "Tworzywa / plastics machining",
+      "keywords": ["tworzyw", "plastics machining", "pom ", "ptfe", "peek", "nylon", "poliamid"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "milling",
+        "turning",
+        "drilling"
+      ],
+      "typical_materials": ["iso-n"],
+      "practical_tools": [
+        "sharp_end_mills",
+        "pcd_or_polished_tools",
+        "turning_inserts_aluminum_style",
+        "drills"
+      ],
+      "workholding": ["soft_jaws", "vacuum_optional"]
+    },
+    "wood_composites_cnc": {
+      "label": "Drewno / kompozyty CNC",
+      "keywords": ["drewno", "wood cnc", "kompozyt", "cfrp", "gfrp", "milling composites"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "routing_milling",
+        "drilling",
+        "trimming"
+      ],
+      "typical_materials": ["iso-n"],
+      "practical_tools": [
+        "router_bits",
+        "diamond_coated_end_mills",
+        "compression_mills",
+        "drills"
+      ],
+      "workholding": ["vacuum_table"]
+    },
+    "energy_large_parts": {
+      "label": "Energetyka / large energy parts",
+      "keywords": ["energetyk", "turbina", "oil and gas", "flange large", "pressure vessel", "ropociąg"],
+      "peer_vertical": "energy",
+      "theoretical_process": [
+        "turning_large",
+        "milling",
+        "drilling",
+        "boring",
+        "welding_prep"
+      ],
+      "typical_materials": ["iso-p", "iso-m", "iso-s"],
+      "practical_tools": [
+        "heavy_turning_inserts",
+        "indexable_drills",
+        "boring_bars",
+        "face_mills",
+        "thread_mills"
+      ],
+      "workholding": ["large_chuck", "floor_fixture"]
     }
   },
   "equipment_to_tools": {
@@ -211,6 +333,18 @@
       "processes": [],
       "practical_tools": ["metrology_probes"],
       "workholding": []
+    },
+    "press_brake": {
+      "keywords": ["prasa krawędziow", "press brake", "abkant"],
+      "processes": [],
+      "practical_tools": ["chamfer_mills", "drills", "taps"],
+      "workholding": ["clamps"]
+    },
+    "laser_cutter": {
+      "keywords": ["wycinarka laser", "laser cutter", "laser cutting"],
+      "processes": [],
+      "practical_tools": ["secondary_end_mills", "drills"],
+      "workholding": []
     }
   },
   "peer_rules": [
@@ -241,6 +375,27 @@
       "or_vertical": ["medical"],
       "apply_tooling_from_family": "medical_implants",
       "rationale": "Peerzy medyczni → mikro-narzędzia, Swiss, gwintowanie precyzyjne."
+    },
+    {
+      "id": "castings_peers",
+      "when_product_family": ["castings_machining"],
+      "or_vertical": [],
+      "apply_tooling_from_family": "castings_machining",
+      "rationale": "Obróbka odlewów → face mills, boring, indexable drills; peerzy dzielą ten zakres."
+    },
+    {
+      "id": "hydraulics_peers",
+      "when_product_family": ["hydraulics_pneumatics"],
+      "or_vertical": [],
+      "apply_tooling_from_family": "hydraulics_pneumatics",
+      "rationale": "Bloki hydrauliczne → deep-hole / gun drills, tapping, reaming."
+    },
+    {
+      "id": "energy_large_peers",
+      "when_product_family": ["energy_large_parts"],
+      "or_vertical": ["energy"],
+      "apply_tooling_from_family": "energy_large_parts",
+      "rationale": "Peerzy energetyki → heavy turning, large boring, indexable drilling."
     }
   ]
 }

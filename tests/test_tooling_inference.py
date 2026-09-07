@@ -83,3 +83,49 @@ def test_aerospace_peer_tooling():
     assert tools
     # ISO-S oriented tooling from aerospace family / peers
     assert any("iso_s" in t or "end_mills" in t or "hsm" in t for t in tools)
+
+
+def test_new_product_families_castings_hydraulics():
+    cast = infer_customer_tooling(
+        "Obrabiamy odlewy żeliwne — face milling i boring korpusów.",
+        vertical="general_machining",
+    )
+    assert any(f["id"] == "castings_machining" for f in cast["product_families"])
+    hyd = infer_customer_tooling(
+        "Produkcja bloków hydraulicznych (manifold) z deep hole drilling.",
+        vertical="general_machining",
+    )
+    assert any(f["id"] == "hydraulics_pneumatics" for f in hyd["product_families"])
+    assert "deep_hole_drills" in hyd["practical_tools"] or "gun_drills" in hyd["practical_tools"]
+
+
+def test_crm_dedupe_tender_and_prospect(tmp_path: Path):
+    from market_agents.crm_tasks import CrmTaskStore
+
+    store = CrmTaskStore.load(tmp_path)
+    t1, c1 = store.create(
+        company="Beta Precision CNC",
+        title="Przetarg ogłoszony: tokarka",
+        reason="announced_tender",
+        opportunity_score=85,
+        source="tender",
+        dedupe_by_company=True,
+        meta={"tender_id": "abc"},
+    )
+    assert c1 is True
+    t2, c2 = store.create(
+        company="Beta Precision CNC",
+        title="Prospect outreach: Beta Precision CNC",
+        reason="vertical=mold_die",
+        opportunity_score=70,
+        source="prospect",
+        dedupe_by_company=True,
+        meta={"processes": ["milling"]},
+    )
+    assert c2 is False
+    assert t2.id == t1.id
+    store.save(tmp_path)
+    again = CrmTaskStore.load(tmp_path)
+    assert len(again.list(status="open")) == 1
+    sources = (again.tasks[0].meta or {}).get("sources") or []
+    assert "tender" in sources and "prospect" in sources

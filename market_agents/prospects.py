@@ -884,6 +884,22 @@ class ProspectRegistry:
                 mid = budget_mid.get("mid")
             else:
                 mid = None
+            pm = pr.get("product_map") or {}
+            ti = pr.get("tooling_inference") or {}
+            families = [
+                str(f.get("id") or f.get("label") or "")
+                for f in (pm.get("product_families") or ti.get("product_families") or [])
+            ]
+            tools = list(
+                pm.get("practical_tools")
+                or ti.get("practical_tools")
+                or pm.get("likely_tool_families")
+                or []
+            )
+            peers = [
+                str(r.get("rule_id") or "")
+                for r in (pm.get("peer_rules_applied") or ti.get("peer_rules_applied") or [])
+            ]
             out.append(
                 {
                     "company": p.company,
@@ -891,10 +907,16 @@ class ProspectRegistry:
                     "vertical": pr.get("vertical"),
                     "quality_tier": pr.get("quality_tier"),
                     "opportunity": opp.get("overall", 0),
+                    "tooling_inference": opp.get("tooling_inference"),
                     "budget_mid_eur": mid,
                     "buys_from_count": len(pr.get("buys_from") or []),
                     "stakeholders": len(pr.get("stakeholders") or []),
-                    "processes": (pr.get("product_map") or {}).get("likely_processes") or [],
+                    "processes": pm.get("likely_processes") or [],
+                    "product_families": [f for f in families if f][:6],
+                    "practical_tools": tools[:8],
+                    "peer_rules": [r for r in peers if r][:4],
+                    "inference_confidence": pm.get("inference_confidence")
+                    or ti.get("inference_confidence"),
                 }
             )
         return out
