@@ -202,6 +202,7 @@ SAFE_TOOLS = frozenset(
         "ontology_neighborhood",
         "find_ontology_path",
         "security_status",
+        "governance_status",
     }
 )
 

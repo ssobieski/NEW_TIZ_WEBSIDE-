@@ -232,6 +232,19 @@ class SecurityConfig(BaseModel):
     allowed_hosts: list[str] = Field(default_factory=list)
 
 
+class GovernanceConfig(BaseModel):
+    """AI governance — Policy-as-Code engine (see GOVERNANCE.md)."""
+
+    enabled: bool = True
+    mode: Literal["enforce", "monitor"] = "enforce"
+    policy_pack: str = "config/governance/tiz.policy.yaml"
+    audit_dir: str = "data/governance"
+    # true = brak/uszkodzony pack ⇒ deny; false = wyłącz governance przy błędzie load
+    fail_closed: bool = False
+    # require_approval traktowane jako deny w trybie enforce
+    deny_require_approval: bool = True
+
+
 class AgenticConfig(BaseModel):
     enabled: bool = True
     max_steps: int = 12
@@ -273,6 +286,7 @@ class AgentsConfig(BaseModel):
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)
     fleet: FleetConfig = Field(default_factory=FleetConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    governance: GovernanceConfig = Field(default_factory=GovernanceConfig)
 
 
 class ScheduleConfig(BaseModel):

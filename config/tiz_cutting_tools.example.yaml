@@ -665,6 +665,13 @@ agents:
     fleet_allowlist_only: true
     enforce_r2_prefix: true
     allowed_hosts: []
+  governance:
+    enabled: true
+    mode: enforce   # enforce | monitor
+    policy_pack: config/governance/tiz.policy.yaml
+    audit_dir: data/governance
+    fail_closed: false
+    deny_require_approval: true
   fleet:
     # central = ten serwer GPU uczy skills/rules i publikuje knowledge dla VPS
     role: central

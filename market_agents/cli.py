@@ -101,6 +101,14 @@ def doctor(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> Non
             "Trace redaction",
             "[green]on[/green]" if getattr(sec, "redact_traces", True) else "[yellow]off[/yellow]",
         )
+    gov = getattr(cfg.agents, "governance", None)
+    if gov is not None:
+        table.add_row(
+            "AI governance",
+            f"{'on' if getattr(gov, 'enabled', True) else 'off'} "
+            f"mode={getattr(gov, 'mode', 'enforce')} "
+            f"pack={getattr(gov, 'policy_pack', '')}",
+        )
     if health.get("ok"):
         table.add_row("LLM", f"[green]OK[/green] modele: {health.get('models')}")
     else:
@@ -329,6 +337,93 @@ def security_cmd(
     console.print(
         "Szczegóły: SECURITY.md — SSRF, prompt-injection, fleet pack, secrets redaction."
     )
+
+
+@app.command("governance")
+def governance_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    action: str = typer.Argument(
+        "status",
+        help="status | validate | eval | audit",
+    ),
+    tool: Optional[str] = typer.Option(None, "--tool", help="Nazwa toola (dla eval)"),
+    role: Optional[str] = typer.Option(None, "--role", help="central|worker (dla eval)"),
+    url: Optional[str] = typer.Option(None, "--url", help="URL (dla eval fetch)"),
+    tail: int = typer.Option(20, "--tail", help="Liczba wpisów audit"),
+) -> None:
+    """AI governance — Policy-as-Code (status / validate / eval / audit)."""
+    from market_agents.governance import (
+        GovernanceEngine,
+        PolicyRequest,
+        load_policy_pack,
+        validate_policy_pack,
+    )
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    engine = GovernanceEngine.from_config(cfg)
+    act = (action or "status").lower().strip()
+
+    if act == "status":
+        st = engine.status()
+        table = Table(title="AI Governance (policy-as-code)")
+        table.add_column("Key")
+        table.add_column("Value")
+        for k, v in st.items():
+            table.add_row(k, str(v))
+        console.print(table)
+        console.print("Docs: GOVERNANCE.md")
+        return
+
+    if act == "validate":
+        pack_path = getattr(cfg.agents.governance, "policy_pack", None)
+        if not pack_path:
+            console.print("[red]Brak policy_pack w config[/red]")
+            raise typer.Exit(1)
+        try:
+            pack = load_policy_pack(pack_path)
+            warns = validate_policy_pack(pack)
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[red]Invalid policy pack:[/red] {exc}")
+            raise typer.Exit(1)
+        console.print(
+            f"[green]OK[/green] policy={pack.id} rules={len(pack.rules)} path={pack.source_path}"
+        )
+        for w in warns:
+            console.print(f"[yellow]warn[/yellow] {w}")
+        return
+
+    if act == "eval":
+        if tool:
+            req = PolicyRequest(
+                action="tool_call",
+                tool=tool,
+                role=role or engine.role,
+                url=url,
+                args={"url": url} if url else {},
+            )
+        elif url:
+            req = PolicyRequest(action="fetch", url=url, role=role or engine.role)
+        else:
+            console.print("Podaj --tool i/lub --url")
+            raise typer.Exit(1)
+        decision = engine.evaluate(req)
+        console.print_json(data=decision.to_dict())
+        if not decision.allowed:
+            raise typer.Exit(2)
+        return
+
+    if act == "audit":
+        rows = engine.recent_audit(limit=tail)
+        if not rows:
+            console.print("Brak wpisów audit (data/governance/audit.jsonl)")
+            return
+        for row in rows:
+            console.print_json(data=row)
+        return
+
+    console.print(f"Nieznana akcja: {action} (status|validate|eval|audit)")
+    raise typer.Exit(1)
 
 
 @app.command("social")

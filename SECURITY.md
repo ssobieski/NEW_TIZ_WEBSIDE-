@@ -54,3 +54,7 @@ python -m market_agents doctor
 ## Tool: `security_status`
 
 Agent może sprawdzić aktywną politykę bez ujawniania sekretów.
+
+## AI Governance
+
+Nad cybersecurity działa warstwa **policy-as-code** (`GOVERNANCE.md`, `market_agents/governance.py`).

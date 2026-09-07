@@ -190,8 +190,16 @@ materiały ISO · maszyny · chłodziwo · procesy · parametry (schemat). Brief
 SSRF guard (blokada localhost/RFC1918/metadata), tool policy (Notion/R2/write),
 redakcja sekretów w traces, fleet pack allowlista. Szczegóły: [SECURITY.md](SECURITY.md).
 
+## AI Governance (policy-as-code)
+
+Silnik `GovernanceEngine` egzekwuje YAML (`config/governance/tiz.policy.yaml`) przed
+tool callami: deny-overrides, role worker, require_approval (promote/upsert), rate limits,
+zakaz CutData (vc/fz). Docs: [GOVERNANCE.md](GOVERNANCE.md).
+
 ```bash
 python -m market_agents security
+python -m market_agents governance status
+python -m market_agents governance eval --tool promote_host_skill
 ```
 
 Encje: `firm` · `material` (ISO P/M/K/N/S/H) · `machine` · `coolant` · `process` · `tool_family` · `parameter` · `standard` · `literature` · `concept`

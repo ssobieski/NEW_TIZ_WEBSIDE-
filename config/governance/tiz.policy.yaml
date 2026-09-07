@@ -1,0 +1,121 @@
+# AI Governance — Policy-as-Code for TIZ market agents
+# Silnik: market_agents.governance.GovernanceEngine
+# Efekty: allow | deny | require_approval | redact | monitor
+# Strategia: deny-overrides (deny > require_approval > redact > monitor > allow)
+
+version: 1
+id: tiz-market-agents
+description: >
+  Governance dla lokalnych agentów monitoringu rynku TIZ.
+  Chroni przed nadużyciem tooli, kopiowaniem cutting data do CutData,
+  mutacją knowledge na workerach VPS oraz niezatwierdzoną promocją skills.
+
+defaults:
+  effect: allow
+  audit: true
+
+rules:
+  # --- Hard denials --------------------------------------------------------
+  - id: deny-file-scheme
+    priority: 300
+    effect: deny
+    reason: "Schemat file:// jest zabroniony (local file exfil)"
+    match:
+      action: [tool_call, fetch]
+      url_scheme: file
+
+  - id: deny-cutdata-param-injection
+    priority: 280
+    effect: deny
+    description: Nie kopiuj liczb vc/fz/ap do rejestrów produktowych / CutData
+    reason: "Zakaz wstrzykiwania parametrów skrawania (vc/fz/ap) do knowledge write"
+    match:
+      action: tool_call
+      tool_in:
+        - register_product_tech
+        - remember
+        - extract_market_intel
+      content_regex: "(?i)\\b(vc|fz|ap)\\s*[=:]\\s*\\d"
+
+  - id: worker-deny-write-tools
+    priority: 260
+    effect: deny
+    reason: "Rola worker (VPS) nie może mutować knowledge / skills"
+    match:
+      action: tool_call
+      role: worker
+      tool_tier: write
+
+  - id: worker-deny-fleet-publish
+    priority: 255
+    effect: deny
+    reason: "Worker nie publikuje knowledge packów"
+    match:
+      action: fleet_publish
+      role: worker
+
+  - id: deny-unknown-tool-strict
+    priority: 240
+    effect: deny
+    reason: "Nieznane narzędzie — zablokowane przez governance"
+    match:
+      action: tool_call
+      tool_tier: unknown
+    # włącz gdy chcesz deny unknown; domyślnie monitor poniżej
+    enabled: false
+
+  # --- Human approval ------------------------------------------------------
+  - id: approval-promote-host-skill
+    priority: 200
+    effect: require_approval
+    reason: "promote_host_skill wymaga zatwierdzenia operatora"
+    match:
+      action: tool_call
+      tool: promote_host_skill
+    obligations: [human_approval, audit]
+
+  - id: approval-upsert-parse-rule
+    priority: 190
+    effect: require_approval
+    reason: "upsert_parse_rule wymaga przeglądu (poisoning risk)"
+    match:
+      action: tool_call
+      tool: upsert_parse_rule
+    obligations: [human_approval, audit]
+
+  # --- Rate limits / soft controls -----------------------------------------
+  - id: rate-limit-deep-fetch
+    priority: 120
+    effect: allow
+    reason: "Limit głębokich fetchy na run"
+    match:
+      action: tool_call
+      tool_in: [fetch_and_parse, fetch_pdf_text, batch_parse]
+      max_per_run: 40
+    obligations: [audit]
+
+  - id: monitor-cloud-tools
+    priority: 80
+    effect: monitor
+    reason: "Użycie Notion/R2 audytowane"
+    match:
+      action: tool_call
+      tool_tier: cloud
+    obligations: [audit]
+
+  - id: monitor-write-tools
+    priority: 70
+    effect: monitor
+    reason: "Zapis do knowledge audytowany"
+    match:
+      action: tool_call
+      tool_tier: write
+    obligations: [audit]
+
+  - id: allow-safe-tools
+    priority: 10
+    effect: allow
+    reason: "Narzędzia SAFE — dozwolone"
+    match:
+      action: tool_call
+      tool_tier: safe

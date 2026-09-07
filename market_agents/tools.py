@@ -45,6 +45,7 @@ from market_agents.product_tech import (
     extract_tech_schema,
 )
 from market_agents.polite_http import build_fetcher_from_config
+from market_agents.governance import GovernanceEngine
 from market_agents.security import (
     SecurityPolicy,
     enforce_r2_key_prefix,
@@ -92,6 +93,7 @@ class ToolRegistry:
         self._notion: NotionCollector | None = None
         self._r2 = None
         self._security = self._build_security_policy(config)
+        self._governance = GovernanceEngine.from_config(config)
         self._handlers: dict[str, ToolFn] = {
             "list_candidates": self.list_candidates,
             "fetch_and_parse": self.fetch_and_parse,
@@ -152,6 +154,7 @@ class ToolRegistry:
             "register_product_tech": self.register_product_tech,
             "extract_product_tech_schema": self.extract_product_tech_schema,
             "security_status": self.security_status_tool,
+            "governance_status": self.governance_status_tool,
         }
         self._known: KnownFirmsIndex | None = None
         self._relations: FirmRelationsGraph | None = None
@@ -293,6 +296,17 @@ class ToolRegistry:
                     "description": (
                         "Status kontroli bezpieczeństwa: SSRF guard, tool policy "
                         "(Notion/R2/write), redaction, fleet allowlist."
+                    ),
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "governance_status",
+                    "description": (
+                        "Status AI governance (policy-as-code): pack id, mode enforce/monitor, "
+                        "liczba reguł, audit trail."
                     ),
                     "parameters": {"type": "object", "properties": {}},
                 },
@@ -1588,6 +1602,17 @@ class ToolRegistry:
         handler = self._handlers.get(name)
         if not handler:
             return {"ok": False, "error": f"unknown tool: {name}"}
+        # AI governance (policy-as-code) — przed cybersecurity tool policy
+        gov = self._governance.authorize_tool(name, arguments or {})
+        if not gov.allowed:
+            return {
+                "ok": False,
+                "error": gov.reason,
+                "tool": name,
+                "governance": True,
+                "effect": gov.effect,
+                "matched_rules": gov.matched_rules,
+            }
         allowed, reason = self._security.tool_allowed(name)
         if not allowed:
             return {"ok": False, "error": reason, "tool": name, "security": True}
@@ -1610,6 +1635,16 @@ class ToolRegistry:
                 )
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "error": safe_error(exc), "tool": name, "security": True}
+            fetch_gov = self._governance.authorize_fetch(url)
+            if not fetch_gov.allowed:
+                return {
+                    "ok": False,
+                    "error": fetch_gov.reason,
+                    "tool": name,
+                    "governance": True,
+                    "effect": fetch_gov.effect,
+                    "matched_rules": fetch_gov.matched_rules,
+                }
         try:
             result = handler(arguments or {})
             if self._security.redact_traces and isinstance(result, dict):
@@ -1625,12 +1660,17 @@ class ToolRegistry:
                         result[key] = redact_secrets(
                             val, max_chars=self._security.trace_tool_result_max_chars
                         )
+            if gov.effect in {"monitor", "redact"} and isinstance(result, dict):
+                result.setdefault("governance", {"effect": gov.effect, "rules": gov.matched_rules})
             return result
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": safe_error(exc), "tool": name}
 
     def security_status_tool(self, args: dict[str, Any]) -> dict[str, Any]:
         return security_status(self._security)
+
+    def governance_status_tool(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._governance.status()
 
     def list_candidates(self, args: dict[str, Any]) -> dict[str, Any]:
         limit = int(args.get("limit") or 20)

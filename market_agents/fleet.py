@@ -119,6 +119,33 @@ class FleetSync:
         """Centrala: spakuj aktualną wiedzę parserów dla VPS."""
         if self.fleet.role not in {"central", "both"}:
             return {"ok": False, "error": "publish_knowledge tylko dla role=central|both"}
+        try:
+            from market_agents.governance import GovernanceEngine, PolicyRequest, load_policy_pack
+
+            pack = None
+            pack_path = Path("config/governance/tiz.policy.yaml")
+            if pack_path.is_file():
+                pack = load_policy_pack(pack_path)
+            gov = GovernanceEngine(
+                pack=pack,
+                enabled=pack is not None,
+                mode="enforce",
+                audit_dir=self.data_dir / "governance",
+                role=self.fleet.role,
+            )
+            decision = gov.evaluate(
+                PolicyRequest(action="fleet_publish", role=self.fleet.role, content=notes)
+            )
+            if not decision.allowed:
+                return {
+                    "ok": False,
+                    "error": decision.reason,
+                    "governance": True,
+                    "effect": decision.effect,
+                    "matched_rules": decision.matched_rules,
+                }
+        except Exception:  # noqa: BLE001
+            pass
         self.ensure_dirs()
         pack_id = f"knowledge-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}"
         dest = self.outbox / pack_id
