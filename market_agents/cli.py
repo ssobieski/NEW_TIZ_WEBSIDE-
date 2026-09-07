@@ -195,6 +195,120 @@ def sync_relations(
     )
 
 
+@app.command("sync-profiles")
+def sync_profiles(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
+    """Zbuduj profile firm (tożsamość, sieć, katalogi/cenniki, scorecard) z ekosystemu wiedzy."""
+    from market_agents.firm_profiles import FirmProfileRegistry
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    reg = FirmProfileRegistry.load(cfg.data_path)
+    result = reg.build_from_ecosystem(
+        cfg.data_path,
+        competitors=list(cfg.industry.competitors or []),
+        default_role="competitor",
+    )
+    console.print(
+        f"[green]Profiles OK[/green]: {result['count']} → {result['path']}"
+    )
+    top = result.get("scoreboard_top") or []
+    if top:
+        table = Table(title="Scoreboard (top)")
+        table.add_column("Firma")
+        table.add_column("Overall", justify="right")
+        table.add_column("Sieć", justify="right")
+        table.add_column("E-shop/cenniki", justify="right")
+        table.add_column("PR", justify="right")
+        for row in top[:15]:
+            table.add_row(
+                str(row.get("company")),
+                str(row.get("overall")),
+                str(row.get("distribution_reach")),
+                str(row.get("digital_commerce")),
+                str(row.get("pr_presence")),
+            )
+        console.print(table)
+
+
+@app.command("profiles")
+def profiles_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    company: Optional[str] = typer.Option(None, "--company", help="Pełny profil jednej firmy"),
+    role: Optional[str] = typer.Option(
+        None, "--role", help="competitor|supplier|distributor|dealer|customer|partner"
+    ),
+    q: Optional[str] = typer.Option(None, "--q"),
+    scoreboard: bool = typer.Option(False, "--scoreboard", help="Tabela ocen"),
+    limit: int = typer.Option(25, "--limit"),
+) -> None:
+    """Profilowanie konkurentów/dostawców — kontakty, sieć, assets, scorecard."""
+    from market_agents.firm_profiles import FirmProfileRegistry
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    reg = FirmProfileRegistry.load(cfg.data_path)
+    if not reg.profiles:
+        console.print(
+            "[yellow]Brak profili.[/yellow] Uruchom: python -m market_agents sync-profiles"
+        )
+        raise typer.Exit(0)
+
+    if company:
+        p = reg.get(company)
+        if not p:
+            console.print(f"[red]Brak profilu:[/red] {company}")
+            raise typer.Exit(1)
+        console.print_json(data=p.to_dict())
+        return
+
+    if scoreboard:
+        table = Table(title="Firm scoreboard")
+        for col in (
+            "Firma",
+            "Role",
+            "Overall",
+            "Tożsamość",
+            "Trust",
+            "Dystrybucja",
+            "Digital",
+            "PR",
+            "Finanse",
+        ):
+            table.add_column(col, justify="right" if col != "Firma" and col != "Role" else "left")
+        for row in reg.scoreboard(limit=limit):
+            table.add_row(
+                str(row["company"]),
+                ",".join(row.get("roles") or []),
+                str(row.get("overall")),
+                str(row.get("completeness")),
+                str(row.get("identity_trust")),
+                str(row.get("distribution_reach")),
+                str(row.get("digital_commerce")),
+                str(row.get("pr_presence")),
+                str(row.get("financial_transparency")),
+            )
+        console.print(table)
+        return
+
+    rows = reg.list(role=role, q=q, sort="overall", limit=limit)
+    table = Table(title=f"Firm profiles ({len(rows)})")
+    table.add_column("Firma")
+    table.add_column("Role")
+    table.add_column("Kraj")
+    table.add_column("Overall", justify="right")
+    table.add_column("WWW")
+    for p in rows:
+        web = (p.websites or [{}])[0].get("url") if p.websites else ""
+        table.add_row(
+            p.company,
+            ",".join(p.roles),
+            p.country or "",
+            str((p.scores or {}).get("overall", "")),
+            str(web or "")[:48],
+        )
+    console.print(table)
+
+
 @app.command("sync-r2")
 def sync_r2(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> None:
     """Zsynchronizuj archiwum Cloudflare R2 → lokalny cache."""

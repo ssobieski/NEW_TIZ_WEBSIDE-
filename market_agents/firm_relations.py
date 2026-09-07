@@ -17,6 +17,9 @@ RELATION_TYPES = (
     "oem_group",  # A i B w tej samej grupie kapitałowej / IMC
     "partner_of",  # partnerstwo / joint venture / alliance
     "rebrand_of",  # A to rebrand / dawna nazwa B
+    "customer_of",  # A jest klientem B (A kupuje od B)
+    "supplier_of",  # A jest dostawcą B (A sprzedaje do B)
+    "competes_with",  # A konkuruje z B
 )
 
 _VALID = set(RELATION_TYPES)

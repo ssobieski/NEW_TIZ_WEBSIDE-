@@ -7,7 +7,10 @@
     "subsidiary_of",
     "oem_group",
     "partner_of",
-    "rebrand_of"
+    "rebrand_of",
+    "customer_of",
+    "supplier_of",
+    "competes_with"
   ],
   "edges": [
     {
@@ -138,6 +141,39 @@
       "relation_type": "oem_group",
       "evidence": "Kennametal / Widia brand family",
       "confidence": 0.75,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "Sandvik Coromant",
+      "target": "Kennametal",
+      "relation_type": "competes_with",
+      "evidence": "Global cutting-tool OEM competitors",
+      "confidence": 0.85,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "Iscar",
+      "target": "Sandvik Coromant",
+      "relation_type": "competes_with",
+      "evidence": "Global cutting-tool OEM competitors",
+      "confidence": 0.85,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "Hoffmann Group",
+      "target": "Sandvik Coromant",
+      "relation_type": "customer_of",
+      "evidence": "Distributor/catalogue channel purchases OEM tooling (Catalogue 57)",
+      "url": "https://www.hoffmann-group.com",
+      "confidence": 0.65,
+      "origin": "industry_seed"
+    },
+    {
+      "source": "Sandvik Coromant",
+      "target": "Hoffmann Group",
+      "relation_type": "supplier_of",
+      "evidence": "OEM supplies tooling into Hoffmann distribution network",
+      "confidence": 0.65,
       "origin": "industry_seed"
     }
   ]
