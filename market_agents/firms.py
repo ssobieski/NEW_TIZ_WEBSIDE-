@@ -242,9 +242,24 @@ _GENERIC_FIRM_PHRASES = {
     "cutting tools",
     "machine tools",
     "carbide products",
+    "cemented carbide products",
     "increasing production capacity",
     "production capacity",
     "precision unlocked",
+    "interviewreihe",
+}
+
+# Marki spoza TIZ / CRM / IT — częsty szum z firm_discovery
+_OFF_DOMAIN_FIRM_NAMES = {
+    "zoho",
+    "sap",
+    "salesforce",
+    "microsoft",
+    "oracle",
+    "adobe",
+    "google",
+    "tesla",
+    "interviewreihe",
 }
 
 # Krótkie ALLCAPS — tylko znane marki tooling; reszta to kody produktów / targi
@@ -515,6 +530,8 @@ def is_plausible_firm_name(name: str) -> bool:
         return False
     norm = normalize_firm_name(name)
     if norm in _PUBLISHER_NAMES or norm in _GENERIC_FIRM_PHRASES:
+        return False
+    if norm in _OFF_DOMAIN_FIRM_NAMES:
         return False
     if norm in _ENGLISH_FILLER:
         return False

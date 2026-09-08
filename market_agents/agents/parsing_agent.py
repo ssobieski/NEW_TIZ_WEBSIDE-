@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,67 @@ from market_agents.llm import LocalLLM
 from market_agents.memory import MarketMemory
 from market_agents.models import MarketItem, utc_now
 from market_agents.tools import ToolRegistry
+
+TOOL_RESULT_CONTEXT_CHARS = 4000
+OLD_TOOL_RESULT_CONTEXT_CHARS = 1000
+RECENT_TOOL_RESULTS_TO_KEEP = 4
+REQUIRED_AGENT_TOOLS = {
+    "get_domain_context",
+    "list_known_firms",
+    "discover_new_firms",
+}
+
+
+def _compact_tool_context(messages: list[dict[str, Any]]) -> None:
+    """Bound old tool outputs while preserving tool-call message ordering."""
+    tool_indexes = [i for i, message in enumerate(messages) if message.get("role") == "tool"]
+    for index in tool_indexes[:-RECENT_TOOL_RESULTS_TO_KEEP]:
+        content = str(messages[index].get("content") or "")
+        if len(content) > OLD_TOOL_RESULT_CONTEXT_CHARS:
+            messages[index]["content"] = (
+                content[:OLD_TOOL_RESULT_CONTEXT_CHARS]
+                + '… [starszy wynik narzędzia skrócony]'
+            )
+
+
+def _briefing_quality_issues(text: str) -> list[str]:
+    """Return reasons why model output cannot be published as a final briefing."""
+    raw = (text or "").strip()
+    low = raw.lower()
+    issues: list[str] = []
+    if len(raw) < 400:
+        issues.append("odpowiedź jest zbyt krótka")
+    if any(marker in low for marker in ("<tool_call>", "<|im_start|>", "<|im_end|>")):
+        issues.append("odpowiedź zawiera surowy znacznik tool-call")
+    required = {
+        "kontekst technologiczny": "kontekst" in low and "tech" in low,
+        "zagrożenia": "zagroż" in low,
+        "szanse": "szans" in low,
+        "ruchy konkurencji": "ruch" in low and "konkur" in low,
+    }
+    missing = [name for name, present in required.items() if not present]
+    if missing:
+        issues.append("brak sekcji: " + ", ".join(missing))
+    decision_bodies = []
+    for heading in ("zagrożenia", "szanse", "ruchy konkurencji"):
+        match = re.search(
+            rf"(?is)(?:^|\n)#{{1,4}}\s*{heading}\s*\n(.*?)(?=\n#{{1,4}}\s|\Z)",
+            raw,
+        )
+        if match:
+            body = re.sub(r"[\s*_\-]+", " ", match.group(1)).strip().lower()
+            decision_bodies.append(body)
+    if decision_bodies and not any(body and body != "brak" for body in decision_bodies):
+        issues.append("wszystkie sekcje decyzyjne są puste")
+    return issues
+
+
+def _invalid_briefing_fallback(issues: list[str]) -> str:
+    detail = "; ".join(issues)[:500] or "nieznany błąd jakości"
+    return (
+        "Nie udało się domknąć briefingu LLM "
+        f"(walidacja odpowiedzi: {detail})."
+    )
 
 
 @dataclass
@@ -198,23 +260,104 @@ class ParsingAgent:
         schema = tools.openai_tools_schema()
         steps: list[AgentTraceStep] = []
         final_text = ""
+        called_tools: set[str] = set()
         max_steps = self.config.agents.agentic.max_steps
 
         for step_idx in range(1, max_steps + 1):
+            _compact_tool_context(messages)
             tool_choice: str | dict[str, Any] | None = "auto"
             if self.config.agents.agentic.require_tool_use and step_idx == 1:
                 tool_choice = "required"
 
-            message = self.llm.chat_messages(
-                messages, tools=schema, tool_choice=tool_choice
-            )
+            try:
+                message = self.llm.chat_messages(
+                    messages, tools=schema, tool_choice=tool_choice
+                )
+            except Exception as exc:  # noqa: BLE001
+                if tool_choice == "required":
+                    try:
+                        message = self.llm.chat_messages(
+                            messages, tools=schema, tool_choice="auto"
+                        )
+                    except Exception as exc2:  # noqa: BLE001
+                        final_text = (
+                            "Agentic LLM niedostępny "
+                            f"({type(exc2).__name__}: {exc2}). "
+                            "Raport pipeline poniżej."
+                        )
+                        steps.append(
+                            AgentTraceStep(
+                                step=step_idx,
+                                assistant={"role": "assistant", "content": final_text},
+                            )
+                        )
+                        break
+                else:
+                    final_text = (
+                        "Agentic LLM niedostępny "
+                        f"({type(exc).__name__}: {exc}). "
+                        "Raport pipeline poniżej."
+                    )
+                    steps.append(
+                        AgentTraceStep(
+                            step=step_idx,
+                            assistant={"role": "assistant", "content": final_text},
+                        )
+                    )
+                    break
             messages.append(message)
             tool_calls = message.get("tool_calls") or []
             step = AgentTraceStep(step=step_idx, assistant=message, tool_results=[])
 
             if not tool_calls:
-                final_text = str(message.get("content") or "").strip()
                 steps.append(step)
+                missing_tools = sorted(REQUIRED_AGENT_TOOLS - called_tools)
+                if missing_tools:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Nie kończ jeszcze. Obowiązkowo wywołaj brakujące "
+                                f"narzędzia: {', '.join(missing_tools)}. "
+                                "Dopiero potem napisz briefing."
+                            ),
+                        }
+                    )
+                    continue
+                candidate = str(message.get("content") or "").strip()
+                issues = _briefing_quality_issues(candidate)
+                if not issues:
+                    final_text = candidate
+                    break
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Poprzednia odpowiedź nie jest finalnym briefingiem "
+                            f"({'; '.join(issues)}). Nie wywołuj już narzędzi. "
+                            "Napisz czysty Markdown po polsku z sekcjami: "
+                            "Kontekst technologiczny, Zagrożenia, Szanse, "
+                            "Ruchy konkurencji, Nowe firmy i Następne kroki."
+                        ),
+                    }
+                )
+                try:
+                    closing = self.llm.chat_messages(messages)
+                    clean = str(closing.get("content") or "").strip()
+                    clean_issues = _briefing_quality_issues(clean)
+                    final_text = (
+                        _invalid_briefing_fallback(clean_issues)
+                        if clean_issues
+                        else clean
+                    )
+                    steps.append(
+                        AgentTraceStep(step=len(steps) + 1, assistant=closing)
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    final_text = (
+                        "Nie udało się domknąć briefingu LLM "
+                        f"({type(exc).__name__}: {exc})."
+                    )
                 break
 
             for call in tool_calls:
@@ -222,12 +365,15 @@ class ParsingAgent:
                 name = fn.get("name") or ""
                 raw_args = fn.get("arguments") or "{}"
                 result = tools.call(name, raw_args)
+                called_tools.add(name)
                 step.tool_results.append({"tool": name, "result": result})
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call.get("id") or f"call_{step_idx}_{name}",
-                        "content": json.dumps(result, ensure_ascii=False)[:12000],
+                        "content": json.dumps(result, ensure_ascii=False)[
+                            :TOOL_RESULT_CONTEXT_CHARS
+                        ],
                     }
                 )
             steps.append(step)
@@ -250,9 +396,25 @@ class ParsingAgent:
                     "content": "Zakończ. Napisz finalny briefing rynkowy po polsku, bez tool calli.",
                 }
             )
-            closing = self.llm.chat_messages(messages)
-            final_text = str(closing.get("content") or "").strip()
-            steps.append(AgentTraceStep(step=len(steps) + 1, assistant=closing))
+            try:
+                closing = self.llm.chat_messages(messages)
+                candidate = str(closing.get("content") or "").strip()
+                issues = _briefing_quality_issues(candidate)
+                final_text = (
+                    _invalid_briefing_fallback(issues) if issues else candidate
+                )
+                steps.append(AgentTraceStep(step=len(steps) + 1, assistant=closing))
+            except Exception as exc:  # noqa: BLE001
+                final_text = (
+                    "Nie udało się domknąć briefingu LLM "
+                    f"({type(exc).__name__}: {exc})."
+                )
+                steps.append(
+                    AgentTraceStep(
+                        step=len(steps) + 1,
+                        assistant={"role": "assistant", "content": final_text},
+                    )
+                )
 
         trace_path = self._save_trace(steps, final_text)
         return AgenticResult(

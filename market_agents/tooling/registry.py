@@ -380,6 +380,11 @@ class ToolRegistry:
             f"z przedstawieniem={with_pres}",
             meta={"count": len(firms), "source": source, "with_presentation": with_pres},
         )
+        notion_catalog = source.startswith("notion") or any(
+            f.get("notion_url")
+            or str(f.get("presentation_source") or "").startswith("notion")
+            for f in firms
+        )
         out: dict[str, Any] = {
             "ok": True,
             "count": len(firms),
@@ -387,7 +392,7 @@ class ToolRegistry:
             "firms": firms,
             "source": source,
             "cache": str(cache_path),
-            "catalog": "notion" if source.startswith("notion") else source,
+            "catalog": "notion" if notion_catalog else source,
             "notion_token": bool(self._notion_token()),
         }
         if warnings:
@@ -4515,6 +4520,7 @@ class ToolRegistry:
                     known,
                     evidence=str(row.get("text") or "")[:400],
                     url=str(row.get("url") or ""),
+                    require_domain=True,
                 )
             )
 
