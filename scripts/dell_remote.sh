@@ -49,6 +49,12 @@ remote() {
   ssh "${SSH_OPTS[@]}" "$DELL_SSH" "$@"
 }
 
+# Expand repo dir on the remote shell (default ~/NEW_TIZ_WEBSIDE-)
+remote_repo() {
+  local inner="$1"
+  remote "bash -lc 'cd ${REPO_DIR} && ${inner}'"
+}
+
 case "$ACTION" in
   status)
     echo "DELL_SSH=$DELL_SSH"
@@ -61,17 +67,17 @@ case "$ACTION" in
     fi
     ;;
   pull-repo)
-    remote "set -e; cd $REPO_DIR; git fetch --all --prune; git status -sb; git rev-parse --abbrev-ref HEAD"
+    remote_repo "git fetch --all --prune; git status -sb; git rev-parse --abbrev-ref HEAD"
     ;;
   checkout)
     BRANCH="${1:?branch name}"
-    remote "set -e; cd $REPO_DIR; git fetch origin; git checkout '$BRANCH'; git pull --ff-only origin '$BRANCH' || git pull --ff-only"
+    remote_repo "git fetch origin; git checkout '${BRANCH}'; git pull --ff-only origin '${BRANCH}' || git pull --ff-only"
     ;;
   doctor)
-    remote "set -e; cd $REPO_DIR; source .venv/bin/activate; export VLLM_BASE_URL=\${VLLM_BASE_URL:-http://127.0.0.1:8000}; python -m market_agents doctor"
+    remote_repo "source .venv/bin/activate; export VLLM_BASE_URL=\${VLLM_BASE_URL:-http://127.0.0.1:8000}; python -m market_agents doctor"
     ;;
   run-agentic)
-    remote "set -e; cd $REPO_DIR; source .venv/bin/activate; export VLLM_BASE_URL=\${VLLM_BASE_URL:-http://127.0.0.1:8000}; python -m market_agents run --agentic"
+    remote_repo "source .venv/bin/activate; export VLLM_BASE_URL=\${VLLM_BASE_URL:-http://127.0.0.1:8000}; python -m market_agents run --agentic"
     ;;
   vllm-check)
     remote "curl -fsS --max-time 10 http://127.0.0.1:8000/v1/models | head -c 400; echo"
@@ -88,7 +94,6 @@ case "$ACTION" in
     remote "$CMD"
     ;;
   *)
-    # Treat first arg as remote shell command
     remote "$ACTION $*"
     ;;
 esac
