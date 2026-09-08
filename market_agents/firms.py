@@ -229,6 +229,8 @@ _PUBLISHER_NAMES = {
     "canadian metalworking",
     "pr newswire",
     "machine maker",
+    "ein news",
+    "ein",
 }
 
 # Generyczne frazy branżowe mylone z nazwą firmy
@@ -602,11 +604,18 @@ def extract_candidate_firm_names(text: str, max_names: int = 12) -> list[str]:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     # odetnij publisher „    PES Media” / trailing source
     cleaned = re.split(r"\s{2,}|  +", cleaned)[0].strip()
-    # odetnij „ - Publisher” na końcu tytułu Google News
+    # odetnij „ - Publisher” / „. Publisher” na końcu tytułu Google News
     cleaned = re.sub(
         r"\s+[-–—]\s+(?:PES Media|Cutting Tool Engineering|Modern Machine Shop|"
         r"PR Newswire|Machine Maker|mmc\.co\.jp|Mynewsdesk|Hypepotamus|"
-        r"Engineering News|Plastics Technology|INsauga)\s*$",
+        r"Engineering News|Plastics Technology|INsauga|EIN News|"
+        r"Metrology and Quality News|ET Manufacturing|Machinery Market)\s*$",
+        "",
+        cleaned,
+        flags=re.I,
+    )
+    cleaned = re.sub(
+        r"^(?:EIN News|PR Newswire|PES Media|Mynewsdesk)\.\s*",
         "",
         cleaned,
         flags=re.I,
@@ -617,12 +626,13 @@ def extract_candidate_firm_names(text: str, max_names: int = 12) -> list[str]:
     patterns = [
         r"\b([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,2})\s+"
         r"(?:GmbH|AG|Ltd|LLC|Inc|S\.A\.|S\.p\.A\.|Corp)\b",
-        # Brand before verb (nie „Cut/Leverages/Expands” jako brand)
+        # Brand before verb (case-flexible verb; Brand stays Capitalized)
         r"\b([A-Z][A-Za-z0-9&./-]{1,}(?:\s+[A-Z][A-Za-z0-9&./-]{1,}){0,2})\s+"
-        r"(?:launches?|unveils?|introduces?|announces?|releases?|presents?|expands?|"
-        r"opens?|acquires?|partners?|exhibits?|showcases?|develops?|debuts?)\b",
-        # „Startup Toolpath …” — nie „Startup Leverages”
-        r"\b(?:Startup|start-up)\s+([A-Z][a-zA-Z0-9&./-]{2,}(?:\s+[A-Z][a-zA-Z0-9&./-]{2,}){0,1})\b",
+        r"(?:[Ll]aunches?|[Uu]nveils?|[Ii]ntroduces?|[Aa]nnounces?|[Rr]eleases?|"
+        r"[Pp]resents?|[Ee]xpands?|[Oo]pens?|[Aa]cquires?|[Pp]artners?|"
+        r"[Ee]xhibits?|[Ss]howcases?|[Dd]evelops?|[Dd]ebuts?)\b",
+        # „Startup Toolpath …” — jeden token (nie „Toolpath Scales”)
+        r"\b(?:Startup|start-up)\s+([A-Z][a-zA-Z0-9&./-]{2,})\b",
         # „Brand: a new brand”
         r"\b([A-Z][A-Za-z0-9&./-]{1,}(?:\s+[A-Z]{2,20})?)\s*:\s*a new brand\b",
         # Po pipe: „PRECISION UNLOCKED | TaeguTec …”
@@ -633,11 +643,12 @@ def extract_candidate_firm_names(text: str, max_names: int = 12) -> list[str]:
         r"\b(?:from)\s+([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,2})\b",
     ]
     for pat in patterns:
-        for m in re.finditer(pat, cleaned, flags=re.IGNORECASE if "new brand" in pat else 0):
+        flags = re.IGNORECASE if "new brand" in pat else 0
+        for m in re.finditer(pat, cleaned, flags=flags):
             cand = m.group(1).strip(" ,.;:-")
             # Startup X: odrzuć jeśli X wygląda na czasownik
             if "Startup" in pat or "start-up" in pat:
-                if re.search(r"(?i)(leverages|celebrates|optimis|develops|introduces)$", cand):
+                if re.search(r"(?i)(leverages|celebrates|optimis|develops|introduces|scales)$", cand):
                     continue
             candidates.append(cand)
 
@@ -652,6 +663,12 @@ def extract_candidate_firm_names(text: str, max_names: int = 12) -> list[str]:
     seen: set[str] = set()
     for raw in candidates:
         name = re.sub(r"\s+", " ", raw).strip(" ,.;:-/")
+        name = re.sub(
+            r"^(?:EIN News|PR Newswire|PES Media|Mynewsdesk|Hypepotamus)\.\s*",
+            "",
+            name,
+            flags=re.I,
+        )
         if not is_plausible_firm_name(name):
             continue
         key = normalize_firm_name(name)
@@ -659,9 +676,23 @@ def extract_candidate_firm_names(text: str, max_names: int = 12) -> list[str]:
             continue
         seen.add(key)
         out.append(name)
-        if len(out) >= max_names:
+        if len(out) >= max_names * 2:
             break
-    return out
+    # dłuższe nazwy pierwsze; usuń substringi (Scientific Cutting ⊂ … Tools)
+    out.sort(key=len, reverse=True)
+    pruned: list[str] = []
+    kept: list[str] = []
+    for name in out:
+        key = normalize_firm_name(name)
+        if any(
+            key != k and (key in k or k in key) and min(len(key), len(k)) >= 4 for k in kept
+        ):
+            continue
+        pruned.append(name)
+        kept.append(key)
+        if len(pruned) >= max_names:
+            break
+    return pruned
 
 
 def filter_new_firms(

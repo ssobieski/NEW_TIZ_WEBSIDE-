@@ -1,0 +1,142 @@
+{
+  "reject_domain": [
+    "PHOTOS: Mississauga introduces brand new grass cutting tools",
+    "Berry Introduces Global Tooling Services",
+    "Tooling manufacturer celebrates 50 years",
+    "Groupe Chaumont launches with acquisition of two Swiss watchmaking startups",
+    "Haas F1 Team to Promote HaasTooling.com European Debut",
+    "Bret Taylor Predicts A.I. Agents Will Redefine Business",
+    "Luxury watch platform expands into Europe",
+    "Outer space composites startup booster program",
+    "Hand tools maker welding debut at hardware show",
+    "Lawn mower cutting tools sale in Mississauga"
+  ],
+  "keep_domain": [
+    "DIAEDGE, A New Brand of Cemented Carbide Products",
+    "Walter FMT: a new brand for lightweight machining",
+    "MSC introduces new brand of cutting tools",
+    "Heritage Cutter debuts - Cutting Tool Engineering",
+    "Scientific Cutting Tools launches Zirc and Onyx DLC coating program",
+    "ITC to launch new cutting tool catalogue and website",
+    "Manar Tools Celebrates a Successful Showcase at EMO Hannover 2025",
+    "Nidec Machine Tool to Launch New Cutting Tool Factory in India",
+    "MHI Develops GE10A Dry-cut Hobbing Machine for Small Automotive Gears",
+    "PTSolutions unveils exclusive NTMA partnership for cutting tools distribution"
+  ],
+  "reject_names": [
+    "Secures",
+    "Promote",
+    "Leverages",
+    "How",
+    "Four",
+    "Japan",
+    "UNLOCKED",
+    "PHOTOS",
+    "FMT",
+    "DLC",
+    "HIMTEX",
+    "CMES",
+    "MVR",
+    "MPLJ",
+    "Hypepotamus",
+    "Mynewsdesk",
+    "Key Acquisitions",
+    "Enterprise Manufacturers",
+    "Dry-cut Hobbing Machine",
+    "Increasing Production Capacity",
+    "Baucor Expands",
+    "Gleason Puts",
+    "Cemented Carbide Products",
+    "PES",
+    "CNC",
+    "CAM"
+  ],
+  "keep_names": [
+    "DIAEDGE",
+    "Heritage Cutter",
+    "Manar Tools",
+    "BladeForge Inc",
+    "Scientific Cutting Tools",
+    "PTSolutions",
+    "PAMA",
+    "Jyoti",
+    "Hyundai Wia",
+    "ITC",
+    "Baucor",
+    "Toolpath",
+    "OrbitalEdge GmbH"
+  ],
+  "extract_cases": [
+    {
+      "text": "DIAEDGE, A New Brand of Cemented Carbide Products",
+      "must_include": ["DIAEDGE"],
+      "must_exclude": ["Cemented", "Carbide Products"]
+    },
+    {
+      "text": "Walter FMT: a new brand for lightweight machining",
+      "must_include": ["Walter"],
+      "must_exclude": ["FMT"]
+    },
+    {
+      "text": "Startup Leverages Machine Tool Builder Expertise - Modern Machine Shop",
+      "must_include": [],
+      "must_exclude": ["Leverages", "Expertise"]
+    },
+    {
+      "text": "How elastic bonded diamond tools optimise precision machining - PES Media",
+      "must_include": [],
+      "must_exclude": ["How"]
+    },
+    {
+      "text": "Enterprise Manufacturers Cut CNC Programming Time by Up to 50%",
+      "must_include": [],
+      "must_exclude": ["Enterprise Manufacturers"]
+    },
+    {
+      "text": "Four of the Nidec Group's Machine Tool Companies to Exhibit at IMTS",
+      "must_include": [],
+      "must_exclude": ["Four"]
+    },
+    {
+      "text": "PRECISION UNLOCKED | TaeguTec India Launch Cutting Tool Knowledge Series",
+      "must_include": ["TaeguTec"],
+      "must_exclude": ["UNLOCKED", "PRECISION"]
+    },
+    {
+      "text": "Nidec Machine Tool to Launch New Cutting Tool Factory by Increasing Production Capacity by 1.5 Times",
+      "must_include": [],
+      "must_exclude": ["Increasing Production Capacity"]
+    },
+    {
+      "text": "MSC introduces new brand of cutting tools - PES Media",
+      "must_include": ["MSC"],
+      "must_exclude": ["PES"]
+    },
+    {
+      "text": "Baucor Expands Custom Cutting Tool Capabilities with Launch of Interactive Designer",
+      "must_include": ["Baucor"],
+      "must_exclude": ["Baucor Expands", "EIN"]
+    },
+    {
+      "text": "Scientific Cutting Tools launches Zirc and Onyx DLC coating program",
+      "must_include": ["Scientific Cutting Tools"],
+      "must_exclude": ["DLC", "Scientific Cutting"]
+    },
+    {
+      "text": "Machining Startup Toolpath Scales Up with Industry Support and Key Acquisitions",
+      "must_include": ["Toolpath"],
+      "must_exclude": ["Key Acquisitions", "Hypepotamus"]
+    }
+  ],
+  "known_should_filter": [
+    {"name": "Sandvik Coromant", "known": true},
+    {"name": "Walter", "known": true},
+    {"name": "Nidec", "known": true},
+    {"name": "MHI", "known": true},
+    {"name": "Haas", "known": true},
+    {"name": "MSC", "known": true},
+    {"name": "Heritage Cutter", "known": false},
+    {"name": "DIAEDGE", "known": false},
+    {"name": "Manar Tools", "known": false}
+  ]
+}
