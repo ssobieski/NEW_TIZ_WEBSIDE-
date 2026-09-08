@@ -2,9 +2,10 @@
 # Uruchom na DELLU (już po SSH). pull → vLLM (auto-start) → ensure → doctor → agentic → raport.
 set -euo pipefail
 cd "${HOME}/NEW_TIZ_WEBSIDE-"
+BRANCH="${BRANCH:-cursor/agent-monitoring-improve-2b9f}"
 git fetch origin
-git checkout cursor/agent-monitoring-improve-2b9f 2>/dev/null || true
-git pull --ff-only origin cursor/agent-monitoring-improve-2b9f || git pull --ff-only
+git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" "origin/$BRANCH"
+git pull --ff-only origin "$BRANCH" || git pull --ff-only
 source .venv/bin/activate
 export VLLM_BASE_URL="${VLLM_BASE_URL:-http://127.0.0.1:8000}"
 export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
@@ -46,14 +47,26 @@ curl -fsS --max-time 8 http://127.0.0.1:8000/v1/models | head -c 300
 echo
 
 python -m market_agents doctor
+run_started="$(date +%s)"
+set +e
 python -m market_agents run --agentic
+run_rc=$?
+set -e
+if [[ "$run_rc" -ne 0 ]]; then
+  echo "WARN: market_agents run exited $run_rc — dump latest report anyway"
+fi
 echo
 echo "========== LATEST REPORT =========="
 ls -lt reports/*.md 2>/dev/null | head -5 || true
 LATEST="$(ls -t reports/*.md 2>/dev/null | head -1 || true)"
 if [[ -n "${LATEST}" ]]; then
-  echo "FILE: $LATEST"
-  echo "----- BEGIN REPORT -----"
-  cat "$LATEST"
-  echo "----- END REPORT -----"
+  latest_mtime="$(stat -c %Y "$LATEST" 2>/dev/null || echo 0)"
+  if (( latest_mtime >= run_started )); then
+    echo "FILE: $LATEST"
+    echo "----- BEGIN REPORT -----"
+    cat "$LATEST"
+    echo "----- END REPORT -----"
+  else
+    echo "WARN: brak nowego raportu z tego cyklu; ostatni plik to $LATEST"
+  fi
 fi
