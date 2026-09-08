@@ -5,6 +5,7 @@ import pytest
 
 from market_agents.agents.parsing_agent import (
     OLD_TOOL_RESULT_CONTEXT_CHARS,
+    REQUIRED_AGENT_TOOLS,
     RECENT_TOOL_RESULTS_TO_KEEP,
     _briefing_quality_issues,
     _compact_tool_context,
@@ -102,3 +103,30 @@ Brak potwierdzonych nowych marek.
 Zweryfikować handbook i przypisać właściciela działania.
 """ * 2
     assert _briefing_quality_issues(text) == []
+
+
+def test_all_empty_decision_sections_fail_quality_gate():
+    text = """
+## Kontekst technologiczny
+Materiały ISO P i proces frezowania.
+## Zagrożenia
+- Brak
+## Szanse
+- Brak
+## Ruchy konkurencji
+- Brak
+## Nowe firmy
+- Brak
+## Następne kroki
+Przejrzeć zebrane źródła i przygotować analizę porównawczą.
+""" * 2
+    assert "wszystkie sekcje decyzyjne są puste" in _briefing_quality_issues(text)
+
+
+def test_required_agent_tools_cover_discovery_and_candidate_evidence():
+    assert {
+        "get_domain_context",
+        "list_known_firms",
+        "list_candidates",
+        "discover_new_firms",
+    } <= REQUIRED_AGENT_TOOLS

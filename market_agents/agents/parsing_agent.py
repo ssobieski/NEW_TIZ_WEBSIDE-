@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,12 @@ from market_agents.tools import ToolRegistry
 TOOL_RESULT_CONTEXT_CHARS = 4000
 OLD_TOOL_RESULT_CONTEXT_CHARS = 1000
 RECENT_TOOL_RESULTS_TO_KEEP = 4
+REQUIRED_AGENT_TOOLS = {
+    "get_domain_context",
+    "list_known_firms",
+    "list_candidates",
+    "discover_new_firms",
+}
 
 
 def _compact_tool_context(messages: list[dict[str, Any]]) -> None:
@@ -46,6 +53,17 @@ def _briefing_quality_issues(text: str) -> list[str]:
     missing = [name for name, present in required.items() if not present]
     if missing:
         issues.append("brak sekcji: " + ", ".join(missing))
+    decision_bodies = []
+    for heading in ("zagrożenia", "szanse", "ruchy konkurencji"):
+        match = re.search(
+            rf"(?is)(?:^|\n)#{{1,4}}\s*{heading}\s*\n(.*?)(?=\n#{{1,4}}\s|\Z)",
+            raw,
+        )
+        if match:
+            body = re.sub(r"[\s*_\-]+", " ", match.group(1)).strip().lower()
+            decision_bodies.append(body)
+    if decision_bodies and not any(body and body != "brak" for body in decision_bodies):
+        issues.append("wszystkie sekcje decyzyjne są puste")
     return issues
 
 
@@ -243,6 +261,7 @@ class ParsingAgent:
         schema = tools.openai_tools_schema()
         steps: list[AgentTraceStep] = []
         final_text = ""
+        called_tools: set[str] = set()
         max_steps = self.config.agents.agentic.max_steps
 
         for step_idx in range(1, max_steps + 1):
@@ -292,8 +311,21 @@ class ParsingAgent:
             step = AgentTraceStep(step=step_idx, assistant=message, tool_results=[])
 
             if not tool_calls:
-                candidate = str(message.get("content") or "").strip()
                 steps.append(step)
+                missing_tools = sorted(REQUIRED_AGENT_TOOLS - called_tools)
+                if missing_tools:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Nie kończ jeszcze. Obowiązkowo wywołaj brakujące "
+                                f"narzędzia: {', '.join(missing_tools)}. "
+                                "Dopiero potem napisz briefing."
+                            ),
+                        }
+                    )
+                    continue
+                candidate = str(message.get("content") or "").strip()
                 issues = _briefing_quality_issues(candidate)
                 if not issues:
                     final_text = candidate
@@ -334,6 +366,7 @@ class ParsingAgent:
                 name = fn.get("name") or ""
                 raw_args = fn.get("arguments") or "{}"
                 result = tools.call(name, raw_args)
+                called_tools.add(name)
                 step.tool_results.append({"tool": name, "result": result})
                 messages.append(
                     {
