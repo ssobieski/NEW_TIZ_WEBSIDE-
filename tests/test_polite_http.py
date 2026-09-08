@@ -109,6 +109,53 @@ def test_403_raises_crawl_blocked(tmp_path: Path):
     assert fetcher.status("deny.example")["in_cooldown"] is True
 
 
+def test_success_recovers_delay_after_historical_failure(tmp_path: Path):
+    AdaptivePoliteFetcher.reset_shared()
+    policy = CrawlPolicy(
+        min_delay_seconds=0.01,
+        max_delay_seconds=1.0,
+        jitter_seconds=0.0,
+        respect_robots_txt=False,
+        adaptive=True,
+    )
+    fetcher = AdaptivePoliteFetcher(policy=policy, data_dir=tmp_path)
+    state = fetcher._host_state("example.com")
+    state.delay_seconds = 1.0
+    state.fail_count = 5
+
+    with patch("httpx.Client") as client_cls:
+        client = MagicMock()
+        client_cls.return_value.__enter__.return_value = client
+        client.request.return_value = _mock_response(200, "recovered")
+        fetcher.get("https://example.com/recovered")
+
+    health = fetcher.status("example.com")["health"]
+    assert health["fail_count"] == 5
+    assert health["delay_seconds"] == 0.7
+
+
+def test_permanent_404_is_not_retried(tmp_path: Path):
+    AdaptivePoliteFetcher.reset_shared()
+    policy = CrawlPolicy(
+        min_delay_seconds=0.01,
+        jitter_seconds=0.0,
+        respect_robots_txt=False,
+        max_retries=3,
+    )
+    fetcher = AdaptivePoliteFetcher(policy=policy, data_dir=tmp_path)
+    with patch("httpx.Client") as client_cls:
+        client = MagicMock()
+        client_cls.return_value.__enter__.return_value = client
+        client.request.return_value = _mock_response(404, "missing")
+        try:
+            fetcher.get("https://missing.example/not-found")
+        except Exception:
+            pass
+
+    assert client.request.call_count == 1
+    assert fetcher.status("missing.example")["health"]["fail_count"] == 1
+
+
 def test_batch_parse_same_host_is_serial(tmp_path: Path):
     AdaptivePoliteFetcher.reset_shared()
     cfg = AppConfig(

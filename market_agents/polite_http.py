@@ -289,6 +289,8 @@ class AdaptivePoliteFetcher:
         state.success_count += 1
         state.last_status = status
         state.last_request_at = time.time()
+        state.cooldown_until = 0.0
+        state.notes = ""
         if state.avg_latency_seconds <= 0:
             state.avg_latency_seconds = latency
         else:
@@ -299,10 +301,12 @@ class AdaptivePoliteFetcher:
                     self.policy.max_delay_seconds,
                     state.delay_seconds * 1.25 + 0.3,
                 )
-            elif latency < 0.8 and state.fail_count == 0:
+            else:
+                # fail_count is a lifetime metric. Using it as a recovery gate
+                # made one historical timeout pin a host at max delay forever.
                 state.delay_seconds = max(
                     self.policy.min_delay_seconds,
-                    state.delay_seconds * 0.9,
+                    state.delay_seconds * 0.7,
                 )
         self.save_state()
 
@@ -385,6 +389,7 @@ class AdaptivePoliteFetcher:
         last_exc: Exception | None = None
 
         for attempt in range(retries + 1):
+            response: httpx.Response | None = None
             if not self._global_sem.acquire(timeout=120):
                 raise TimeoutError("global crawl concurrency timeout")
             if not host_lock.acquire(timeout=120):
@@ -450,6 +455,10 @@ class AdaptivePoliteFetcher:
             except CrawlBlockedError:
                 raise
             except Exception as exc:  # noqa: BLE001
+                # Authentication/not-found and other permanent client errors
+                # will not improve after backoff. Fail this source immediately.
+                if response is not None and 400 <= response.status_code < 500:
+                    raise
                 last_exc = exc
                 if not isinstance(exc, httpx.HTTPStatusError):
                     self._on_fail(host)
