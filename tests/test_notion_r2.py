@@ -57,3 +57,19 @@ def test_list_known_firms_uses_seed():
         assert result["ok"] is True
         assert result["count"] >= 1
         assert any("Horn" in str(f.get("company")) for f in result["firms"])
+
+
+def test_list_known_firms_without_notion_token_live_falls_back():
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = load_config("config/tiz_cutting_tools.example.yaml")
+        cfg.agents.data_dir = tmp
+        import os
+
+        os.environ.pop("NOTION_TOKEN", None)
+        tools = ToolRegistry(cfg, MarketMemory(Path(tmp)))
+        result = tools.list_known_firms({"live": True, "limit": 40})
+        assert result["ok"] is True
+        assert result["count"] >= 10
+        assert result.get("notion_token") is False
+        assert any("Sandvik" in str(f.get("company")) for f in result["firms"])
+        assert "Brak NOTION_TOKEN" not in str(result.get("error") or "")

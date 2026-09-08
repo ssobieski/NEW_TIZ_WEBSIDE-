@@ -238,11 +238,19 @@ class ToolRegistry:
                 self._ontology.save(self.config.data_path)
         return self._ontology
 
+    def _notion_token(self) -> str | None:
+        token = self.config.notion_token()
+        return token.strip() if token else None
+
     def _get_notion(self) -> NotionCollector:
         if self._notion is None:
-            token = self.config.notion_token()
+            token = self._notion_token()
             if not token:
-                raise RuntimeError("Brak NOTION_TOKEN — ustaw env z tokenem integracji Notion")
+                raise RuntimeError(
+                    "Brak NOTION_TOKEN — kontynuuj bez Notion "
+                    "(list_known_firms z seed/competitors YAML). "
+                    "Ustaw NOTION_TOKEN tylko gdy chcesz live sync z katalogu."
+                )
             self._notion = NotionCollector(self.config.sources.notion, token)
         return self._notion
 
@@ -254,6 +262,137 @@ class ToolRegistry:
             )
         return self._r2
 
+    def _firms_from_competitors(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for name in self.config.industry.competitors or []:
+            n = str(name or "").strip()
+            if n:
+                rows.append(
+                    {
+                        "company": n,
+                        "product_focus": "competitor (industry.yaml)",
+                        "source": "competitors_yaml",
+                    }
+                )
+        return rows
+
+    def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:
+        query = str(args.get("query") or "").strip().lower()
+        limit = int(args.get("limit") or 50)
+        live = bool(args.get("live"))
+        include_presentation = args.get("include_presentation", True)
+        firms: list[dict[str, Any]] = []
+        cache_path = self.config.data_path / "knowledge" / "known_firms.json"
+        seed_path = Path("config/known_firms.seed.json")
+        source = "cache"
+        warnings: list[str] = []
+
+        if live:
+            if not self._notion_token():
+                warnings.append(
+                    "live=true, ale brak NOTION_TOKEN — używam cache/seed/competitors"
+                )
+                live = False
+            else:
+                try:
+                    firms = self._get_notion().list_known_firms(
+                        limit=max(limit, 200),
+                        enrich_presentations=True,
+                    )
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_text(
+                        json.dumps(firms, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    source = "notion_live"
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"Notion live failed: {exc}")
+                    live = False
+
+        if not firms and cache_path.exists():
+            try:
+                firms = json.loads(cache_path.read_text(encoding="utf-8"))
+                source = "cache"
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"cache read failed: {exc}")
+
+        if not firms and seed_path.exists():
+            try:
+                firms = json.loads(seed_path.read_text(encoding="utf-8"))
+                source = "seed"
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"seed read failed: {exc}")
+
+        # Zawsze dołącz konkurentów z YAML (dedupe po nazwie)
+        from market_agents.firms import normalize_firm_name
+
+        seen = {normalize_firm_name(str(f.get("company") or "")) for f in firms}
+        extra = 0
+        for row in self._firms_from_competitors():
+            key = normalize_firm_name(str(row.get("company") or ""))
+            if key and key not in seen:
+                firms.append(row)
+                seen.add(key)
+                extra += 1
+        if extra and source in {"cache", "seed", "competitors_yaml"}:
+            source = f"{source}+competitors" if firms else "competitors_yaml"
+        elif not firms:
+            firms = self._firms_from_competitors()
+            source = "competitors_yaml"
+
+        if not firms:
+            return {
+                "ok": False,
+                "error": (
+                    "Brak known_firms (cache/seed/competitors). "
+                    "Uzupełnij industry.competitors lub ustaw NOTION_TOKEN + sync-firms."
+                ),
+                "warnings": warnings,
+            }
+
+        if query:
+            firms = [
+                f
+                for f in firms
+                if query
+                in " ".join(
+                    str(f.get(k) or "")
+                    for k in (
+                        "company",
+                        "country",
+                        "product_focus",
+                        "note",
+                        "presentation",
+                    )
+                ).lower()
+            ]
+        if not include_presentation:
+            slim = []
+            for f in firms:
+                row = dict(f)
+                row.pop("presentation", None)
+                slim.append(row)
+            firms = slim
+        firms = firms[:limit]
+        with_pres = sum(1 for f in firms if f.get("presentation"))
+        self.memory.add(
+            "known_firms",
+            f"query={query or '*'} → {len(firms)} firm ({source}), "
+            f"z przedstawieniem={with_pres}",
+            meta={"count": len(firms), "source": source, "with_presentation": with_pres},
+        )
+        out: dict[str, Any] = {
+            "ok": True,
+            "count": len(firms),
+            "with_presentation": with_pres,
+            "firms": firms,
+            "source": source,
+            "cache": str(cache_path),
+            "catalog": "notion" if source.startswith("notion") else source,
+            "notion_token": bool(self._notion_token()),
+        }
+        if warnings:
+            out["warnings"] = warnings
+        return out
     def openai_tools_schema(self) -> list[dict[str, Any]]:
         return [
             {
@@ -3333,94 +3472,8 @@ class ToolRegistry:
             )
         return result
 
-    def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:
-        query = str(args.get("query") or "").strip().lower()
-        limit = int(args.get("limit") or 50)
-        live = bool(args.get("live"))
-        include_presentation = args.get("include_presentation", True)
-        firms: list[dict[str, Any]] = []
-        cache_path = self.config.data_path / "knowledge" / "known_firms.json"
-        seed_path = Path("config/known_firms.seed.json")
-        source = "cache"
-
-        if live:
-            firms = self._get_notion().list_known_firms(
-                limit=max(limit, 200),
-                enrich_presentations=True,
-            )
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(
-                json.dumps(firms, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            source = "notion_live"
-        elif cache_path.exists():
-            try:
-                firms = json.loads(cache_path.read_text(encoding="utf-8"))
-                source = "cache"
-            except Exception as exc:  # noqa: BLE001
-                return {"ok": False, "error": f"cache read failed: {exc}"}
-        elif seed_path.exists():
-            firms = json.loads(seed_path.read_text(encoding="utf-8"))
-            source = "seed"
-        else:
-            try:
-                firms = self._get_notion().list_known_firms(
-                    limit=max(limit, 200),
-                    enrich_presentations=True,
-                )
-                source = "notion_live"
-            except Exception as exc:  # noqa: BLE001
-                return {
-                    "ok": False,
-                    "error": (
-                        f"Brak cache/seed i Notion niedostępne: {exc}. "
-                        "Uruchom: python -m market_agents sync-firms"
-                    ),
-                }
-
-        if query:
-            firms = [
-                f
-                for f in firms
-                if query
-                in " ".join(
-                    str(f.get(k) or "")
-                    for k in (
-                        "company",
-                        "country",
-                        "product_focus",
-                        "note",
-                        "presentation",
-                    )
-                ).lower()
-            ]
-        if not include_presentation:
-            slim = []
-            for f in firms:
-                row = dict(f)
-                row.pop("presentation", None)
-                slim.append(row)
-            firms = slim
-        firms = firms[:limit]
-        with_pres = sum(1 for f in firms if f.get("presentation"))
-        self.memory.add(
-            "known_firms",
-            f"query={query or '*'} → {len(firms)} firm ({source}), "
-            f"z przedstawieniem={with_pres}",
-            meta={"count": len(firms), "source": source, "with_presentation": with_pres},
-        )
-        return {
-            "ok": True,
-            "count": len(firms),
-            "with_presentation": with_pres,
-            "firms": firms,
-            "source": source,
-            "cache": str(cache_path),
-            "catalog": "notion",
-        }
-
     def get_firm_presentation(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Przedstawienie jednej firmy z Notion katalogu."""
+        """Przedstawienie jednej firmy z Notion katalogu / seed."""
         company = str(args.get("company") or "").strip()
         if not company:
             return {"ok": False, "error": "company required"}
