@@ -72,6 +72,9 @@ def test_tooling_relevant_gate():
     assert is_plausible_firm_name("DIAEDGE")
     assert is_plausible_firm_name("BladeForge Inc")
     assert is_plausible_firm_name("Manar Tools")
+    assert not is_plausible_firm_name("Zoho")
+    assert not is_plausible_firm_name("Interviewreihe")
+    assert not is_plausible_firm_name("A New")
 
 
 def test_extract_real_tiz_headlines():
@@ -180,5 +183,20 @@ def test_discover_new_firms_tool_parses_texts():
         assert result["ok"] is True
         assert result["count"] >= 1
         assert any("OrbitalEdge" in str(f.get("company")) for f in result["new_firms"])
+        noise = tools.discover_new_firms(
+            {
+                "run_search": False,
+                "parse_candidates": False,
+                "texts": [
+                    {
+                        "text": "Zoho CRM webinar Interviewreihe dealers without machining context",
+                        "url": "https://example.com/zoho",
+                    }
+                ],
+                "limit": 10,
+            }
+        )
+        names = {str(f.get("company") or "").lower() for f in noise["new_firms"]}
+        assert not any("zoho" in n or "hyundai" in n or "interviewreihe" in n for n in names)
         checked = tools.check_firm_known({"name": "Sandvik Coromant"})
         assert checked["results"][0]["known"] is True

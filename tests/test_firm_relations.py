@@ -56,6 +56,15 @@ def test_extract_relation_candidates_basic():
     )
 
 
+def test_extract_skips_diaedge_a_new_brand_headline():
+    cands = extract_relation_candidates(
+        "DIAEDGE, A New Brand of Cemented Carbide Products"
+    )
+    pairs = {(c["source"], c["target"]) for c in cands}
+    assert ("A New", "Cemented Carbide Products") not in pairs
+    assert not any(s.lower() == "a new" for s, _ in pairs)
+
+
 def test_add_relation_dedupes():
     g = FirmRelationsGraph()
     r1 = g.add_relation(

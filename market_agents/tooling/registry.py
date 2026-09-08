@@ -4515,6 +4515,7 @@ class ToolRegistry:
                     known,
                     evidence=str(row.get("text") or "")[:400],
                     url=str(row.get("url") or ""),
+                    require_domain=True,
                 )
             )
 

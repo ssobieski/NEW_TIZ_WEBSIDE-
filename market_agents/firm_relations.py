@@ -329,7 +329,34 @@ _NAME_STOP = {
     "dealer",
     "brand",
     "subsidiary",
+    "new",
 }
+
+_GENERIC_RELATION_PARTIES = {
+    "a new",
+    "the new",
+    "our new",
+    "its new",
+    "cemented carbide products",
+    "carbide products",
+    "cutting tools",
+    "machine tools",
+}
+
+
+def _plausible_relation_party(name: str) -> bool:
+    n = re.sub(r"\s+", " ", (name or "").strip(" ,.;:-/"))
+    if len(n) < 2 or len(n) > 64:
+        return False
+    low = n.lower()
+    if low in _GENERIC_RELATION_PARTIES:
+        return False
+    if low in _NAME_STOP:
+        return False
+    if re.search(r"\b(products?|services?|photos?|interviewreihe)\b", n, re.I):
+        if not re.search(r"\b(GmbH|AG|Ltd|LLC|Inc|Corp)\b", n):
+            return False
+    return True
 
 
 def extract_relation_candidates(
@@ -402,6 +429,8 @@ def _push_relation(
     if len(source) < 2 or len(target) < 2:
         return
     if source.lower() in _NAME_STOP or target.lower() in _NAME_STOP:
+        return
+    if not _plausible_relation_party(source) or not _plausible_relation_party(target):
         return
     # odrzuć nazwy złożone tylko ze stopwords
     if all(t.lower() in _NAME_STOP for t in re.split(r"[\s/-]+", source) if t):
