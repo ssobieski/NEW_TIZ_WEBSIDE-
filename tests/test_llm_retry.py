@@ -6,6 +6,7 @@ import pytest
 from market_agents.agents.parsing_agent import (
     OLD_TOOL_RESULT_CONTEXT_CHARS,
     RECENT_TOOL_RESULTS_TO_KEEP,
+    _briefing_quality_issues,
     _compact_tool_context,
 )
 from market_agents.agents.orchestrator import _is_notion_abort_briefing
@@ -70,3 +71,34 @@ def test_old_tool_results_are_compacted_but_recent_results_stay_complete():
     assert len(tool_messages[0]["content"]) < OLD_TOOL_RESULT_CONTEXT_CHARS + 100
     assert "skrócony" in tool_messages[0]["content"]
     assert len(tool_messages[-1]["content"]) == OLD_TOOL_RESULT_CONTEXT_CHARS + 500
+
+
+def test_raw_tool_call_is_not_a_publishable_briefing():
+    text = """
+### Firm Profile: Ceratizit
+Profil konkurenta i proponowane dalsze kroki.
+<tool_call>
+{"name": "get_firm_profile", "arguments": {"company": "Dormer Pramet"}}
+<|im_start|>
+"""
+    issues = _briefing_quality_issues(text)
+    assert any("tool-call" in issue for issue in issues)
+    assert any("brak sekcji" in issue for issue in issues)
+
+
+def test_complete_briefing_passes_quality_gate():
+    text = """
+## Kontekst technologiczny
+Nowe dane dotyczą frezowania stali ISO P.
+## Zagrożenia
+Konkurencja publikuje nowy handbook.
+## Szanse
+Porównać dane aplikacyjne TIZ.
+## Ruchy konkurencji
+Firma Example rozszerzyła katalog.
+## Nowe firmy
+Brak potwierdzonych nowych marek.
+## Następne kroki
+Zweryfikować handbook i przypisać właściciela działania.
+""" * 2
+    assert _briefing_quality_issues(text) == []

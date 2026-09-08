@@ -28,6 +28,35 @@ def _compact_tool_context(messages: list[dict[str, Any]]) -> None:
             )
 
 
+def _briefing_quality_issues(text: str) -> list[str]:
+    """Return reasons why model output cannot be published as a final briefing."""
+    raw = (text or "").strip()
+    low = raw.lower()
+    issues: list[str] = []
+    if len(raw) < 400:
+        issues.append("odpowiedź jest zbyt krótka")
+    if any(marker in low for marker in ("<tool_call>", "<|im_start|>", "<|im_end|>")):
+        issues.append("odpowiedź zawiera surowy znacznik tool-call")
+    required = {
+        "kontekst technologiczny": "kontekst" in low and "tech" in low,
+        "zagrożenia": "zagroż" in low,
+        "szanse": "szans" in low,
+        "ruchy konkurencji": "ruch" in low and "konkur" in low,
+    }
+    missing = [name for name, present in required.items() if not present]
+    if missing:
+        issues.append("brak sekcji: " + ", ".join(missing))
+    return issues
+
+
+def _invalid_briefing_fallback(issues: list[str]) -> str:
+    detail = "; ".join(issues)[:500] or "nieznany błąd jakości"
+    return (
+        "Nie udało się domknąć briefingu LLM "
+        f"(walidacja odpowiedzi: {detail})."
+    )
+
+
 @dataclass
 class AgentTraceStep:
     step: int
@@ -263,8 +292,41 @@ class ParsingAgent:
             step = AgentTraceStep(step=step_idx, assistant=message, tool_results=[])
 
             if not tool_calls:
-                final_text = str(message.get("content") or "").strip()
+                candidate = str(message.get("content") or "").strip()
                 steps.append(step)
+                issues = _briefing_quality_issues(candidate)
+                if not issues:
+                    final_text = candidate
+                    break
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "Poprzednia odpowiedź nie jest finalnym briefingiem "
+                            f"({'; '.join(issues)}). Nie wywołuj już narzędzi. "
+                            "Napisz czysty Markdown po polsku z sekcjami: "
+                            "Kontekst technologiczny, Zagrożenia, Szanse, "
+                            "Ruchy konkurencji, Nowe firmy i Następne kroki."
+                        ),
+                    }
+                )
+                try:
+                    closing = self.llm.chat_messages(messages)
+                    clean = str(closing.get("content") or "").strip()
+                    clean_issues = _briefing_quality_issues(clean)
+                    final_text = (
+                        _invalid_briefing_fallback(clean_issues)
+                        if clean_issues
+                        else clean
+                    )
+                    steps.append(
+                        AgentTraceStep(step=len(steps) + 1, assistant=closing)
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    final_text = (
+                        "Nie udało się domknąć briefingu LLM "
+                        f"({type(exc).__name__}: {exc})."
+                    )
                 break
 
             for call in tool_calls:
@@ -304,7 +366,11 @@ class ParsingAgent:
             )
             try:
                 closing = self.llm.chat_messages(messages)
-                final_text = str(closing.get("content") or "").strip()
+                candidate = str(closing.get("content") or "").strip()
+                issues = _briefing_quality_issues(candidate)
+                final_text = (
+                    _invalid_briefing_fallback(issues) if issues else candidate
+                )
                 steps.append(AgentTraceStep(step=len(steps) + 1, assistant=closing))
             except Exception as exc:  # noqa: BLE001
                 final_text = (
