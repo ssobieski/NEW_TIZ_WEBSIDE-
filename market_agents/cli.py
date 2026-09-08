@@ -86,7 +86,11 @@ def doctor(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> Non
     table.add_row("LLM provider", cfg.llm.provider)
     table.add_row("LLM base_url", cfg.llm.base_url)
     table.add_row("Model", cfg.llm.model)
-    table.add_row("TP (A100)", str(cfg.llm.tensor_parallel_size))
+    tp = int(getattr(cfg.llm, "tensor_parallel_size", 0) or 0)
+    table.add_row(
+        "TP (config)",
+        f"{tp} (runtime: scripts/run_vllm_a100.sh dobiera TP÷heads; 3×A100→TP=2)",
+    )
     fleet = getattr(cfg.agents, "fleet", None)
     if fleet is not None:
         table.add_row(

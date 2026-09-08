@@ -1574,7 +1574,8 @@ class ToolRegistry:
                     "name": "analyze_prospect",
                     "description": (
                         "Przeanalizuj potencjalnego klienta z URL (fetch WWW) albo z przekazanego tekstu: "
-                        "branża, budżet tooling, park maszyn, dostawcy narzędzi, procesy, decydenci."
+                        "branża, budżet tooling, park maszyn, dostawcy narzędzi, procesy, decydenci. "
+                        "Gdy robots.txt / 403 blokuje fetch — przekaż text=tytuł+summary artykułu."
                     ),
                     "parameters": {
                         "type": "object",
@@ -1583,7 +1584,11 @@ class ToolRegistry:
                             "url": {"type": "string"},
                             "text": {
                                 "type": "string",
-                                "description": "Opcjonalna treść zamiast fetch (test / Notion excerpt)",
+                                "description": "Opcjonalna treść zamiast fetch (test / Notion excerpt / news lead)",
+                            },
+                            "evidence": {
+                                "type": "string",
+                                "description": "Alias text — headline/summary gdy fetch niemożliwy",
                             },
                             "persist": {"type": "boolean", "default": True},
                         },
@@ -4120,9 +4125,10 @@ class ToolRegistry:
         if not company:
             return {"ok": False, "error": "company required"}
         url = str(args.get("url") or "").strip()
-        text = str(args.get("text") or "")
+        text = str(args.get("text") or args.get("evidence") or "")
         persist = bool(args.get("persist", True))
         assumptions = load_vertical_assumptions()
+        fetch_error: str | None = None
         if text.strip():
             analysis = analyze_prospect_text(
                 text, company=company, website=url, assumptions=assumptions
@@ -4133,7 +4139,34 @@ class ToolRegistry:
                 html = resp.text or ""
                 final_url = str(resp.url) if resp.url else url
             except Exception as exc:  # noqa: BLE001
-                return {"ok": False, "error": safe_error(exc), "url": url}
+                # robots.txt / 403 / cooldown — nie zabijaj leada; spróbuj z URL/company
+                fetch_error = safe_error(exc)
+                fallback = f"{company}. Source URL: {url}. Fetch blocked: {fetch_error}"
+                analysis = analyze_prospect_text(
+                    fallback, company=company, website=url, assumptions=assumptions
+                )
+                if persist:
+                    pr = self._get_prospects()
+                    profile = pr.upsert_from_analysis(
+                        company, analysis, self.config.data_path
+                    )
+                    self._profiles = pr.profiles
+                    return {
+                        "ok": True,
+                        "partial": True,
+                        "company": profile.company,
+                        "prospect": profile.prospect,
+                        "scores": profile.scores,
+                        "fetch_error": fetch_error,
+                        "hint": "Podaj text=tytuł+lead newsa przy kolejnym wywołaniu",
+                        "disclaimer": analysis.get("disclaimer"),
+                    }
+                return {
+                    "ok": True,
+                    "partial": True,
+                    "analysis": analysis,
+                    "fetch_error": fetch_error,
+                }
             analysis = analyze_prospect_html(
                 html, company=company, base_url=final_url, assumptions=assumptions
             )
