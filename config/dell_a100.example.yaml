@@ -1,5 +1,12 @@
 # Profil Dell: 2TB RAM + 4x NVIDIA A100 — agentic parsing przez vLLM
 # cp config/dell_a100.example.yaml config/industry.yaml
+#
+# Lokalnie na Dellu: base_url poniżej (127.0.0.1).
+# Klient przez Cybertech VPN: NIE zmieniaj YAML — ustaw:
+#   export VLLM_BASE_URL=http://<dell-vpn-ip>:8000
+#   bash scripts/check_dell_vllm.sh
+#   python -m market_agents doctor
+# Zobacz też: config/dell_vpn.example.yaml
 
 industry:
   name: "Twoja branża"

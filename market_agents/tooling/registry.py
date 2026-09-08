@@ -164,6 +164,10 @@ class ToolRegistry:
             "get_prospect_profile": self.get_prospect_profile,
             "prospect_scoreboard": self.prospect_scoreboard,
             "analyze_prospect": self.analyze_prospect,
+            "parse_tender": self.parse_tender,
+            "ingest_tender": self.ingest_tender,
+            "list_tenders": self.list_tenders,
+            "tender_scoreboard": self.tender_scoreboard,
             "estimate_tooling_budget": self.estimate_tooling_budget_tool,
             "ingest_prospect_seeds": self.ingest_prospect_seeds,
             "create_crm_task": self.create_crm_task,
@@ -234,11 +238,19 @@ class ToolRegistry:
                 self._ontology.save(self.config.data_path)
         return self._ontology
 
+    def _notion_token(self) -> str | None:
+        token = self.config.notion_token()
+        return token.strip() if token else None
+
     def _get_notion(self) -> NotionCollector:
         if self._notion is None:
-            token = self.config.notion_token()
+            token = self._notion_token()
             if not token:
-                raise RuntimeError("Brak NOTION_TOKEN — ustaw env z tokenem integracji Notion")
+                raise RuntimeError(
+                    "Brak NOTION_TOKEN — kontynuuj bez Notion "
+                    "(list_known_firms z seed/competitors YAML). "
+                    "Ustaw NOTION_TOKEN tylko gdy chcesz live sync z katalogu."
+                )
             self._notion = NotionCollector(self.config.sources.notion, token)
         return self._notion
 
@@ -250,6 +262,137 @@ class ToolRegistry:
             )
         return self._r2
 
+    def _firms_from_competitors(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for name in self.config.industry.competitors or []:
+            n = str(name or "").strip()
+            if n:
+                rows.append(
+                    {
+                        "company": n,
+                        "product_focus": "competitor (industry.yaml)",
+                        "source": "competitors_yaml",
+                    }
+                )
+        return rows
+
+    def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:
+        query = str(args.get("query") or "").strip().lower()
+        limit = int(args.get("limit") or 50)
+        live = bool(args.get("live"))
+        include_presentation = args.get("include_presentation", True)
+        firms: list[dict[str, Any]] = []
+        cache_path = self.config.data_path / "knowledge" / "known_firms.json"
+        seed_path = Path("config/known_firms.seed.json")
+        source = "cache"
+        warnings: list[str] = []
+
+        if live:
+            if not self._notion_token():
+                warnings.append(
+                    "live=true, ale brak NOTION_TOKEN — używam cache/seed/competitors"
+                )
+                live = False
+            else:
+                try:
+                    firms = self._get_notion().list_known_firms(
+                        limit=max(limit, 200),
+                        enrich_presentations=True,
+                    )
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_text(
+                        json.dumps(firms, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                    source = "notion_live"
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"Notion live failed: {exc}")
+                    live = False
+
+        if not firms and cache_path.exists():
+            try:
+                firms = json.loads(cache_path.read_text(encoding="utf-8"))
+                source = "cache"
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"cache read failed: {exc}")
+
+        if not firms and seed_path.exists():
+            try:
+                firms = json.loads(seed_path.read_text(encoding="utf-8"))
+                source = "seed"
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"seed read failed: {exc}")
+
+        # Zawsze dołącz konkurentów z YAML (dedupe po nazwie)
+        from market_agents.firms import normalize_firm_name
+
+        seen = {normalize_firm_name(str(f.get("company") or "")) for f in firms}
+        extra = 0
+        for row in self._firms_from_competitors():
+            key = normalize_firm_name(str(row.get("company") or ""))
+            if key and key not in seen:
+                firms.append(row)
+                seen.add(key)
+                extra += 1
+        if extra and source in {"cache", "seed", "competitors_yaml"}:
+            source = f"{source}+competitors" if firms else "competitors_yaml"
+        elif not firms:
+            firms = self._firms_from_competitors()
+            source = "competitors_yaml"
+
+        if not firms:
+            return {
+                "ok": False,
+                "error": (
+                    "Brak known_firms (cache/seed/competitors). "
+                    "Uzupełnij industry.competitors lub ustaw NOTION_TOKEN + sync-firms."
+                ),
+                "warnings": warnings,
+            }
+
+        if query:
+            firms = [
+                f
+                for f in firms
+                if query
+                in " ".join(
+                    str(f.get(k) or "")
+                    for k in (
+                        "company",
+                        "country",
+                        "product_focus",
+                        "note",
+                        "presentation",
+                    )
+                ).lower()
+            ]
+        if not include_presentation:
+            slim = []
+            for f in firms:
+                row = dict(f)
+                row.pop("presentation", None)
+                slim.append(row)
+            firms = slim
+        firms = firms[:limit]
+        with_pres = sum(1 for f in firms if f.get("presentation"))
+        self.memory.add(
+            "known_firms",
+            f"query={query or '*'} → {len(firms)} firm ({source}), "
+            f"z przedstawieniem={with_pres}",
+            meta={"count": len(firms), "source": source, "with_presentation": with_pres},
+        )
+        out: dict[str, Any] = {
+            "ok": True,
+            "count": len(firms),
+            "with_presentation": with_pres,
+            "firms": firms,
+            "source": source,
+            "cache": str(cache_path),
+            "catalog": "notion" if source.startswith("notion") else source,
+            "notion_token": bool(self._notion_token()),
+        }
+        if warnings:
+            out["warnings"] = warnings
+        return out
     def openai_tools_schema(self) -> list[dict[str, Any]]:
         return [
             {
@@ -1570,7 +1713,8 @@ class ToolRegistry:
                     "name": "analyze_prospect",
                     "description": (
                         "Przeanalizuj potencjalnego klienta z URL (fetch WWW) albo z przekazanego tekstu: "
-                        "branża, budżet tooling, park maszyn, dostawcy narzędzi, procesy, decydenci."
+                        "branża, budżet tooling, park maszyn, dostawcy narzędzi, procesy, decydenci. "
+                        "Gdy robots.txt / 403 blokuje fetch — przekaż text=tytuł+summary artykułu."
                     ),
                     "parameters": {
                         "type": "object",
@@ -1579,11 +1723,96 @@ class ToolRegistry:
                             "url": {"type": "string"},
                             "text": {
                                 "type": "string",
-                                "description": "Opcjonalna treść zamiast fetch (test / Notion excerpt)",
+                                "description": "Opcjonalna treść zamiast fetch (test / Notion excerpt / news lead)",
+                            },
+                            "evidence": {
+                                "type": "string",
+                                "description": "Alias text — headline/summary gdy fetch niemożliwy",
                             },
                             "persist": {"type": "boolean", "default": True},
                         },
                         "required": ["company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "parse_tender",
+                    "description": (
+                        "Parsuj ogłoszenie przetargu lub news o zakupie/zamiarze zakupu sprzętu "
+                        "(CNC, tokarka, frezarka, EDM, narzędzia). Z text lub URL."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "url": {"type": "string"},
+                            "company": {"type": "string"},
+                            "title": {"type": "string"},
+                            "persist": {
+                                "type": "boolean",
+                                "default": False,
+                                "description": "True = od razu ingest_tender (profil+CRM)",
+                            },
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "ingest_tender",
+                    "description": (
+                        "Zapisz sparsowany sygnał przetargowy/zakupowy do tenders.json, "
+                        "podłącz do profilu firmy i utwórz zadanie CRM."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "url": {"type": "string"},
+                            "company": {"type": "string"},
+                            "title": {"type": "string"},
+                            "create_crm": {"type": "boolean", "default": True},
+                            "update_profile": {"type": "boolean", "default": True},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_tenders",
+                    "description": "Lista sygnałów przetargowych / zakupowych sprzętu.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "q": {"type": "string"},
+                            "intent": {
+                                "type": "string",
+                                "enum": [
+                                    "announced_tender",
+                                    "planned_tender",
+                                    "intends_to_buy",
+                                    "purchased",
+                                    "awarded",
+                                    "other",
+                                ],
+                            },
+                            "limit": {"type": "integer", "default": 30},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "tender_scoreboard",
+                    "description": "Scoreboard przetargów i sygnałów zakupu sprzętu (confidence).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"limit": {"type": "integer", "default": 25}},
                     },
                 },
             },
@@ -3243,94 +3472,8 @@ class ToolRegistry:
             )
         return result
 
-    def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:
-        query = str(args.get("query") or "").strip().lower()
-        limit = int(args.get("limit") or 50)
-        live = bool(args.get("live"))
-        include_presentation = args.get("include_presentation", True)
-        firms: list[dict[str, Any]] = []
-        cache_path = self.config.data_path / "knowledge" / "known_firms.json"
-        seed_path = Path("config/known_firms.seed.json")
-        source = "cache"
-
-        if live:
-            firms = self._get_notion().list_known_firms(
-                limit=max(limit, 200),
-                enrich_presentations=True,
-            )
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(
-                json.dumps(firms, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            source = "notion_live"
-        elif cache_path.exists():
-            try:
-                firms = json.loads(cache_path.read_text(encoding="utf-8"))
-                source = "cache"
-            except Exception as exc:  # noqa: BLE001
-                return {"ok": False, "error": f"cache read failed: {exc}"}
-        elif seed_path.exists():
-            firms = json.loads(seed_path.read_text(encoding="utf-8"))
-            source = "seed"
-        else:
-            try:
-                firms = self._get_notion().list_known_firms(
-                    limit=max(limit, 200),
-                    enrich_presentations=True,
-                )
-                source = "notion_live"
-            except Exception as exc:  # noqa: BLE001
-                return {
-                    "ok": False,
-                    "error": (
-                        f"Brak cache/seed i Notion niedostępne: {exc}. "
-                        "Uruchom: python -m market_agents sync-firms"
-                    ),
-                }
-
-        if query:
-            firms = [
-                f
-                for f in firms
-                if query
-                in " ".join(
-                    str(f.get(k) or "")
-                    for k in (
-                        "company",
-                        "country",
-                        "product_focus",
-                        "note",
-                        "presentation",
-                    )
-                ).lower()
-            ]
-        if not include_presentation:
-            slim = []
-            for f in firms:
-                row = dict(f)
-                row.pop("presentation", None)
-                slim.append(row)
-            firms = slim
-        firms = firms[:limit]
-        with_pres = sum(1 for f in firms if f.get("presentation"))
-        self.memory.add(
-            "known_firms",
-            f"query={query or '*'} → {len(firms)} firm ({source}), "
-            f"z przedstawieniem={with_pres}",
-            meta={"count": len(firms), "source": source, "with_presentation": with_pres},
-        )
-        return {
-            "ok": True,
-            "count": len(firms),
-            "with_presentation": with_pres,
-            "firms": firms,
-            "source": source,
-            "cache": str(cache_path),
-            "catalog": "notion",
-        }
-
     def get_firm_presentation(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Przedstawienie jednej firmy z Notion katalogu."""
+        """Przedstawienie jednej firmy z Notion katalogu / seed."""
         company = str(args.get("company") or "").strip()
         if not company:
             return {"ok": False, "error": "company required"}
@@ -4035,9 +4178,10 @@ class ToolRegistry:
         if not company:
             return {"ok": False, "error": "company required"}
         url = str(args.get("url") or "").strip()
-        text = str(args.get("text") or "")
+        text = str(args.get("text") or args.get("evidence") or "")
         persist = bool(args.get("persist", True))
         assumptions = load_vertical_assumptions()
+        fetch_error: str | None = None
         if text.strip():
             analysis = analyze_prospect_text(
                 text, company=company, website=url, assumptions=assumptions
@@ -4048,7 +4192,34 @@ class ToolRegistry:
                 html = resp.text or ""
                 final_url = str(resp.url) if resp.url else url
             except Exception as exc:  # noqa: BLE001
-                return {"ok": False, "error": safe_error(exc), "url": url}
+                # robots.txt / 403 / cooldown — nie zabijaj leada; spróbuj z URL/company
+                fetch_error = safe_error(exc)
+                fallback = f"{company}. Source URL: {url}. Fetch blocked: {fetch_error}"
+                analysis = analyze_prospect_text(
+                    fallback, company=company, website=url, assumptions=assumptions
+                )
+                if persist:
+                    pr = self._get_prospects()
+                    profile = pr.upsert_from_analysis(
+                        company, analysis, self.config.data_path
+                    )
+                    self._profiles = pr.profiles
+                    return {
+                        "ok": True,
+                        "partial": True,
+                        "company": profile.company,
+                        "prospect": profile.prospect,
+                        "scores": profile.scores,
+                        "fetch_error": fetch_error,
+                        "hint": "Podaj text=tytuł+lead newsa przy kolejnym wywołaniu",
+                        "disclaimer": analysis.get("disclaimer"),
+                    }
+                return {
+                    "ok": True,
+                    "partial": True,
+                    "analysis": analysis,
+                    "fetch_error": fetch_error,
+                }
             analysis = analyze_prospect_html(
                 html, company=company, base_url=final_url, assumptions=assumptions
             )
@@ -4066,6 +4237,90 @@ class ToolRegistry:
                 "disclaimer": analysis.get("disclaimer"),
             }
         return {"ok": True, "analysis": analysis}
+
+    def parse_tender(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.tenders import ingest_tender_analysis, parse_tender_html, parse_tender_text
+
+        text = str(args.get("text") or "")
+        url = str(args.get("url") or "").strip()
+        company = str(args.get("company") or "").strip() or None
+        title = str(args.get("title") or "")
+        persist = bool(args.get("persist", False))
+        if text.strip():
+            analysis = parse_tender_text(
+                text, company=company, title=title, url=url, source="tool"
+            )
+        elif url:
+            try:
+                resp = self._fetcher.get(url)
+                html = resp.text or ""
+                final_url = str(resp.url) if resp.url else url
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": safe_error(exc), "url": url}
+            analysis = parse_tender_html(
+                html,
+                company=company,
+                title=title,
+                url=final_url,
+                source="tool",
+            )
+        else:
+            return {"ok": False, "error": "podaj text albo url"}
+        if persist and analysis.get("tender_relevant"):
+            return ingest_tender_analysis(
+                analysis,
+                self.config.data_path,
+                create_crm=True,
+                update_profile=True,
+            )
+        return analysis
+
+    def ingest_tender(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.tenders import ingest_tender_analysis, parse_tender_html, parse_tender_text
+
+        text = str(args.get("text") or "")
+        url = str(args.get("url") or "").strip()
+        company = str(args.get("company") or "").strip() or None
+        title = str(args.get("title") or "")
+        if text.strip():
+            analysis = parse_tender_text(
+                text, company=company, title=title, url=url, source="tool"
+            )
+        elif url:
+            try:
+                resp = self._fetcher.get(url)
+                html = resp.text or ""
+                final_url = str(resp.url) if resp.url else url
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": safe_error(exc), "url": url}
+            analysis = parse_tender_html(
+                html, company=company, title=title, url=final_url, source="tool"
+            )
+        else:
+            return {"ok": False, "error": "podaj text albo url"}
+        return ingest_tender_analysis(
+            analysis,
+            self.config.data_path,
+            create_crm=bool(args.get("create_crm", True)),
+            update_profile=bool(args.get("update_profile", True)),
+        )
+
+    def list_tenders(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.tenders import TenderRegistry
+
+        reg = TenderRegistry.load(self.config.data_path)
+        rows = reg.list(
+            q=str(args.get("q") or "") or None,
+            intent=str(args.get("intent") or "") or None,
+            limit=int(args.get("limit") or 30),
+        )
+        return {"ok": True, "count": len(rows), "signals": [r.to_dict() for r in rows]}
+
+    def tender_scoreboard(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.tenders import TenderRegistry
+
+        reg = TenderRegistry.load(self.config.data_path)
+        return {"ok": True, "scoreboard": reg.scoreboard(limit=int(args.get("limit") or 25))}
 
     def estimate_tooling_budget_tool(self, args: dict[str, Any]) -> dict[str, Any]:
         vertical = str(args.get("vertical") or "unknown").strip()

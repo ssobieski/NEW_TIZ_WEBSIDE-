@@ -279,6 +279,7 @@ class FleetConfig(BaseModel):
     publish_ontology: bool = True
     publish_firm_profiles: bool = True
     publish_crm_tasks: bool = False
+    publish_tenders: bool = True
     publish_pricelists: bool = True
     publish_literature: bool = True
     publish_product_tech: bool = True
@@ -351,8 +352,78 @@ def load_config(path: str | Path) -> AppConfig:
             f"Brak pliku konfiguracji: {config_path}. "
             "Skopiuj config/tiz_cutting_tools.example.yaml → config/industry.yaml"
         )
+    load_dotenv_files()
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    return AppConfig.model_validate(raw)
+    cfg = AppConfig.model_validate(raw)
+    _apply_llm_env_overrides(cfg)
+    return cfg
+
+
+def load_dotenv_files(*paths: str | Path) -> list[Path]:
+    """Load KEY=VALUE from .env files into os.environ (no overwrite of existing).
+
+    Looks for .env in CWD and repo root. Safe for Cybertech VPN secrets
+    (VLLM_BASE_URL, NOTION_TOKEN, …) without committing them.
+    """
+    candidates: list[Path] = []
+    if paths:
+        candidates.extend(Path(p) for p in paths)
+    else:
+        candidates.extend(
+            [
+                Path(".env"),
+                Path(__file__).resolve().parents[1] / ".env",
+            ]
+        )
+    loaded: list[Path] = []
+    seen: set[Path] = set()
+    for path in candidates:
+        path = path.resolve()
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            if not key or key in os.environ:
+                continue
+            val = val.strip().strip("'").strip('"')
+            os.environ[key] = val
+        loaded.append(path)
+    return loaded
+
+
+def _apply_llm_env_overrides(cfg: AppConfig) -> None:
+    """Override LLM endpoint from env — for Dell over Cybertech VPN / remote vLLM.
+
+    MARKET_AGENTS_LLM_BASE_URL or VLLM_BASE_URL → llm.base_url
+    MARKET_AGENTS_LLM_MODEL or VLLM_MODEL → llm.model
+    MARKET_AGENTS_LLM_API_KEY → llm.api_key
+    """
+    base = (
+        os.environ.get("MARKET_AGENTS_LLM_BASE_URL")
+        or os.environ.get("VLLM_BASE_URL")
+        or ""
+    ).strip()
+    if base:
+        cfg.llm.base_url = base.rstrip("/")
+    model = (
+        os.environ.get("MARKET_AGENTS_LLM_MODEL")
+        or os.environ.get("VLLM_MODEL")
+        or ""
+    ).strip()
+    if model:
+        cfg.llm.model = model
+    api_key = os.environ.get("MARKET_AGENTS_LLM_API_KEY")
+    if api_key is not None and api_key != "":
+        cfg.llm.api_key = api_key
 
 
 def default_config_path() -> Path:

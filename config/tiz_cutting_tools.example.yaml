@@ -59,6 +59,17 @@ industry:
   - Tungaloy
   - Walter
   - YG-1
+  - przetarg
+  - zapytanie ofertowe
+  - zamówienie publiczne
+  - tender
+  - RFQ
+  - RFP
+  - zakup obrabiarki
+  - centrum obróbcze
+  - tokarka CNC
+  - frezarka CNC
+  - inwestycja w park maszynowy
   exclude_keywords:
   - oferta pracy
   - rekrutacja
@@ -101,6 +112,16 @@ industry:
   - Walter
   - YesTool
   - YG-1
+  - MSC Industrial Supply
+  - MSC
+  - Mitsubishi Heavy Industries
+  - MHI
+  - Nidec Machine Tool
+  - Nidec
+  - Haas
+  - Mazak
+  - Gleason
+  - TaeguTec
   focus_questions:
   - Jakie NOWE firmy / marki narzędzi skrawających pojawiają się poza listą known_firms?
   - Która firma jest dystrybutorem / dealerem innej (siatka powiązań distributor_of / dealer_of)?
@@ -118,6 +139,8 @@ industry:
   - Co firmy komunikują w mediach społecznościowych (YouTube/LinkedIn/X) o nowych produktach, katalogach, targach?
   - "Jakie książki / artykuły naukowe / wideo (literatura: dynamika obróbki, narzędzia) warto dodać do korpusu Pozycje?"
   - "Jaki jest kontekst technologiczny (materiały ISO P/M/K/N/S/H, maszyny, chłodziwo, procesy) w nowych handbookach / katalogach?"
+  - Które firmy ogłosiły / planują przetarg lub kupiły obrabiarki CNC / tooling?
+  - Jakie sygnały zakupowe sprzętu (tokarka, frezarka, EDM, centrum obróbcze) widać w newsach / BZP?
 sources:
   rss:
   - name: Google News — machining literature books papers
@@ -134,6 +157,10 @@ sources:
     url: https://news.google.com/rss/search?q=%28EMO+OR+AMB+OR+IMTS%29+%28exhibitor+OR+cutting+tools+OR+tooling%29&hl=en&gl=US&ceid=US:en
   - name: Google News — machining magazines
     url: https://news.google.com/rss/search?q=%28%22Modern+Machine+Shop%22+OR+%22Cutting+Tool+Engineering%22+OR+%22MM+Maschinenmarkt%22%29+%28tool+OR+tooling+OR+carbide%29&hl=en&gl=US&ceid=US:en
+  - name: Google News — przetargi / zakup obrabiarek CNC
+    url: https://news.google.com/rss/search?q=%28przetarg+OR+%22zapytanie+ofertowe%22+OR+tender%29+%28CNC+OR+obrabiarka+OR+%22centrum+obr%C3%B3bcze%22+OR+tokarka+OR+frezarka%29&hl=pl&gl=PL&ceid=PL:pl
+  - name: Google News — machine tool investment / purchase
+    url: https://news.google.com/rss/search?q=%28%22purchased+a%22+OR+%22invests+in%22+OR+%22new+CNC%22+OR+%22machining+center%22%29+%28CNC+OR+%22machine+tool%22%29&hl=en&gl=US&ceid=US:en
   web: []
   media:
   - name: EMO Hannover
@@ -598,11 +625,13 @@ sources:
     region: US
     max_items: 20
     search_queries:
-    - '"cutting tools" (startup OR "new manufacturer" OR "new brand" OR debut OR "spin-off")'
+    # Unikaj luźnego „tooling” (grass / plastics). Preferuj cutting tools / carbide / machining.
+    - '"cutting tools" (startup OR "new manufacturer" OR "new brand" OR debut OR "spin-off") -grass -lawn -plastics -watch'
     - '"carbide tools" ("enters the market" OR "new company" OR exhibitor OR "first catalog")'
-    - '"tooling manufacturer" (launch OR unveils OR introduces) (catalog OR ecatalog)'
+    - '"cutting tools" manufacturer (launch OR unveils OR introduces) (catalog OR ecatalog OR brand)'
     - '"narzędzia skrawające" (nowy producent OR debiut OR "nowa marka")'
     - '"solid carbide" ("new brand" OR startup OR "new player")'
+    - '"machine tools" ("new brand" OR debut OR "Nidec" OR hobbing OR "gear shaping")'
     feed_urls: []
     known_match_threshold: 0.88
 llm:
@@ -621,7 +650,7 @@ agents:
   lookback_hours: 168
   report_dir: reports
   data_dir: data
-  min_relevance_score: 0.25
+  min_relevance_score: 0.45
   # Post-run knowledge loops (central only — workers skip in code + yaml)
   post_enrich_profiles: true
   post_enrich_crm_tasks: true
@@ -693,6 +722,7 @@ agents:
     publish_ontology: true
     publish_firm_profiles: true
     publish_crm_tasks: false  # opt-in; CRM often needs human review before fleet share
+    publish_tenders: true
     publish_pricelists: true
     publish_literature: true
     publish_product_tech: true

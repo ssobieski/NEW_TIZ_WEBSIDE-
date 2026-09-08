@@ -13,8 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from market_agents.firms import normalize_firm_name
+
 TaskStatus = Literal["open", "in_progress", "done", "cancelled"]
 TaskPriority = Literal["low", "medium", "high", "hot"]
+
+_PRIORITY_RANK: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "hot": 3}
 
 
 def utc_now_iso() -> str:
@@ -112,8 +116,13 @@ class CrmTaskStore:
         priority: TaskPriority | None = None,
         owner: str = "",
         meta: dict[str, Any] | None = None,
+        dedupe_by_company: bool = False,
+        source: str | None = None,
     ) -> tuple[CrmTask, bool]:
-        """Zwraca (task, created) — created=False gdy zaktualizowano istniejący open task."""
+        """Zwraca (task, created) — created=False gdy zaktualizowano istniejący open task.
+
+        dedupe_by_company=True: jeden open lead na firmę (łączy przetarg↔prospect).
+        """
         company = (company or "").strip()
         if not company:
             raise ValueError("company required")
@@ -124,18 +133,67 @@ class CrmTaskStore:
                 priority = "high"
             else:
                 priority = "medium"
-        # dedupe open tasks for same company+similar title
+        meta_in = dict(meta or {})
+        company_norm = normalize_firm_name(company)
+        # dedupe open tasks for same company+similar title, or whole company
         for t in self.tasks:
-            if (
-                t.status in {"open", "in_progress"}
-                and t.company.lower() == company.lower()
-                and (not title or t.title.lower() == (title or "").lower())
-            ):
+            same_company = (
+                normalize_firm_name(t.company) == company_norm
+                if company_norm
+                else t.company.lower() == company.lower()
+            )
+            title_match = not title or t.title.lower() == (title or "").lower()
+            company_lead = dedupe_by_company and same_company and t.status in {
+                "open",
+                "in_progress",
+            }
+            if t.status in {"open", "in_progress"} and same_company and (title_match or company_lead):
                 t.updated_at = utc_now_iso()
                 if opportunity_score is not None:
-                    t.opportunity_score = opportunity_score
+                    # keep higher opportunity
+                    prev = t.opportunity_score
+                    if prev is None or opportunity_score >= float(prev):
+                        t.opportunity_score = opportunity_score
                 if reason:
-                    t.reason = reason[:800]
+                    # append distinct reason snippets
+                    if reason[:80] not in (t.reason or ""):
+                        t.reason = ((t.reason or "") + " | " + reason).strip(" |")[:800]
+                if title and company_lead and title not in (t.title or ""):
+                    # keep original title; stash alternate in meta
+                    t.meta = dict(t.meta or {})
+                    alts = list(t.meta.get("alt_titles") or [])
+                    if title not in alts:
+                        alts.append(title)
+                    t.meta["alt_titles"] = alts[:8]
+                if meta_in:
+                    t.meta = dict(t.meta or {})
+                    # Namespace source-specific blobs; merge other keys non-destructively
+                    for k, v in meta_in.items():
+                        if v is None or v == "" or v == []:
+                            continue
+                        if isinstance(v, dict) and k in {"tender", "prospect"}:
+                            bucket = dict(t.meta.get(k) or {})
+                            for sk, sv in v.items():
+                                if sv is None or sv == "" or sv == []:
+                                    continue
+                                bucket[sk] = sv
+                            t.meta[k] = bucket
+                        elif k not in t.meta or t.meta.get(k) in (None, "", []):
+                            t.meta[k] = v
+                        elif k not in {"tender", "prospect"}:
+                            # avoid clobbering existing non-empty scalars from other source
+                            continue
+                if source:
+                    # track multi-source lead
+                    t.meta = dict(t.meta or {})
+                    sources = list(t.meta.get("sources") or ([t.source] if t.source else []))
+                    if source not in sources:
+                        sources.append(source)
+                    t.meta["sources"] = sources[:8]
+                    if not t.source or t.source == "local":
+                        t.source = source
+                if _PRIORITY_RANK.get(priority, 0) > _PRIORITY_RANK.get(t.priority, 0):
+                    t.priority = priority
                 return t, False
         task = CrmTask(
             id=uuid.uuid4().hex[:12],
@@ -145,7 +203,8 @@ class CrmTaskStore:
             reason=reason,
             opportunity_score=opportunity_score,
             owner=owner,
-            meta=dict(meta or {}),
+            source=source or "local",
+            meta=meta_in,
         )
         self.tasks.insert(0, task)
         return task, True
@@ -195,9 +254,17 @@ def create_tasks_from_prospect_scoreboard(
             company=str(row["company"]),
             title=f"Prospect outreach: {row['company']}",
             reason=f"vertical={row.get('vertical')} quality={row.get('quality_tier')} "
-            f"budget_mid={row.get('budget_mid_eur')}",
+            f"budget_mid={row.get('budget_mid_eur')} families={','.join(row.get('product_families') or [])}",
             opportunity_score=opp,
-            meta={"processes": row.get("processes") or []},
+            source="prospect",
+            dedupe_by_company=True,
+            meta={
+                "prospect": {
+                    "processes": row.get("processes") or [],
+                    "product_families": row.get("product_families") or [],
+                    "practical_tools": row.get("practical_tools") or [],
+                }
+            },
         )
         if was_created:
             created += 1

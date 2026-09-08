@@ -1,0 +1,401 @@
+{
+  "description": "Reguły inferencji tooling dla profilowania klientów TIZ: produkt → proces → narzędzia; park maszyn → narzędzia; peerzy branżowi.",
+  "product_families": {
+    "injection_molds": {
+      "label": "Formy wtryskowe / injection molds",
+      "keywords": ["formy wtrysk", "injection mold", "mould", "forma wtryskowa", "mold making", "tool & die"],
+      "peer_vertical": "mold_die",
+      "theoretical_process": [
+        "design_cad_cam",
+        "rough_milling",
+        "hsm_finishing",
+        "edm_sinker_or_wire",
+        "electrode_milling",
+        "grinding_polish",
+        "fitting_assembly"
+      ],
+      "typical_materials": ["iso-h", "iso-p"],
+      "practical_tools": [
+        "solid_carbide_end_mills",
+        "hsm_toolholders",
+        "ball_nose_end_mills",
+        "edm_electrodes",
+        "deep_hole_drills",
+        "spot_drills",
+        "reamers"
+      ],
+      "workholding": ["vise", "modular_fixture", "electrode_holders"]
+    },
+    "stamping_dies": {
+      "label": "Matryce / stemple / stamping dies",
+      "keywords": ["matryc", "stempel", "stamping die", "press die", "tłocznik", "die set"],
+      "peer_vertical": "mold_die",
+      "theoretical_process": [
+        "design_cad_cam",
+        "plate_milling",
+        "wire_edm",
+        "grinding",
+        "heat_treat",
+        "assembly"
+      ],
+      "typical_materials": ["iso-h", "iso-p"],
+      "practical_tools": [
+        "solid_carbide_end_mills",
+        "face_mills",
+        "edm_wire_consumables",
+        "drills",
+        "taps"
+      ],
+      "workholding": ["die_clamps", "parallels"]
+    },
+    "shafts": {
+      "label": "Wały / shafts",
+      "keywords": ["wał ", "wały", "shaft", "spindle shaft", "wałek"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "turning_rough",
+        "turning_finish",
+        "milling_keyways",
+        "drilling",
+        "grinding",
+        "balancing_optional"
+      ],
+      "typical_materials": ["iso-p", "iso-m"],
+      "practical_tools": [
+        "turning_inserts",
+        "grooving",
+        "parting",
+        "end_mills",
+        "drills",
+        "grinding_wheels"
+      ],
+      "workholding": ["chuck", "centers", "steady_rest"]
+    },
+    "housings": {
+      "label": "Korpusy / obudowy / housings",
+      "keywords": ["korpus", "obudowa", "housing", "casing", "gearbox housing"],
+      "peer_vertical": "automotive",
+      "theoretical_process": [
+        "facing_milling",
+        "boring",
+        "drilling",
+        "tapping",
+        "spotfacing"
+      ],
+      "typical_materials": ["iso-k", "iso-n", "iso-p"],
+      "practical_tools": [
+        "face_mills",
+        "indexable_milling",
+        "boring_bars",
+        "indexable_drills",
+        "taps",
+        "thread_mills"
+      ],
+      "workholding": ["tombstone", "fixture_plate", "hydraulic_clamp"]
+    },
+    "gears": {
+      "label": "Koła zębate / gears",
+      "keywords": ["koło zębate", "zębat", "gears", "gearbox", "pinion", "zębnik", "gear blank"],
+      "peer_vertical": "automotive",
+      "theoretical_process": [
+        "turning",
+        "hobbing_or_milling",
+        "drilling",
+        "grinding_optional",
+        "heat_treat"
+      ],
+      "typical_materials": ["iso-p", "iso-h"],
+      "practical_tools": [
+        "turning_inserts",
+        "hobs_or_gear_mills",
+        "end_mills",
+        "drills",
+        "grinding_wheels"
+      ],
+      "workholding": ["mandrel", "chuck"]
+    },
+    "aerospace_structurals": {
+      "label": "Detale lotnicze / aerospace structurals",
+      "keywords": ["aerospace", "lotnic", "turbine blade", "turbine blades", "impeller", "titanium part", "struktural", "blisk"],
+      "peer_vertical": "aerospace",
+      "theoretical_process": [
+        "5_axis_milling",
+        "turning",
+        "drilling",
+        "deburring"
+      ],
+      "typical_materials": ["iso-s", "iso-n"],
+      "practical_tools": [
+        "solid_carbide_end_mills",
+        "high_feed_mills",
+        "turning_inserts_iso_s",
+        "drills_iso_s",
+        "hsm_toolholders"
+      ],
+      "workholding": ["vacuum_table", "custom_fixture", "tombstone"]
+    },
+    "medical_implants": {
+      "label": "Implanty / detale medyczne",
+      "keywords": ["implant", "medyczn", "medical device", "bone screw", "prosthes"],
+      "peer_vertical": "medical",
+      "theoretical_process": [
+        "swiss_turning",
+        "micro_milling",
+        "drilling",
+        "threading",
+        "finishing"
+      ],
+      "typical_materials": ["iso-s", "iso-m"],
+      "practical_tools": [
+        "micro_end_mills",
+        "swiss_turning_tools",
+        "micro_drills",
+        "thread_whirling_or_taps"
+      ],
+      "workholding": ["collet", "swiss_guide_bushing"]
+    },
+    "precision_parts": {
+      "label": "Detale precyzyjne / job-shop parts",
+      "keywords": ["detale precyzyjne", "detali precyzyj", "precyzyjne detale", "obrabiamy", "cnc parts", "contract machining", "usługi cnc", "job shop"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "milling",
+        "turning",
+        "drilling",
+        "tapping"
+      ],
+      "typical_materials": ["iso-p", "iso-n", "iso-m"],
+      "practical_tools": [
+        "end_mills",
+        "turning_inserts",
+        "drills",
+        "taps",
+        "face_mills"
+      ],
+      "workholding": ["vise", "chuck", "soft_jaws"]
+    },
+    "castings_machining": {
+      "label": "Obróbka odlewów / castings",
+      "keywords": ["odlew", "casting", "żeliwo", "cast iron", "aluminum casting", "odlewn"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "facing",
+        "boring",
+        "milling",
+        "drilling",
+        "tapping",
+        "deburring"
+      ],
+      "typical_materials": ["iso-k", "iso-n"],
+      "practical_tools": [
+        "face_mills",
+        "indexable_milling",
+        "boring_bars",
+        "drills",
+        "taps",
+        "ceramic_or_cBN_optional"
+      ],
+      "workholding": ["fixture_plate", "tombstone", "hydraulic_clamp"]
+    },
+    "sheet_metal": {
+      "label": "Blachy / sheet metal fabrication",
+      "keywords": ["blachar", "sheet metal", "laser cutting", "wycinanie laser", "gięcie", "press brake", "konstrukcje stalowe"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "cutting",
+        "bending",
+        "welding_optional",
+        "secondary_machining"
+      ],
+      "typical_materials": ["iso-p", "iso-n"],
+      "practical_tools": [
+        "end_mills",
+        "drills",
+        "taps",
+        "chamfer_mills",
+        "spot_welds_consumables"
+      ],
+      "workholding": ["vise", "clamps"]
+    },
+    "hydraulics_pneumatics": {
+      "label": "Hydraulika / pneumatyka / manifolds",
+      "keywords": ["hydraulik", "pneumatik", "manifold", "siłownik", "zawór", "valve body", "blok hydrauliczny"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "milling",
+        "deep_hole_drilling",
+        "boring",
+        "tapping",
+        "honing_optional"
+      ],
+      "typical_materials": ["iso-p", "iso-n"],
+      "practical_tools": [
+        "solid_carbide_end_mills",
+        "deep_hole_drills",
+        "gun_drills",
+        "boring_bars",
+        "taps",
+        "reamers"
+      ],
+      "workholding": ["vise", "custom_fixture"]
+    },
+    "plastics_machining": {
+      "label": "Tworzywa / plastics machining",
+      "keywords": ["tworzyw", "plastics machining", "pom ", "ptfe", "peek", "nylon", "poliamid"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "milling",
+        "turning",
+        "drilling"
+      ],
+      "typical_materials": ["iso-n"],
+      "practical_tools": [
+        "sharp_end_mills",
+        "pcd_or_polished_tools",
+        "turning_inserts_aluminum_style",
+        "drills"
+      ],
+      "workholding": ["soft_jaws", "vacuum_optional"]
+    },
+    "wood_composites_cnc": {
+      "label": "Drewno / kompozyty CNC",
+      "keywords": ["drewno", "wood cnc", "kompozyt", "cfrp", "gfrp", "milling composites"],
+      "peer_vertical": "general_machining",
+      "theoretical_process": [
+        "routing_milling",
+        "drilling",
+        "trimming"
+      ],
+      "typical_materials": ["iso-n"],
+      "practical_tools": [
+        "router_bits",
+        "diamond_coated_end_mills",
+        "compression_mills",
+        "drills"
+      ],
+      "workholding": ["vacuum_table"]
+    },
+    "energy_large_parts": {
+      "label": "Energetyka / large energy parts",
+      "keywords": ["energetyk", "turbina", "oil and gas", "flange large", "pressure vessel", "ropociąg"],
+      "peer_vertical": "energy",
+      "theoretical_process": [
+        "turning_large",
+        "milling",
+        "drilling",
+        "boring",
+        "welding_prep"
+      ],
+      "typical_materials": ["iso-p", "iso-m", "iso-s"],
+      "practical_tools": [
+        "heavy_turning_inserts",
+        "indexable_drills",
+        "boring_bars",
+        "face_mills",
+        "thread_mills"
+      ],
+      "workholding": ["large_chuck", "floor_fixture"]
+    }
+  },
+  "equipment_to_tools": {
+    "cnc_lathe": {
+      "keywords": ["tokarka", "turning center", "cnc lathe", "swiss", "drehmaschine"],
+      "processes": ["turning", "threading"],
+      "practical_tools": ["turning_inserts", "grooving", "parting", "thread_turning", "boring_bars"],
+      "workholding": ["chuck", "collet", "bar_feeder"]
+    },
+    "cnc_mill": {
+      "keywords": ["frezarka", "machining center", "centrum obróbcze", "vmc", "hmc", "milling machine"],
+      "processes": ["milling", "drilling", "threading"],
+      "practical_tools": ["end_mills", "face_mills", "indexable_milling", "drills", "taps", "toolholders"],
+      "workholding": ["vise", "tombstone", "fixture_plate"]
+    },
+    "5_axis": {
+      "keywords": ["5-osi", "5-axis", "five axis", "5 axis"],
+      "processes": ["milling", "hsm"],
+      "practical_tools": ["solid_carbide_end_mills", "ball_nose_end_mills", "hsm_toolholders", "high_feed_mills"],
+      "workholding": ["5_axis_vice", "custom_fixture"]
+    },
+    "grinder": {
+      "keywords": ["szlifierka", "grinding machine", "schleif"],
+      "processes": ["grinding"],
+      "practical_tools": ["grinding_wheels", "dressing_tools"],
+      "workholding": ["magnetic_chuck", "centers"]
+    },
+    "edm": {
+      "keywords": ["edm", "elektrodrąż", "wire edm", "sinker"],
+      "processes": ["edm"],
+      "practical_tools": ["edm_electrodes", "edm_wire_consumables"],
+      "workholding": ["electrode_holders"]
+    },
+    "cmm": {
+      "keywords": ["cmm", "współrzędnościow", "coordinate measuring"],
+      "processes": [],
+      "practical_tools": ["metrology_probes"],
+      "workholding": []
+    },
+    "press_brake": {
+      "keywords": ["prasa krawędziow", "press brake", "abkant"],
+      "processes": [],
+      "practical_tools": ["chamfer_mills", "drills", "taps"],
+      "workholding": ["clamps"]
+    },
+    "laser_cutter": {
+      "keywords": ["wycinarka laser", "laser cutter", "laser cutting"],
+      "processes": [],
+      "practical_tools": ["secondary_end_mills", "drills"],
+      "workholding": []
+    }
+  },
+  "peer_rules": [
+    {
+      "id": "mold_peers_share_tooling",
+      "when_product_family": ["injection_molds", "stamping_dies"],
+      "or_vertical": ["mold_die"],
+      "apply_tooling_from_family": "injection_molds",
+      "rationale": "Firmy produkujące formy/matryce mają zbliżony zakres narzędzi i oprzyrządowania (HSM, EDM, deep-hole, ball-nose)."
+    },
+    {
+      "id": "aerospace_iso_s_tooling",
+      "when_product_family": ["aerospace_structurals"],
+      "or_vertical": ["aerospace"],
+      "apply_tooling_from_family": "aerospace_structurals",
+      "rationale": "Peerzy aerospace zwykle potrzebują tooling pod ISO-S (tytan/Inconel) i 5-axis HSM."
+    },
+    {
+      "id": "automotive_housings_peers",
+      "when_product_family": ["housings", "gears"],
+      "or_vertical": ["automotive"],
+      "apply_tooling_from_family": "housings",
+      "rationale": "Peerzy automotive (korpusy/przekładnie) dzielą boring, face milling, tapping, indexable drills."
+    },
+    {
+      "id": "medical_micro_peers",
+      "when_product_family": ["medical_implants"],
+      "or_vertical": ["medical"],
+      "apply_tooling_from_family": "medical_implants",
+      "rationale": "Peerzy medyczni → mikro-narzędzia, Swiss, gwintowanie precyzyjne."
+    },
+    {
+      "id": "castings_peers",
+      "when_product_family": ["castings_machining"],
+      "or_vertical": [],
+      "apply_tooling_from_family": "castings_machining",
+      "rationale": "Obróbka odlewów → face mills, boring, indexable drills; peerzy dzielą ten zakres."
+    },
+    {
+      "id": "hydraulics_peers",
+      "when_product_family": ["hydraulics_pneumatics"],
+      "or_vertical": [],
+      "apply_tooling_from_family": "hydraulics_pneumatics",
+      "rationale": "Bloki hydrauliczne → deep-hole / gun drills, tapping, reaming."
+    },
+    {
+      "id": "energy_large_peers",
+      "when_product_family": ["energy_large_parts"],
+      "or_vertical": ["energy"],
+      "apply_tooling_from_family": "energy_large_parts",
+      "rationale": "Peerzy energetyki → heavy turning, large boring, indexable drilling."
+    }
+  ]
+}

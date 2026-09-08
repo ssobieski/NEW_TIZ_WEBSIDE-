@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Optional
@@ -39,12 +40,13 @@ def init_config(
     profile: str = typer.Option(
         "tiz",
         "--profile",
-        help="tiz | mvp | worker | dell | basic | furniture",
+        help="tiz | mvp | worker | dell | dell-vpn | basic | furniture",
     ),
 ) -> None:
     """Utwórz config/industry.yaml z profilu."""
     mapping = {
         "dell": Path("config/dell_a100.example.yaml"),
+        "dell-vpn": Path("config/dell_vpn.example.yaml"),
         "basic": Path("config/industry.example.yaml"),
         "furniture": Path("config/furniture.pl.example.yaml"),
         "tiz": Path("config/tiz_cutting_tools.example.yaml"),
@@ -79,11 +81,50 @@ def doctor(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> Non
     table.add_row("Agentic", str(cfg.agents.agentic.enabled))
     table.add_row("Max steps", str(cfg.agents.agentic.max_steps))
     table.add_row("Źródła RSS", str(len(cfg.sources.rss)))
+    table.add_row("Źródła media (targi/czasopisma)", str(len(cfg.sources.media)))
+    table.add_row("Źródła social", str(len(cfg.sources.social)))
+    table.add_row("Źródła literature", str(len(cfg.sources.literature)))
+    if len(cfg.sources.rss) < 1 or len(cfg.sources.media) < 1:
+        table.add_row(
+            "UWAGA źródła",
+            "[red]rss/media puste — uruchom: bash scripts/ensure_tiz_sources.sh[/red]",
+        )
     table.add_row("Notion", str(cfg.sources.notion.enabled))
     table.add_row("Cloudflare R2", str(cfg.sources.cloudflare_r2.enabled))
     table.add_row("LLM provider", cfg.llm.provider)
+    table.add_row("LLM base_url", cfg.llm.base_url)
     table.add_row("Model", cfg.llm.model)
-    table.add_row("TP (A100)", str(cfg.llm.tensor_parallel_size))
+    tp = int(getattr(cfg.llm, "tensor_parallel_size", 0) or 0)
+    table.add_row(
+        "TP (config)",
+        f"{tp} (runtime: scripts/run_vllm_a100.sh dobiera TP÷heads; 3×A100→TP=2)",
+    )
+    fleet = getattr(cfg.agents, "fleet", None)
+    if fleet is not None:
+        table.add_row(
+            "Fleet",
+            f"role={getattr(fleet, 'role', '?')} sync={getattr(fleet, 'sync_dir', '')}",
+        )
+    dell_ssh = os.environ.get("DELL_SSH") or ""
+    table.add_row(
+        "DELL_SSH",
+        "[green]set[/green]" if dell_ssh else "[dim]unset[/dim] (fleet_rsync_vpn.sh)",
+    )
+    if any(
+        os.environ.get(k)
+        for k in (
+            "MARKET_AGENTS_LLM_BASE_URL",
+            "VLLM_BASE_URL",
+            "MARKET_AGENTS_LLM_MODEL",
+            "VLLM_MODEL",
+        )
+    ):
+        table.add_row("LLM env override", "[cyan]active[/cyan] (VPN / remote Dell)")
+    else:
+        table.add_row(
+            "LLM env override",
+            "[dim]off[/dim] — ustaw VLLM_BASE_URL=http://<dell-vpn-ip>:8000 w .env",
+        )
     sec = getattr(cfg.agents, "security", None)
     if sec is not None:
         table.add_row(
@@ -407,8 +448,12 @@ def prospects_cmd(
     table.add_column("Branża")
     table.add_column("Jakość")
     table.add_column("Opportunity", justify="right")
-    table.add_column("Budżet mid EUR", justify="right")
+    table.add_column("ToolingInf", justify="right")
     table.add_column("Dostawcy", justify="right")
+    table.add_column("Budżet mid EUR", justify="right")
+    table.add_column("Families")
+    table.add_column("Narzędzia")
+    table.add_column("Peer rules")
     table.add_column("Procesy")
     for row in rows:
         table.add_row(
@@ -416,10 +461,108 @@ def prospects_cmd(
             str(row.get("vertical") or ""),
             str(row.get("quality_tier") or ""),
             str(row.get("opportunity") or 0),
-            str(int(row["budget_mid_eur"])) if row.get("budget_mid_eur") else "—",
+            str(row.get("tooling_inference") or "—"),
             str(row.get("buys_from_count") or 0),
-            ",".join(row.get("processes") or [])[:40],
+            str(int(row["budget_mid_eur"])) if row.get("budget_mid_eur") else "—",
+            ",".join(row.get("product_families") or [])[:36] or "—",
+            ",".join(row.get("practical_tools") or [])[:40] or "—",
+            ",".join(row.get("peer_rules") or [])[:28] or "—",
+            ",".join(row.get("processes") or [])[:36],
         )
+    console.print(table)
+
+
+@app.command("tenders")
+def tenders_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    text_file: Optional[Path] = typer.Option(
+        None, "--text-file", help="Parsuj plik tekstowy (news / ogłoszenie)"
+    ),
+    text: Optional[str] = typer.Option(None, "--text", help="Parsuj tekst inline"),
+    company: Optional[str] = typer.Option(None, "--company"),
+    title: Optional[str] = typer.Option(None, "--title"),
+    intent: Optional[str] = typer.Option(
+        None,
+        "--intent",
+        help="announced_tender|planned_tender|intends_to_buy|purchased|awarded",
+    ),
+    scoreboard: bool = typer.Option(False, "--scoreboard"),
+    ingest: bool = typer.Option(
+        False, "--ingest", help="Zapisz sygnał + profil + CRM"
+    ),
+    q: Optional[str] = typer.Option(None, "--q", help="Filtr listy"),
+    limit: int = typer.Option(25, "--limit"),
+) -> None:
+    """Przetargi i sygnały zakupu sprzętu (CNC / obrabiarki / tooling)."""
+    from market_agents.tenders import (
+        TenderRegistry,
+        ingest_tender_analysis,
+        parse_tender_text,
+    )
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    body = ""
+    if text_file:
+        body = text_file.read_text(encoding="utf-8")
+    elif text:
+        body = text
+
+    if body.strip():
+        analysis = parse_tender_text(
+            body,
+            company=company,
+            title=title or "",
+            source="cli",
+        )
+        if ingest:
+            result = ingest_tender_analysis(analysis, cfg.data_path)
+            console.print_json(data=result)
+            if not result.get("ok"):
+                raise typer.Exit(1)
+            return
+        console.print_json(data=analysis)
+        return
+
+    reg = TenderRegistry.load(cfg.data_path)
+    if scoreboard:
+        rows = reg.scoreboard(limit=limit)
+        if not rows:
+            console.print("[yellow]Brak sygnałów przetargowych.[/yellow]")
+            raise typer.Exit(0)
+        table = Table(title="Tender / purchase signals")
+        table.add_column("Firma")
+        table.add_column("Intent")
+        table.add_column("Sprzęt")
+        table.add_column("Wartość EUR", justify="right")
+        table.add_column("Conf", justify="right")
+        table.add_column("Termin")
+        for row in rows:
+            table.add_row(
+                str(row.get("company") or ""),
+                str(row.get("intent") or ""),
+                ",".join(row.get("equipment") or [])[:40],
+                str(int(row["value_eur"])) if row.get("value_eur") else "—",
+                str(row.get("confidence") or ""),
+                str(row.get("deadline") or "—"),
+            )
+        console.print(table)
+        return
+
+    rows = reg.list(q=q, intent=intent, limit=limit)
+    if not rows:
+        console.print(
+            "[yellow]Brak sygnałów.[/yellow] "
+            "Użyj: tenders --text-file news.txt --ingest"
+        )
+        raise typer.Exit(0)
+    table = Table(title=f"Tenders ({len(rows)})")
+    table.add_column("Firma")
+    table.add_column("Intent")
+    table.add_column("Title")
+    table.add_column("Conf", justify="right")
+    for r in rows:
+        table.add_row(r.company, r.intent, (r.title or "")[:50], str(r.confidence))
     console.print(table)
 
 

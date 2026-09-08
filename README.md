@@ -126,6 +126,35 @@ Założenia: `config/prospect_assumptions.json` · seed: `config/prospects.seed.
 Tooli: `analyze_prospect`, `list_prospects`, `get_prospect_profile`, `prospect_scoreboard`,
 `estimate_tooling_budget`, `ingest_prospect_seeds`.
 
+### Inferencja tooling (produkt → proces → narzędzia)
+
+Przy `analyze_prospect` bot buduje w profilu:
+- **produkty** klienta i **rodzinę produktową** (formy, matryce, wały, korpusy…)
+- **teoretyczny proces** (how it's made)
+- **narzędzia praktyczne** + **oprzyrządowanie**
+- z **parku maszyn** (WWW / film / opis) dodatkowe rodziny narzędzi
+- **reguły peerów** (np. firmy produkujące formy → podobny zakres tooling)
+
+Reguły: `config/tooling_inference.rules.json` · silnik: `market_agents/tooling_inference.py`
+
+## Przetargi / sygnały zakupu sprzętu
+
+Parsuj ogłoszenia przetargów oraz newsy, że firma **kupiła / zamierza kupić / planuje
+ogłosić przetarg** na CNC, tokarkę, frezarkę, EDM, tooling itd.
+
+```bash
+# parse + zapis (profil prospect + CRM follow-up)
+python -m market_agents tenders --text-file config/tender_sample.txt --ingest
+
+# lista / scoreboard
+python -m market_agents tenders --scoreboard
+python -m market_agents tenders --intent announced_tender
+```
+
+Intenty: `announced_tender` · `planned_tender` · `intends_to_buy` · `purchased` · `awarded`  
+Artefakt: `data/knowledge/tenders.json`  
+Tooli agentowe: `parse_tender`, `ingest_tender`, `list_tenders`, `tender_scoreboard`.
+
 ## MVP do testów (offline)
 
 Szybka ścieżka bez GPU / Notion / R2 / sieci — seed → profiles → prospect → CRM →
@@ -186,13 +215,43 @@ Eksport: `export-knowledge` / tool `export_knowledge_pack`.
 ## Uruchomienie na Dellu
 
 ```bash
-# terminal 1 — vLLM na 4x A100
+# terminal 1 — vLLM na 4x A100 (bind 0.0.0.0 pod VPN)
 bash scripts/run_vllm_a100.sh
 
-# terminal 2 — agenci
+# terminal 2 — agenci (na tym samym hoście)
 python -m market_agents doctor
 python -m market_agents run --agentic
 python -m market_agents schedule
+```
+
+### Dell przez Cybertech VPN
+
+Gdy laptop / VPS jest w VPN Cybertech, a vLLM działa na Dellu:
+
+```bash
+# 1) VPN Cybertech ON
+# 2) na Dellu: bash scripts/run_vllm_a100.sh
+# 3) na kliencie — IP Dell w sieci VPN (nie commituj):
+export VLLM_BASE_URL=http://10.x.x.x:8000
+bash scripts/check_dell_vllm.sh
+python -m market_agents doctor
+python -m market_agents run --agentic
+```
+
+Aliasy env: `MARKET_AGENTS_LLM_BASE_URL`, `VLLM_MODEL`, `MARKET_AGENTS_LLM_API_KEY`.
+Profil: `config/dell_vpn.example.yaml` / `init-config --profile dell-vpn`.
+Plik `.env` jest wczytywany automatycznie (bez nadpisywania zmiennych już ustawionych).
+
+**Fleet VPS ↔ Dell (rsync przez VPN):**
+
+```bash
+# .env: DELL_SSH=user@<dell-vpn-ip>
+bash scripts/fleet_rsync_vpn.sh status
+bash scripts/fleet_rsync_vpn.sh pull   # knowledge pack z Della
+python -m market_agents fleet-pull
+python -m market_agents worker --every-hours 6
+bash scripts/fleet_rsync_vpn.sh push   # inbox na Della
+# na Dellu: python -m market_agents fleet-absorb --republish
 ```
 
 Tooli: `list_known_firms`, `get_firm_presentation`, `discover_new_firms`, `check_firm_known`,

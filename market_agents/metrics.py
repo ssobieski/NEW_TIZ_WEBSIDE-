@@ -75,6 +75,7 @@ def knowledge_counts(data_dir: Path | str) -> dict[str, int]:
         "prospects": _role_count(profiles_path, ("prospect",)),
         "crm_tasks_open": _crm_open(knowledge / "crm_tasks.json"),
         "crm_with_notion": _crm_with_notion(knowledge / "crm_tasks.json"),
+        "tenders": _json_count(knowledge / "tenders.json", "signals"),
         "literature": _json_count(knowledge / "literature.json", "items"),
         "pricelists": _json_count(knowledge / "available_pricelists.json", "items"),
         "product_tech": _json_count(knowledge / "product_tech.json", "items"),
