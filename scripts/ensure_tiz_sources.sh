@@ -42,12 +42,17 @@ if [[ ! -f "$TARGET" ]]; then
 else
   read -r RSS WEB MEDIA SOCIAL LIT <<<"$(python_count 2>/dev/null || echo "0 0 0 0 0")"
   echo "==> Obecne źródła: rss=$RSS web=$WEB media=$MEDIA social=$SOCIAL literature=$LIT"
-  if [[ "${RSS:-0}" -lt 1 || "${MEDIA:-0}" -lt 1 ]]; then
+  EXAMPLE_RSS=$(python - <<'PY'
+from market_agents.config import load_config
+print(len(load_config("config/tiz_cutting_tools.example.yaml").sources.rss))
+PY
+)
+  if [[ "${RSS:-0}" -lt 1 || "${MEDIA:-0}" -lt 1 || "${SOCIAL:-0}" -lt 1 || "${RSS:-0}" -lt "${EXAMPLE_RSS:-9}" ]]; then
     cp "$EXAMPLE" "$TARGET"
     apply_local_vllm
-    echo "==> Skopiowano pełne źródła TIZ (rss lub media było 0)"
+    echo "==> Skopiowano pełne źródła TIZ (rss/media/social niepełne)"
   else
-    echo "==> OK — nie nadpisuję (RSS>0 i media>0)"
+    echo "==> OK — nie nadpisuję (RSS/media/social kompletne)"
   fi
 fi
 

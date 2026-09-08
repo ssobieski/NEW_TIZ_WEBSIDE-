@@ -113,8 +113,15 @@ industry:
   - YesTool
   - YG-1
   - MSC Industrial Supply
+  - MSC
   - Mitsubishi Heavy Industries
+  - MHI
   - Nidec Machine Tool
+  - Nidec
+  - Haas
+  - Mazak
+  - Gleason
+  - TaeguTec
   focus_questions:
   - Jakie NOWE firmy / marki narzędzi skrawających pojawiają się poza listą known_firms?
   - Która firma jest dystrybutorem / dealerem innej (siatka powiązań distributor_of / dealer_of)?

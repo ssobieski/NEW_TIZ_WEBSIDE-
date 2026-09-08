@@ -66,8 +66,12 @@ def test_tooling_relevant_gate():
     assert not is_plausible_firm_name("Hypepotamus")
     assert not is_plausible_firm_name("PHOTOS")
     assert not is_plausible_firm_name("FMT")
+    assert not is_plausible_firm_name("Leverages")
+    assert not is_plausible_firm_name("How")
+    assert not is_plausible_firm_name("Enterprise Manufacturers")
     assert is_plausible_firm_name("DIAEDGE")
     assert is_plausible_firm_name("BladeForge Inc")
+    assert is_plausible_firm_name("Manar Tools")
 
 
 def test_extract_real_tiz_headlines():
@@ -81,6 +85,37 @@ def test_extract_real_tiz_headlines():
     assert any("Walter" in n for n in names2)
     grass = "PHOTOS: Mississauga introduces brand new grass cutting tools"
     assert not is_tooling_relevant(grass)
+    bad = extract_candidate_firm_names(
+        "Startup Leverages Machine Tool Builder Expertise - Modern Machine Shop"
+    )
+    assert "Leverages" not in bad
+    how = extract_candidate_firm_names(
+        "How elastic bonded diamond tools optimise precision machining - PES Media"
+    )
+    assert "How" not in how
+    ent = extract_candidate_firm_names(
+        "Enterprise Manufacturers Cut CNC Programming Time by Up to 50% with Limitless CAM Agent"
+    )
+    assert "Enterprise Manufacturers" not in ent
+    assert "Increasing Production Capacity" not in extract_candidate_firm_names(
+        "Nidec Machine Tool to Launch New Cutting Tool Factory in India to Meet "
+        "Growing Demand for Automotive and Related Components by Increasing Production Capacity by 1.5 Times"
+    )
+    assert "Four" not in extract_candidate_firm_names(
+        "Four of the Nidec Group's Machine Tool Companies to Exhibit Products at IMTS 2024"
+    )
+    assert "UNLOCKED" not in extract_candidate_firm_names(
+        "PRECISION UNLOCKED | TaeguTec India Launch Cutting Tool Knowledge Series"
+    )
+    assert any(
+        "TaeguTec" in n
+        for n in extract_candidate_firm_names(
+            "PRECISION UNLOCKED | TaeguTec India Launch Cutting Tool Knowledge Series"
+        )
+    )
+    assert not is_plausible_firm_name("DLC")
+    assert not is_plausible_firm_name("Baucor Expands")
+    assert is_plausible_firm_name("Baucor")
 
 
 def test_filter_new_firms_excludes_known():
