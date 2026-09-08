@@ -8,6 +8,8 @@ from market_agents.firms import (
     KnownFirmsIndex,
     extract_candidate_firm_names,
     filter_new_firms,
+    is_plausible_firm_name,
+    is_tooling_relevant,
     normalize_firm_name,
 )
 from market_agents.memory import MarketMemory
@@ -30,6 +32,32 @@ def test_extract_candidate_firm_names():
     assert any("NovaCut" in n for n in names)
 
 
+def test_extract_rejects_headline_verbs_and_off_domain():
+    assert "Secures" not in extract_candidate_firm_names(
+        "Diamond-Tech Startup AKHAN Secures $20M"
+    )
+    assert "Promote" not in extract_candidate_firm_names(
+        "Haas F1 Team to Promote HaasTooling.com European Debut"
+    )
+    assert not is_tooling_relevant(
+        "Groupe Chaumont launches with acquisition of two Swiss watchmaking startups"
+    )
+    assert not is_tooling_relevant("Bret Taylor Predicts A.I. Agents Will Redefine")
+    assert not is_plausible_firm_name("Secures")
+    assert not is_plausible_firm_name("Kanematsu Invests")
+    assert is_plausible_firm_name("BladeForge Inc")
+
+
+def test_tooling_relevant_gate():
+    assert is_tooling_relevant("MSC introduces new brand of cutting tools")
+    assert is_tooling_relevant("OrbitalEdge GmbH solid carbide mills catalog")
+    assert not is_tooling_relevant("Luxury watch platform Groupe Chaumont")
+    assert not is_tooling_relevant("Haas F1 Team European Debut")
+    assert not is_plausible_firm_name("Secures")
+    assert not is_plausible_firm_name("Kanematsu Invests")
+    assert is_plausible_firm_name("BladeForge Inc")
+
+
 def test_filter_new_firms_excludes_known():
     idx = KnownFirmsIndex([{"company": "Sandvik Coromant"}])
     rows = filter_new_firms(
@@ -41,6 +69,18 @@ def test_filter_new_firms_excludes_known():
     companies = [r["company"] for r in rows]
     assert "BladeForge Inc" in companies
     assert "Sandvik Coromant" not in companies
+
+
+def test_filter_require_domain_drops_off_topic():
+    idx = KnownFirmsIndex([])
+    rows = filter_new_firms(
+        ["Groupe Chaumont"],
+        idx,
+        evidence="Groupe Chaumont launches Swiss watchmaking startups",
+        url="https://example.com/x",
+        require_domain=True,
+    )
+    assert rows == []
 
 
 def test_tiz_config_has_firm_discovery():

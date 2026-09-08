@@ -13,8 +13,21 @@ _STOP_TOKENS = {
     "for",
     "with",
     "from",
+    "into",
+    "over",
+    "that",
+    "can",
+    "will",
+    "its",
     "new",
     "news",
+    "first",
+    "time",
+    "year",
+    "old",
+    "next",
+    "generation",
+    "high",
     "launches",
     "launch",
     "unveils",
@@ -24,6 +37,57 @@ _STOP_TOKENS = {
     "presents",
     "expands",
     "opens",
+    "acquires",
+    "partners",
+    "exhibits",
+    "showcases",
+    "secures",
+    "invests",
+    "promote",
+    "promotes",
+    "predicts",
+    "redefine",
+    "revealed",
+    "finalists",
+    "booster",
+    "connecting",
+    "world",
+    "take",
+    "part",
+    "adds",
+    "makes",
+    "debut",
+    "european",
+    "swiss",
+    "luxury",
+    "watch",
+    "watchmaking",
+    "startups",
+    "startup",
+    "spin",
+    "off",
+    "tech",
+    "diamond",
+    "built",
+    "chicago",
+    "media",
+    "pes",
+    "ceo",
+    "agents",
+    "business",
+    "ideas",
+    "profitable",
+    "youth",
+    "owner",
+    "lessons",
+    "hard",
+    "contributing",
+    "solving",
+    "challenges",
+    "through",
+    "infrastructure",
+    "outer",
+    "space",
     "cutting",
     "tool",
     "tools",
@@ -40,9 +104,11 @@ _STOP_TOKENS = {
     "pdf",
     "handbook",
     "industry",
+    "industries",
     "market",
     "global",
     "group",
+    "groupe",
     "company",
     "inc",
     "ltd",
@@ -65,11 +131,57 @@ _STOP_TOKENS = {
     "exhibition",
     "fair",
     "show",
+    "team",
+    "foundation",
+    "alloy",
+    "composites",
     "amb",
     "emo",
     "imts",
     "jimtof",
+    "imtex",
+    "fabtech",
+    "jec",
 }
+
+# Off-domain cues — newsy spoza tooling / machining
+_OFF_DOMAIN_CUES = (
+    "watchmaking",
+    "luxury watch",
+    "f1 team",
+    "formula 1",
+    "outer space",
+    "tanzanian",
+    "a.i. agents",
+    "ai agents",
+    "predicts a.i",
+    "composites startup booster",
+    "hand tools maker",
+    "welding debut",
+)
+
+# Sygnały, że artykuł dotyczy branży skrawającej / machine tools
+_DOMAIN_CUES = (
+    "cutting tool",
+    "cutting tools",
+    "carbide",
+    "tooling",
+    "end mill",
+    "insert",
+    "machining",
+    "machine tool",
+    "cnc",
+    "tokarka",
+    "frez",
+    "wiert",
+    "skrawaj",
+    "narzędzia skrawające",
+    "solid carbide",
+    "drill",
+    "mill-turn",
+    "werkzeug",
+    "zerspan",
+)
 
 
 def normalize_firm_name(name: str) -> str:
@@ -187,6 +299,61 @@ class KnownFirmsIndex:
         )
 
 
+def is_tooling_relevant(text: str) -> bool:
+    """True jeśli tekst wygląda na branżę tooling / machining."""
+    t = (text or "").lower()
+    if any(cue in t for cue in _OFF_DOMAIN_CUES):
+        return False
+    return any(cue in t for cue in _DOMAIN_CUES)
+
+
+def is_plausible_firm_name(name: str) -> bool:
+    """Odrzuć czasowniki / title-case śmieci z headlines."""
+    name = re.sub(r"\s+", " ", (name or "").strip(" ,.;:-/"))
+    if len(name) < 2 or len(name) > 60:
+        return False
+    if re.search(r"\d{4}", name):  # lata w „nazwie”
+        return False
+    tokens = [t for t in re.split(r"[\s/-]+", name) if t]
+    if not tokens or len(tokens) > 4:
+        return False
+    lower = [t.lower().strip(".,") for t in tokens]
+    legal = {"gmbh", "ag", "ltd", "llc", "inc", "corp", "sa", "spa", "co"}
+    # same stopwords / same legal-only
+    meaningful = [t for t in lower if t not in _STOP_TOKENS and t not in legal]
+    if not meaningful:
+        return False
+    # pierwszy token nie może być czasownikiem / fillerem
+    if lower[0] in _STOP_TOKENS:
+        return False
+    # „Kanematsu Invests”, „Bret Taylor Predicts …”
+    verbish = {
+        "invests",
+        "secures",
+        "predicts",
+        "promotes",
+        "promote",
+        "introduces",
+        "launches",
+        "unveils",
+        "announces",
+        "adds",
+        "makes",
+        "takes",
+        "take",
+        "will",
+        "can",
+        "revealed",
+    }
+    if any(t in verbish for t in lower[1:]):
+        return False
+    if len(tokens) == 1:
+        tok = lower[0]
+        if len(tok) < 3:
+            return False
+    return True
+
+
 def extract_candidate_firm_names(text: str, max_names: int = 12) -> list[str]:
     """
     Heurystyczne wyciąganie nazw firm z tytułu / leadu newsa.
@@ -199,24 +366,24 @@ def extract_candidate_firm_names(text: str, max_names: int = 12) -> list[str]:
 
     candidates: list[str] = []
 
-    # 1) Wzorce: "X launches/unveils/introduces..."
+    # 1) Preferowane: X + legal form, X + launches/…, from/by X
     patterns = [
+        r"\b([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,2})\s+"
+        r"(?:GmbH|AG|Ltd|LLC|Inc|S\.A\.|S\.p\.A\.|Corp)\b",
         r"\b([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,3})\s+"
         r"(?:launches|unveils|introduces|announces|releases|presents|expands|"
         r"opens|acquires|partners|exhibits|showcases)\b",
-        r"\b(?:from|by|at)\s+([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,3})\b",
-        r"\b([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,2})\s+"
-        r"(?:GmbH|AG|Ltd|LLC|Inc|S\.A\.|S\.p\.A\.|Corp)\b",
-        # ALLCAPS brand tokens 2–20 chars
-        r"\b([A-Z]{2,20}(?:-[A-Z0-9]{1,10})?)\b",
+        r"\b(?:from|by)\s+([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,3})\b",
+        # ALLCAPS brand tokens 3–20 (MSC, AKHAN) — nie 2-literowe
+        r"\b([A-Z]{3,20}(?:-[A-Z0-9]{1,10})?)\b",
     ]
     for pat in patterns:
         for m in re.finditer(pat, cleaned):
             candidates.append(m.group(1).strip(" ,.;:-"))
 
-    # 2) Ciągi Title Case (2–4 słowa)
+    # 2) Title Case 2–3 słowa (nie pojedyncze pospolite)
     for m in re.finditer(
-        r"\b([A-Z][a-z0-9&./-]{1,}(?:\s+[A-Z][a-z0-9&./-]{1,}){0,3})\b", cleaned
+        r"\b([A-Z][a-z0-9&./-]{2,}(?:\s+[A-Z][a-z0-9&./-]{2,}){1,2})\b", cleaned
     ):
         candidates.append(m.group(1).strip())
 
@@ -224,19 +391,7 @@ def extract_candidate_firm_names(text: str, max_names: int = 12) -> list[str]:
     seen: set[str] = set()
     for raw in candidates:
         name = re.sub(r"\s+", " ", raw).strip(" ,.;:-/")
-        if len(name) < 2 or len(name) > 60:
-            continue
-        tokens = [t.lower() for t in re.split(r"[\s/-]+", name) if t]
-        if not tokens:
-            continue
-        if all(t in _STOP_TOKENS for t in tokens):
-            continue
-        # odrzuć jeśli większość to stopwords
-        if sum(1 for t in tokens if t in _STOP_TOKENS) >= max(1, len(tokens) - 0):
-            if len(tokens) == 1 and tokens[0] in _STOP_TOKENS:
-                continue
-        # odrzuć czysto pospolite frazy
-        if name.lower() in _STOP_TOKENS:
+        if not is_plausible_firm_name(name):
             continue
         key = normalize_firm_name(name)
         if not key or key in seen:
@@ -254,11 +409,16 @@ def filter_new_firms(
     *,
     evidence: str = "",
     url: str = "",
+    require_domain: bool = False,
 ) -> list[dict[str, Any]]:
-    """Zwraca tylko firmy spoza indeksu znanego."""
+    """Zwraca tylko firmy spoza indeksu znanego (opcjonalnie: tylko tooling)."""
+    if require_domain and evidence and not is_tooling_relevant(evidence):
+        return []
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     for name in names:
+        if not is_plausible_firm_name(name):
+            continue
         if index.is_known(name):
             continue
         key = normalize_firm_name(name)
