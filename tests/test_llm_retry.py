@@ -10,7 +10,10 @@ from market_agents.agents.parsing_agent import (
     _briefing_quality_issues,
     _compact_tool_context,
 )
-from market_agents.agents.orchestrator import _is_notion_abort_briefing
+from market_agents.agents.orchestrator import (
+    _is_notion_abort_briefing,
+    _sources_section,
+)
 from market_agents.llm import _raise_for_status_with_body, is_retryable_llm_error
 
 
@@ -123,10 +126,28 @@ Przejrzeć zebrane źródła i przygotować analizę porównawczą.
     assert "wszystkie sekcje decyzyjne są puste" in _briefing_quality_issues(text)
 
 
-def test_required_agent_tools_cover_discovery_and_candidate_evidence():
+def test_required_agent_tools_cover_core_discovery_evidence():
     assert {
         "get_domain_context",
         "list_known_firms",
-        "list_candidates",
         "discover_new_firms",
     } <= REQUIRED_AGENT_TOOLS
+
+
+def test_sources_section_drops_duplicate_generic_briefing():
+    generic = """# Monitoring rynku
+
+## Executive summary
+Generic summary.
+
+## Zagrożenia
+- Brak
+
+## Źródła
+- [Example](https://example.com) (rss)
+"""
+    result = _sources_section(generic)
+    assert "Executive summary" not in result
+    assert "## Zagrożenia" not in result
+    assert "## Źródła" in result
+    assert "[Example](https://example.com)" in result

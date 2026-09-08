@@ -18,7 +18,6 @@ RECENT_TOOL_RESULTS_TO_KEEP = 4
 REQUIRED_AGENT_TOOLS = {
     "get_domain_context",
     "list_known_firms",
-    "list_candidates",
     "discover_new_firms",
 }
 

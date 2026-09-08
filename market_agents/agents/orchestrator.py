@@ -104,11 +104,20 @@ class Orchestrator:
                         if llm_broke
                         else "agentic"
                     )
-                    report.summary_markdown = (
-                        f"# Monitoring rynku ({title}): {self.config.industry.name}\n\n"
-                        f"{final}\n\n---\n\n"
-                        + report.summary_markdown
-                    )
+                    if llm_broke:
+                        report.summary_markdown = (
+                            f"# Monitoring rynku ({title}): {self.config.industry.name}\n\n"
+                            f"{final}\n\n---\n\n"
+                            + report.summary_markdown
+                        )
+                    else:
+                        sources = _sources_section(report.summary_markdown)
+                        report.summary_markdown = (
+                            f"# Monitoring rynku ({title}): {self.config.industry.name}\n\n"
+                            f"_Wygenerowano: {report.generated_at}_\n\n"
+                            f"{final}"
+                            f"{sources}"
+                        )
                 mode = "agentic_fallback" if llm_broke else "agentic"
                 trace_path = agentic_result.trace_path
         else:
@@ -296,3 +305,11 @@ def _is_notion_abort_briefing(text: str) -> bool:
     if len(text) > 2500:
         return False
     return bool(re.search(r"bł[aą]d|error|ustaw notion", t))
+
+
+def _sources_section(markdown: str) -> str:
+    """Keep provenance without appending a contradictory second briefing."""
+    marker = "\n## Źródła\n"
+    if marker not in markdown:
+        return ""
+    return "\n\n---\n\n## Źródła\n" + markdown.split(marker, 1)[1].strip()
