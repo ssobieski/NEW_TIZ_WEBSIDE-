@@ -81,6 +81,14 @@ def doctor(config: Optional[Path] = typer.Option(None, "--config", "-c")) -> Non
     table.add_row("Agentic", str(cfg.agents.agentic.enabled))
     table.add_row("Max steps", str(cfg.agents.agentic.max_steps))
     table.add_row("Źródła RSS", str(len(cfg.sources.rss)))
+    table.add_row("Źródła media (targi/czasopisma)", str(len(cfg.sources.media)))
+    table.add_row("Źródła social", str(len(cfg.sources.social)))
+    table.add_row("Źródła literature", str(len(cfg.sources.literature)))
+    if len(cfg.sources.rss) < 1 or len(cfg.sources.media) < 1:
+        table.add_row(
+            "UWAGA źródła",
+            "[red]rss/media puste — uruchom: bash scripts/ensure_tiz_sources.sh[/red]",
+        )
     table.add_row("Notion", str(cfg.sources.notion.enabled))
     table.add_row("Cloudflare R2", str(cfg.sources.cloudflare_r2.enabled))
     table.add_row("LLM provider", cfg.llm.provider)

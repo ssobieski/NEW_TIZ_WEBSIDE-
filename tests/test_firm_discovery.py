@@ -51,11 +51,36 @@ def test_extract_rejects_headline_verbs_and_off_domain():
 def test_tooling_relevant_gate():
     assert is_tooling_relevant("MSC introduces new brand of cutting tools")
     assert is_tooling_relevant("OrbitalEdge GmbH solid carbide mills catalog")
+    assert is_tooling_relevant("DIAEDGE, A New Brand of Cemented Carbide Products")
     assert not is_tooling_relevant("Luxury watch platform Groupe Chaumont")
     assert not is_tooling_relevant("Haas F1 Team European Debut")
+    assert not is_tooling_relevant(
+        "PHOTOS: Mississauga introduces brand new grass cutting tools"
+    )
+    assert not is_tooling_relevant("Berry Introduces Global Tooling Services")
+    assert not is_tooling_relevant("Tooling manufacturer celebrates 50 years")
     assert not is_plausible_firm_name("Secures")
     assert not is_plausible_firm_name("Kanematsu Invests")
+    assert not is_plausible_firm_name("Dry-cut Hobbing Machine")
+    assert not is_plausible_firm_name("Key Acquisitions")
+    assert not is_plausible_firm_name("Hypepotamus")
+    assert not is_plausible_firm_name("PHOTOS")
+    assert not is_plausible_firm_name("FMT")
+    assert is_plausible_firm_name("DIAEDGE")
     assert is_plausible_firm_name("BladeForge Inc")
+
+
+def test_extract_real_tiz_headlines():
+    names = extract_candidate_firm_names(
+        "DIAEDGE, A New Brand of Cemented Carbide Products"
+    )
+    assert any(n.upper() == "DIAEDGE" for n in names)
+    names2 = extract_candidate_firm_names(
+        "Walter FMT: a new brand for lightweight machining"
+    )
+    assert any("Walter" in n for n in names2)
+    grass = "PHOTOS: Mississauga introduces brand new grass cutting tools"
+    assert not is_tooling_relevant(grass)
 
 
 def test_filter_new_firms_excludes_known():

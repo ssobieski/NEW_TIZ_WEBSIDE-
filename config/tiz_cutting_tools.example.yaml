@@ -112,6 +112,9 @@ industry:
   - Walter
   - YesTool
   - YG-1
+  - MSC Industrial Supply
+  - Mitsubishi Heavy Industries
+  - Nidec Machine Tool
   focus_questions:
   - Jakie NOWE firmy / marki narzędzi skrawających pojawiają się poza listą known_firms?
   - Która firma jest dystrybutorem / dealerem innej (siatka powiązań distributor_of / dealer_of)?
@@ -615,11 +618,13 @@ sources:
     region: US
     max_items: 20
     search_queries:
-    - '"cutting tools" (startup OR "new manufacturer" OR "new brand" OR debut OR "spin-off")'
+    # Unikaj luźnego „tooling” (grass / plastics). Preferuj cutting tools / carbide / machining.
+    - '"cutting tools" (startup OR "new manufacturer" OR "new brand" OR debut OR "spin-off") -grass -lawn -plastics -watch'
     - '"carbide tools" ("enters the market" OR "new company" OR exhibitor OR "first catalog")'
-    - '"tooling manufacturer" (launch OR unveils OR introduces) (catalog OR ecatalog)'
+    - '"cutting tools" manufacturer (launch OR unveils OR introduces) (catalog OR ecatalog OR brand)'
     - '"narzędzia skrawające" (nowy producent OR debiut OR "nowa marka")'
     - '"solid carbide" ("new brand" OR startup OR "new player")'
+    - '"machine tools" ("new brand" OR debut OR "Nidec" OR hobbing OR "gear shaping")'
     feed_urls: []
     known_match_threshold: 0.88
 llm:
@@ -638,7 +643,7 @@ agents:
   lookback_hours: 168
   report_dir: reports
   data_dir: data
-  min_relevance_score: 0.25
+  min_relevance_score: 0.45
   # Post-run knowledge loops (central only — workers skip in code + yaml)
   post_enrich_profiles: true
   post_enrich_crm_tasks: true

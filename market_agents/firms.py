@@ -142,9 +142,70 @@ _STOP_TOKENS = {
     "imtex",
     "fabtech",
     "jec",
+    "photos",
+    "key",
+    "acquisitions",
+    "acquisition",
+    "enabling",
+    "high-speed",
+    "high",
+    "speed",
+    "precision",
+    "small",
+    "automotive",
+    "gears",
+    "gear",
+    "hobbing",
+    "shaping",
+    "helical",
+    "dry-cut",
+    "dry",
+    "cut",
+    "machine",
+    "machines",
+    "brand",
+    "products",
+    "product",
+    "cemented",
+    "lightweight",
+    "scales",
+    "support",
+    "mississauga",
+    "chicago",
+    "hypepotamus",
+    "mynewsdesk",
+    "engineering",
+    "insauga",
+    "develops",
+    "developed",
+    "offering",
+    "debut",
+    "international",
+    "expo",
+    "axis",
+    "system",
+    "fully",
+    "programmable",
+    "nc",
+    "modern",
+    "shop",
+    "berry",
 }
 
-# Off-domain cues — newsy spoza tooling / machining
+# Wydawcy / portale — nie są firmami tooling
+_PUBLISHER_NAMES = {
+    "hypepotamus",
+    "mynewsdesk",
+    "pes media",
+    "pes",
+    "engineering news",
+    "plastics technology",
+    "modern machine shop",
+    "insauga",
+    "canadian metalworking",
+}
+
+# Off-domain cues — newsy spoza tooling / machining metalowego
 _OFF_DOMAIN_CUES = (
     "watchmaking",
     "luxury watch",
@@ -158,30 +219,61 @@ _OFF_DOMAIN_CUES = (
     "composites startup booster",
     "hand tools maker",
     "welding debut",
+    "grass cutting",
+    "lawn",
+    "lawnmower",
+    "plastics technology",
+    "plastic injection",
+    "global tooling services",
+    "berry introduces",
+    "photos:",
+    "celebrates 50 years",
 )
 
-# Sygnały, że artykuł dotyczy branży skrawającej / machine tools
+# Silne sygnały branży skrawającej (metal) — nie „grass cutting tools”
 _DOMAIN_CUES = (
-    "cutting tool",
     "cutting tools",
-    "carbide",
-    "tooling",
+    "cemented carbide",
+    "solid carbide",
+    "carbide products",
+    "carbide tools",
     "end mill",
-    "insert",
+    "indexable",
     "machining",
     "machine tool",
+    "machine tools",
     "cnc",
+    "hobbing",
+    "gear shaping",
     "tokarka",
-    "frez",
+    "frezowan",
     "wiert",
     "skrawaj",
     "narzędzia skrawające",
-    "solid carbide",
-    "drill",
+    "lightweight machining",
     "mill-turn",
     "werkzeug",
     "zerspan",
+    "imts",
+    "imtex",
+    "emo ",
 )
+
+
+def is_tooling_relevant(text: str) -> bool:
+    """True jeśli tekst wygląda na branżę tooling / machining (metal)."""
+    t = (text or "").lower()
+    if any(cue in t for cue in _OFF_DOMAIN_CUES):
+        return False
+    if "grass" in t or "lawn" in t:
+        return False
+    # unikaj czystego „tooling” w plastics / generic services bez machining cue
+    if any(cue in t for cue in _DOMAIN_CUES):
+        return True
+    # słabsze: „cutting tool” tylko bez grass
+    if "cutting tool" in t or "carbide" in t:
+        return True
+    return False
 
 
 def normalize_firm_name(name: str) -> str:
@@ -299,34 +391,37 @@ class KnownFirmsIndex:
         )
 
 
-def is_tooling_relevant(text: str) -> bool:
-    """True jeśli tekst wygląda na branżę tooling / machining."""
-    t = (text or "").lower()
-    if any(cue in t for cue in _OFF_DOMAIN_CUES):
-        return False
-    return any(cue in t for cue in _DOMAIN_CUES)
-
-
 def is_plausible_firm_name(name: str) -> bool:
-    """Odrzuć czasowniki / title-case śmieci z headlines."""
+    """Odrzuć czasowniki / title-case śmieci / opisy produktów z headlines."""
     name = re.sub(r"\s+", " ", (name or "").strip(" ,.;:-/"))
-    if len(name) < 2 or len(name) > 60:
+    if len(name) < 2 or len(name) > 48:
         return False
-    if re.search(r"\d{4}", name):  # lata w „nazwie”
+    if re.search(r"\d{4}", name):
         return False
+    if normalize_firm_name(name) in _PUBLISHER_NAMES:
+        return False
+    # opisy produktów / procesów, nie brand
+    if re.search(
+        r"\b(Machine|Machining|Hobbing|Shaping|Enabling|Acquisitions?|Products?|"
+        r"Services?|Photos?|System|Gears?|Carbide)\b",
+        name,
+    ) and not re.search(r"\b(GmbH|AG|Ltd|LLC|Inc|Corp)\b", name):
+        if len(name.split()) >= 2:
+            return False
     tokens = [t for t in re.split(r"[\s/-]+", name) if t]
-    if not tokens or len(tokens) > 4:
+    if not tokens or len(tokens) > 3:
         return False
     lower = [t.lower().strip(".,") for t in tokens]
     legal = {"gmbh", "ag", "ltd", "llc", "inc", "corp", "sa", "spa", "co"}
-    # same stopwords / same legal-only
     meaningful = [t for t in lower if t not in _STOP_TOKENS and t not in legal]
     if not meaningful:
         return False
-    # pierwszy token nie może być czasownikiem / fillerem
     if lower[0] in _STOP_TOKENS:
         return False
-    # „Kanematsu Invests”, „Bret Taylor Predicts …”
+    # ALLCAPS śmieci mediów / akronimy procesów (nie brand)
+    junk_acronyms = {"photos", "fmt", "pes", "cnc", "cam", "imts", "imtex", "emo"}
+    if len(tokens) == 1 and lower[0] in junk_acronyms:
+        return False
     verbish = {
         "invests",
         "secures",
@@ -344,6 +439,8 @@ def is_plausible_firm_name(name: str) -> bool:
         "will",
         "can",
         "revealed",
+        "develops",
+        "scales",
     }
     if any(t in verbish for t in lower[1:]):
         return False
@@ -351,39 +448,48 @@ def is_plausible_firm_name(name: str) -> bool:
         tok = lower[0]
         if len(tok) < 3:
             return False
+        if tok in {"photos", "news", "media", "key"}:
+            return False
     return True
 
 
 def extract_candidate_firm_names(text: str, max_names: int = 12) -> list[str]:
     """
     Heurystyczne wyciąganie nazw firm z tytułu / leadu newsa.
-    Nie jest NER-em LLM — szybki filtr przed agentem.
+    Preferuj wzorce „Brand launches/introduces” i ALLCAPS brand; mniej Title Case.
     """
     if not text:
         return []
     cleaned = re.sub(r"<[^>]+>", " ", text)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    # odetnij publisher „    PES Media” / trailing source
+    cleaned = re.split(r"\s{2,}|  +", cleaned)[0].strip()
 
     candidates: list[str] = []
 
-    # 1) Preferowane: X + legal form, X + launches/…, from/by X
     patterns = [
         r"\b([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,2})\s+"
         r"(?:GmbH|AG|Ltd|LLC|Inc|S\.A\.|S\.p\.A\.|Corp)\b",
-        r"\b([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,3})\s+"
+        # Brand before verb
+        r"\b([A-Z][A-Za-z0-9&./-]{1,}(?:\s+[A-Z][A-Za-z0-9&./-]{1,}){0,2})\s+"
         r"(?:launches|unveils|introduces|announces|releases|presents|expands|"
-        r"opens|acquires|partners|exhibits|showcases)\b",
-        r"\b(?:from|by)\s+([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,3})\b",
-        # ALLCAPS brand tokens 3–20 (MSC, AKHAN) — nie 2-literowe
+        r"opens|acquires|partners|exhibits|showcases|develops)\b",
+        # „Startup Toolpath …”
+        r"\b(?:Startup|start-up)\s+([A-Z][A-Za-z0-9&./-]{2,})\b",
+        # „Brand: a new brand”
+        r"\b([A-Z][A-Za-z0-9&./-]{1,}(?:\s+[A-Z]{2,20})?)\s*:\s*a new brand\b",
+        # ALLCAPS brand 3–20 (DIAEDGE, MSC) — nie PHOTOS
         r"\b([A-Z]{3,20}(?:-[A-Z0-9]{1,10})?)\b",
+        r"\b(?:from|by)\s+([A-Z][\w&./-]*(?:\s+[A-Z][\w&./-]*){0,2})\b",
     ]
     for pat in patterns:
-        for m in re.finditer(pat, cleaned):
+        for m in re.finditer(pat, cleaned, flags=re.IGNORECASE if "new brand" in pat else 0):
             candidates.append(m.group(1).strip(" ,.;:-"))
 
-    # 2) Title Case 2–3 słowa (nie pojedyncze pospolite)
+    # Title Case tylko 2 słowa na początku tytułu (przed dwukropkiem / em dash)
+    head = re.split(r"[:—–|-]", cleaned, maxsplit=1)[0]
     for m in re.finditer(
-        r"\b([A-Z][a-z0-9&./-]{2,}(?:\s+[A-Z][a-z0-9&./-]{2,}){1,2})\b", cleaned
+        r"^\s*([A-Z][a-z0-9&./-]{2,}(?:\s+[A-Z][a-z0-9&./-]{2,}){0,1})\b", head
     ):
         candidates.append(m.group(1).strip())
 
@@ -435,4 +541,14 @@ def filter_new_firms(
                 "normalized": key,
             }
         )
-    return rows
+    # Prefer longer brands; drop substrings (FMT ⊂ Walter FMT)
+    rows.sort(key=lambda r: len(str(r.get("company") or "")), reverse=True)
+    pruned: list[dict[str, Any]] = []
+    kept_norms: list[str] = []
+    for row in rows:
+        n = str(row.get("normalized") or "")
+        if any(n != k and n in k for k in kept_norms):
+            continue
+        pruned.append(row)
+        kept_norms.append(n)
+    return pruned
