@@ -4,9 +4,33 @@ import json
 from typing import Any
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from market_agents.config import LlmConfig
+
+
+def is_retryable_llm_error(exc: BaseException) -> bool:
+    """Retry timeouts and 5xx/429 — never retry 4xx schema/payload errors."""
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code if exc.response is not None else 0
+        return code >= 500 or code == 429
+    return False
+
+
+def _raise_for_status_with_body(response: httpx.Response) -> None:
+    if response.is_success:
+        return
+    body = (response.text or "").strip().replace("\n", " ")[:800]
+    detail = f"{response.status_code} {response.request.url}"
+    if body:
+        detail = f"{detail}: {body}"
+    raise httpx.HTTPStatusError(
+        detail,
+        request=response.request,
+        response=response,
+    )
 
 
 class LocalLLM:
@@ -36,7 +60,12 @@ class LocalLLM:
         result = self.chat_messages(messages)
         return str(result.get("content") or "").strip()
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=retry_if_exception(is_retryable_llm_error),
+        reraise=True,
+    )
     def chat_messages(
         self,
         messages: list[dict[str, Any]],
@@ -64,7 +93,7 @@ class LocalLLM:
 
         with httpx.Client(timeout=self.config.timeout_seconds) as client:
             response = client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
+            _raise_for_status_with_body(response)
             data = response.json()
         return data["choices"][0]["message"]
 
@@ -82,7 +111,7 @@ class LocalLLM:
         }
         with httpx.Client(timeout=self.config.timeout_seconds) as client:
             response = client.post(url, json=payload)
-            response.raise_for_status()
+            _raise_for_status_with_body(response)
             data = response.json()
         return str(data.get("message", {}).get("content", "")).strip()
 

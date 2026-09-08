@@ -11,6 +11,22 @@ from market_agents.memory import MarketMemory
 from market_agents.models import MarketItem, utc_now
 from market_agents.tools import ToolRegistry
 
+TOOL_RESULT_CONTEXT_CHARS = 4000
+OLD_TOOL_RESULT_CONTEXT_CHARS = 1000
+RECENT_TOOL_RESULTS_TO_KEEP = 4
+
+
+def _compact_tool_context(messages: list[dict[str, Any]]) -> None:
+    """Bound old tool outputs while preserving tool-call message ordering."""
+    tool_indexes = [i for i, message in enumerate(messages) if message.get("role") == "tool"]
+    for index in tool_indexes[:-RECENT_TOOL_RESULTS_TO_KEEP]:
+        content = str(messages[index].get("content") or "")
+        if len(content) > OLD_TOOL_RESULT_CONTEXT_CHARS:
+            messages[index]["content"] = (
+                content[:OLD_TOOL_RESULT_CONTEXT_CHARS]
+                + '… [starszy wynik narzędzia skrócony]'
+            )
+
 
 @dataclass
 class AgentTraceStep:
@@ -201,13 +217,47 @@ class ParsingAgent:
         max_steps = self.config.agents.agentic.max_steps
 
         for step_idx in range(1, max_steps + 1):
+            _compact_tool_context(messages)
             tool_choice: str | dict[str, Any] | None = "auto"
             if self.config.agents.agentic.require_tool_use and step_idx == 1:
                 tool_choice = "required"
 
-            message = self.llm.chat_messages(
-                messages, tools=schema, tool_choice=tool_choice
-            )
+            try:
+                message = self.llm.chat_messages(
+                    messages, tools=schema, tool_choice=tool_choice
+                )
+            except Exception as exc:  # noqa: BLE001
+                if tool_choice == "required":
+                    try:
+                        message = self.llm.chat_messages(
+                            messages, tools=schema, tool_choice="auto"
+                        )
+                    except Exception as exc2:  # noqa: BLE001
+                        final_text = (
+                            "Agentic LLM niedostępny "
+                            f"({type(exc2).__name__}: {exc2}). "
+                            "Raport pipeline poniżej."
+                        )
+                        steps.append(
+                            AgentTraceStep(
+                                step=step_idx,
+                                assistant={"role": "assistant", "content": final_text},
+                            )
+                        )
+                        break
+                else:
+                    final_text = (
+                        "Agentic LLM niedostępny "
+                        f"({type(exc).__name__}: {exc}). "
+                        "Raport pipeline poniżej."
+                    )
+                    steps.append(
+                        AgentTraceStep(
+                            step=step_idx,
+                            assistant={"role": "assistant", "content": final_text},
+                        )
+                    )
+                    break
             messages.append(message)
             tool_calls = message.get("tool_calls") or []
             step = AgentTraceStep(step=step_idx, assistant=message, tool_results=[])
@@ -227,7 +277,9 @@ class ParsingAgent:
                     {
                         "role": "tool",
                         "tool_call_id": call.get("id") or f"call_{step_idx}_{name}",
-                        "content": json.dumps(result, ensure_ascii=False)[:12000],
+                        "content": json.dumps(result, ensure_ascii=False)[
+                            :TOOL_RESULT_CONTEXT_CHARS
+                        ],
                     }
                 )
             steps.append(step)
@@ -250,9 +302,21 @@ class ParsingAgent:
                     "content": "Zakończ. Napisz finalny briefing rynkowy po polsku, bez tool calli.",
                 }
             )
-            closing = self.llm.chat_messages(messages)
-            final_text = str(closing.get("content") or "").strip()
-            steps.append(AgentTraceStep(step=len(steps) + 1, assistant=closing))
+            try:
+                closing = self.llm.chat_messages(messages)
+                final_text = str(closing.get("content") or "").strip()
+                steps.append(AgentTraceStep(step=len(steps) + 1, assistant=closing))
+            except Exception as exc:  # noqa: BLE001
+                final_text = (
+                    "Nie udało się domknąć briefingu LLM "
+                    f"({type(exc).__name__}: {exc})."
+                )
+                steps.append(
+                    AgentTraceStep(
+                        step=len(steps) + 1,
+                        assistant={"role": "assistant", "content": final_text},
+                    )
+                )
 
         trace_path = self._save_trace(steps, final_text)
         return AgenticResult(

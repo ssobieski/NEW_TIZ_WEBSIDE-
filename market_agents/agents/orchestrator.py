@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,17 +73,44 @@ class Orchestrator:
                 pass
 
         if use_agentic and items:
-            agentic_result = self.parsing_agent.run(items)
-            items = agentic_result.items
-            report = self.reporter.build(items)
-            if agentic_result.final_text:
+            try:
+                agentic_result = self.parsing_agent.run(items)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[agentic] padł LLM/ReAct ({exc}) — fallback pipeline + raport")
+                if not skip_llm:
+                    items = self.analyst.analyze_batch(items)
+                report = self.reporter.build(items)
                 report.summary_markdown = (
-                    f"# Monitoring rynku (agentic): {self.config.industry.name}\n\n"
-                    f"{agentic_result.final_text}\n\n---\n\n"
+                    f"# Monitoring rynku (agentic fallback): {self.config.industry.name}\n\n"
+                    f"Agentic ReAct nie dokończył cyklu: {exc}\n\n"
+                    "Poniżej briefing z pipeline (bez twardego stopu na Notion/LLM).\n\n---\n\n"
                     + report.summary_markdown
                 )
-            mode = "agentic"
-            trace_path = agentic_result.trace_path
+                mode = "agentic_fallback"
+                trace_path = None
+            else:
+                items = agentic_result.items
+                final = (agentic_result.final_text or "").strip()
+                llm_broke = (
+                    "Agentic LLM niedostępny" in final
+                    or "Nie udało się domknąć briefingu LLM" in final
+                )
+                if llm_broke and not skip_llm:
+                    items = self.analyst.analyze_batch(items)
+                report = self.reporter.build(items)
+                if final and not _is_notion_abort_briefing(final):
+                    title = (
+                        "agentic fallback"
+                        if llm_broke
+                        else "agentic"
+                    )
+                    report.summary_markdown = (
+                        f"# Monitoring rynku ({title}): {self.config.industry.name}\n\n"
+                        f"{final}\n\n---\n\n"
+                        + report.summary_markdown
+                    )
+                mode = "agentic_fallback" if llm_broke else "agentic"
+                trace_path = agentic_result.trace_path
         else:
             if not skip_llm and items:
                 items = self.analyst.analyze_batch(items)
@@ -256,3 +284,15 @@ class Orchestrator:
         if not out["errors"]:
             out.pop("errors", None)
         return out
+
+
+def _is_notion_abort_briefing(text: str) -> bool:
+    """Model sometimes aborts with a Notion-token error instead of a briefing."""
+    t = (text or "").lower()
+    if "notion" not in t:
+        return False
+    if "notion_token" not in t and "brak token" not in t and "brak notion" not in t:
+        return False
+    if len(text) > 2500:
+        return False
+    return bool(re.search(r"bł[aą]d|error|ustaw notion", t))
