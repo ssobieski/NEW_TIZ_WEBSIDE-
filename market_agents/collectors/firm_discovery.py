@@ -12,6 +12,7 @@ from market_agents.firms import (
     KnownFirmsIndex,
     extract_candidate_firm_names,
     filter_new_firms,
+    is_tooling_relevant,
 )
 from market_agents.models import MarketItem
 
@@ -19,7 +20,7 @@ from market_agents.models import MarketItem
 class FirmDiscoveryCollector(BaseCollector):
     """
     Parsing wyszukiwania NOWYCH firm (spoza known_firms).
-    Google News RSS + własne feedy → ekstrakcja nazw → filtr znanych.
+    Google News RSS + własne feedy → ekstrakcja nazw → filtr znanych + domeny tooling.
     """
 
     name = "firm_discovery"
@@ -68,24 +69,22 @@ class FirmDiscoveryCollector(BaseCollector):
                 )
                 summary = _strip_html(str(summary))
                 blob = f"{title}. {summary}"
+
+                # Odrzuć off-topic (zegarki, F1, space, AI hype…) — wymagaj cue tooling
+                if not is_tooling_relevant(blob):
+                    continue
+
                 names = extract_candidate_firm_names(blob, max_names=8)
                 new_firms = filter_new_firms(
-                    names, self.known, evidence=blob, url=link
+                    names,
+                    self.known,
+                    evidence=blob,
+                    url=link,
+                    require_domain=True,
                 )
-
-                if not new_firms and not _looks_like_new_entrant(blob):
-                    continue
+                # Bez wiarygodnej nazwy — nie używaj całego tytułu jako „firmy”
                 if not new_firms:
-                    new_firms = [
-                        {
-                            "company": title[:80],
-                            "status": "new_signal",
-                            "known": False,
-                            "evidence": blob[:400],
-                            "url": link,
-                            "normalized": "",
-                        }
-                    ]
+                    continue
 
                 fresh: list[dict[str, Any]] = []
                 for firm in new_firms:
@@ -128,8 +127,12 @@ class FirmDiscoveryCollector(BaseCollector):
         for row in texts:
             text = str(row.get("text") or row.get("title") or "")
             url = str(row.get("url") or "")
+            if text and not is_tooling_relevant(text):
+                continue
             names = extract_candidate_firm_names(text, max_names=10)
-            for firm in filter_new_firms(names, self.known, evidence=text, url=url):
+            for firm in filter_new_firms(
+                names, self.known, evidence=text, url=url, require_domain=True
+            ):
                 key = str(firm.get("normalized") or "")
                 if not key or key in seen:
                     continue
@@ -146,28 +149,6 @@ def _google_news_rss(query: str, lang: str = "en", region: str = "US") -> str:
         f"https://news.google.com/rss/search?q={q}"
         f"&hl={lang}&gl={region}&ceid={region}:{lang}"
     )
-
-
-def _looks_like_new_entrant(text: str) -> bool:
-    t = text.lower()
-    cues = [
-        "new manufacturer",
-        "new cutting tool",
-        "startup",
-        "new brand",
-        "enters the market",
-        "market entry",
-        "newly founded",
-        "spin-off",
-        "spinoff",
-        "exhibitor",
-        "debut",
-        "first catalog",
-        "nowa firma",
-        "nowy producent",
-        "debiut",
-    ]
-    return any(c in t for c in cues)
 
 
 def _strip_html(text: str) -> str:
