@@ -174,6 +174,18 @@ class ToolRegistry:
             "list_crm_tasks": self.list_crm_tasks,
             "sync_crm_from_prospects": self.sync_crm_from_prospects,
             "push_crm_to_notion": self.push_crm_to_notion,
+            "list_contacts": self.list_contacts,
+            "get_contact": self.get_contact,
+            "contact_scoreboard": self.contact_scoreboard,
+            "upsert_contact": self.upsert_contact,
+            "sync_contacts_from_prospects": self.sync_contacts_from_prospects,
+            "list_deals": self.list_deals,
+            "get_deal": self.get_deal,
+            "deal_pipeline": self.deal_pipeline,
+            "get_deal_strategy": self.get_deal_strategy_tool,
+            "sync_deals_from_prospects": self.sync_deals_from_prospects,
+            "upsert_deal": self.upsert_deal,
+            "set_deal_stage": self.set_deal_stage,
             "list_suppliers": self.list_suppliers,
             "supplier_scoreboard": self.supplier_scoreboard,
             "score_suppliers": self.score_suppliers,
@@ -1783,6 +1795,248 @@ class ToolRegistry:
                             "only_hot": {"type": "boolean", "default": True},
                             "dry_run": {"type": "boolean", "default": False},
                         },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_contacts",
+                    "description": (
+                        "Lista osób (kontakty) powiązanych z firmami: prospecty, konkurencja, "
+                        "decydujący o zakupie. Filtr company/role/q."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "q": {"type": "string"},
+                            "company": {"type": "string"},
+                            "role": {
+                                "type": "string",
+                                "enum": [
+                                    "purchasing",
+                                    "production",
+                                    "technology",
+                                    "quality",
+                                    "owner_exec",
+                                    "engineering",
+                                    "sales",
+                                    "other",
+                                ],
+                            },
+                            "limit": {"type": "integer", "default": 40},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_contact",
+                    "description": "Pobierz kontakt po id lub name+company.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "name": {"type": "string"},
+                            "company": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "contact_scoreboard",
+                    "description": (
+                        "Ranking kontaktów wg wpływu na zakup i reachability (email/tel)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"limit": {"type": "integer", "default": 40}},
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "upsert_contact",
+                    "description": (
+                        "Dodaj/aktualizuj osobę w bazie kontaktów i powiąż z firmą "
+                        "(works_at / buys_for / influences / competitor_rep)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "company": {"type": "string"},
+                            "title": {"type": "string"},
+                            "role": {"type": "string"},
+                            "email": {"type": "string"},
+                            "phone": {"type": "string"},
+                            "influence": {
+                                "type": "string",
+                                "enum": ["high", "medium", "low", "unknown"],
+                            },
+                            "relation": {
+                                "type": "string",
+                                "enum": [
+                                    "works_at",
+                                    "buys_for",
+                                    "influences",
+                                    "competitor_rep",
+                                    "partner_rep",
+                                    "former",
+                                    "unknown",
+                                ],
+                            },
+                            "notes": {"type": "string"},
+                        },
+                        "required": ["name", "company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "sync_contacts_from_prospects",
+                    "description": (
+                        "Zsynchronizuj named stakeholders z profili prospect do contacts.json."
+                    ),
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_deals",
+                    "description": "Lista dealów (pipeline sprzedażowy tooling).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "stage": {"type": "string"},
+                            "company": {"type": "string"},
+                            "q": {"type": "string"},
+                            "limit": {"type": "integer", "default": 30},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_deal",
+                    "description": "Pobierz deal po id lub nazwie firmy.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "company": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "deal_pipeline",
+                    "description": (
+                        "Otwarty pipeline dealów: stage, wartość, EV, next action, incumbents."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"limit": {"type": "integer", "default": 40}},
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_deal_strategy",
+                    "description": (
+                        "Strategia dealu: buying center, value prop, win themes, risks, "
+                        "outreach sequence, next actions. Odświeża z kontaktów + prospect."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "company": {"type": "string"},
+                            "id": {"type": "string"},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "sync_deals_from_prospects",
+                    "description": (
+                        "Zbuduj/odśwież deale + strategię z prospectów (i sync kontaktów). "
+                        "Opcjonalnie tworzy CRM tasks."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "min_opportunity": {"type": "number", "default": 50},
+                            "create_crm": {"type": "boolean", "default": True},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "upsert_deal",
+                    "description": "Utwórz/aktualizuj deal ręcznie (firma, stage, notatki).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "company": {"type": "string"},
+                            "title": {"type": "string"},
+                            "stage": {
+                                "type": "string",
+                                "enum": [
+                                    "discover",
+                                    "qualify",
+                                    "map_buying_center",
+                                    "propose",
+                                    "negotiate",
+                                    "won",
+                                    "lost",
+                                    "on_hold",
+                                ],
+                            },
+                            "notes": {"type": "string"},
+                            "value_eur_mid": {"type": "number"},
+                        },
+                        "required": ["company"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "set_deal_stage",
+                    "description": "Ustaw stage dealu (discover→…→won/lost).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "stage": {
+                                "type": "string",
+                                "enum": [
+                                    "discover",
+                                    "qualify",
+                                    "map_buying_center",
+                                    "propose",
+                                    "negotiate",
+                                    "won",
+                                    "lost",
+                                    "on_hold",
+                                ],
+                            },
+                        },
+                        "required": ["id", "stage"],
                     },
                 },
             },
@@ -4289,6 +4543,163 @@ class ToolRegistry:
             min_opportunity=float(args.get("min_opportunity") or 60),
             limit=int(args.get("limit") or 20),
         )
+
+    def list_contacts(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.contacts import ContactRegistry
+
+        reg = ContactRegistry.load(self.config.data_path)
+        rows = reg.list(
+            q=str(args.get("q") or "") or None,
+            company=str(args.get("company") or "") or None,
+            role=str(args.get("role") or "") or None,
+            limit=int(args.get("limit") or 40),
+        )
+        return {"ok": True, "count": len(rows), "contacts": [c.to_dict() for c in rows]}
+
+    def get_contact(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.contacts import ContactRegistry
+
+        reg = ContactRegistry.load(self.config.data_path)
+        cid = str(args.get("id") or "").strip()
+        if cid:
+            c = reg.get(cid)
+            if c:
+                return {"ok": True, "contact": c.to_dict()}
+        name = str(args.get("name") or "").strip()
+        company = str(args.get("company") or "").strip()
+        if name:
+            c = reg.find_by_name_company(name, company)
+            if c:
+                return {"ok": True, "contact": c.to_dict()}
+        return {"ok": False, "error": "contact not found"}
+
+    def contact_scoreboard(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.contacts import ContactRegistry
+
+        reg = ContactRegistry.load(self.config.data_path)
+        return {"ok": True, "scoreboard": reg.scoreboard(limit=int(args.get("limit") or 40))}
+
+    def upsert_contact(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.contacts import upsert_manual_contact
+
+        name = str(args.get("name") or "").strip()
+        company = str(args.get("company") or "").strip()
+        if not name or not company:
+            return {"ok": False, "error": "name and company required"}
+        return upsert_manual_contact(
+            self.config.data_path,
+            name=name,
+            company=company,
+            title=str(args.get("title") or ""),
+            role=str(args.get("role") or "other"),
+            email=str(args.get("email") or ""),
+            phone=str(args.get("phone") or ""),
+            influence=str(args.get("influence") or "unknown"),
+            relation=str(args.get("relation") or "works_at"),
+            notes=str(args.get("notes") or ""),
+        )
+
+    def sync_contacts_from_prospects(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.contacts import sync_contacts_from_profiles
+
+        return sync_contacts_from_profiles(self.config.data_path)
+
+    def list_deals(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import DealRegistry
+
+        reg = DealRegistry.load(self.config.data_path)
+        rows = reg.list(
+            stage=str(args.get("stage") or "") or None,
+            company=str(args.get("company") or "") or None,
+            q=str(args.get("q") or "") or None,
+            limit=int(args.get("limit") or 30),
+        )
+        return {"ok": True, "count": len(rows), "deals": [d.to_dict() for d in rows]}
+
+    def get_deal(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import DealRegistry
+
+        reg = DealRegistry.load(self.config.data_path)
+        did = str(args.get("id") or "").strip()
+        if did:
+            d = reg.get(did)
+            if d:
+                return {"ok": True, "deal": d.to_dict()}
+        company = str(args.get("company") or "").strip()
+        if company:
+            d = reg.find_open_for_company(company)
+            if d:
+                return {"ok": True, "deal": d.to_dict()}
+            for row in reg.deals:
+                if company.lower() in row.company.lower():
+                    return {"ok": True, "deal": row.to_dict()}
+        return {"ok": False, "error": "deal not found"}
+
+    def deal_pipeline(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import DealRegistry
+
+        reg = DealRegistry.load(self.config.data_path)
+        return {"ok": True, "pipeline": reg.pipeline(limit=int(args.get("limit") or 40))}
+
+    def get_deal_strategy_tool(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import get_deal_strategy
+
+        key = str(args.get("id") or args.get("company") or "").strip()
+        if not key:
+            return {"ok": False, "error": "company or id required"}
+        return get_deal_strategy(self.config.data_path, key)
+
+    def sync_deals_from_prospects(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import sync_deals_from_prospects
+
+        comps = list(getattr(self.config.industry, "competitors", None) or [])
+        return sync_deals_from_prospects(
+            self.config.data_path,
+            min_opportunity=float(args.get("min_opportunity") or 50),
+            create_crm=bool(args.get("create_crm", True)),
+            competitors_industry=[str(c) for c in comps],
+        )
+
+    def upsert_deal(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import DEAL_STAGES, Deal, DealRegistry, deal_id_from_company
+        from market_agents.firm_profiles import firm_id_from_name
+
+        company = str(args.get("company") or "").strip()
+        if not company:
+            return {"ok": False, "error": "company required"}
+        stage = str(args.get("stage") or "discover")
+        if stage not in DEAL_STAGES:
+            stage = "discover"
+        value = args.get("value_eur_mid")
+        deal = Deal(
+            id=deal_id_from_company(company),
+            company=company,
+            firm_id=firm_id_from_name(company),
+            title=str(args.get("title") or f"Deal: {company}")[:200],
+            stage=stage,
+            notes=str(args.get("notes") or "")[:2000],
+            value_eur_mid=float(value) if value is not None else None,
+            sources=["manual"],
+            origin="manual",
+        )
+        reg = DealRegistry.load(self.config.data_path)
+        saved, created = reg.upsert(deal)
+        path = reg.save(self.config.data_path)
+        return {"ok": True, "created": created, "deal": saved.to_dict(), "path": str(path)}
+
+    def set_deal_stage(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import DealRegistry
+
+        did = str(args.get("id") or "").strip()
+        stage = str(args.get("stage") or "").strip()
+        if not did or not stage:
+            return {"ok": False, "error": "id and stage required"}
+        reg = DealRegistry.load(self.config.data_path)
+        d = reg.set_stage(did, stage)
+        if not d:
+            return {"ok": False, "error": "deal not found or invalid stage"}
+        path = reg.save(self.config.data_path)
+        return {"ok": True, "deal": d.to_dict(), "path": str(path)}
 
     def push_crm_to_notion(self, args: dict[str, Any]) -> dict[str, Any]:
         from market_agents.crm_tasks import push_crm_tasks_to_notion

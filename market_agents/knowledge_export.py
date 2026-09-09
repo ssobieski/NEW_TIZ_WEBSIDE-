@@ -38,6 +38,8 @@ def export_knowledge_pack(
     from market_agents.prospects import ProspectRegistry
     from market_agents.suppliers import SupplierRegistry
     from market_agents.crm_tasks import CrmTaskStore
+    from market_agents.contacts import ContactRegistry
+    from market_agents.deals import DealRegistry
     from market_agents.metrics import knowledge_counts, recent_metrics
 
     profiles = FirmProfileRegistry.load(data_dir)
@@ -45,6 +47,8 @@ def export_knowledge_pack(
     prospect_board = ProspectRegistry.load(data_dir).scoreboard(limit=limit)
     supplier_board = SupplierRegistry.load(data_dir).scoreboard(limit=limit)
     crm = [t.to_dict() for t in CrmTaskStore.load(data_dir).list(status="open", limit=limit)]
+    contacts = ContactRegistry.load(data_dir).scoreboard(limit=limit)
+    deals = DealRegistry.load(data_dir).pipeline(limit=limit)
     counts = knowledge_counts(data_dir)
     metrics = recent_metrics(data_dir, limit=5)
     relations = _load_json(knowledge / "firm_relations.json") or {}
@@ -59,6 +63,8 @@ def export_knowledge_pack(
         "prospect_scoreboard": prospect_board,
         "supplier_scoreboard": supplier_board,
         "crm_open": crm,
+        "contact_scoreboard": contacts,
+        "deal_pipeline": deals,
         "relations_count": edge_n,
         "digest": digest,
         "recent_metrics": metrics,
@@ -100,6 +106,18 @@ def export_knowledge_pack(
         md_lines.append(
             f"- [{t.get('priority')}] {t.get('company')}: {t.get('title')} "
             f"(opp={t.get('opportunity_score')}, notion={notion})"
+        )
+    md_lines += ["", "## Contacts (buying center)", ""]
+    for c in contacts:
+        md_lines.append(
+            f"- {c.get('name')} @ {c.get('company')} — {c.get('role')} "
+            f"infl={c.get('influence_on_purchase')} reach={c.get('reachability')}"
+        )
+    md_lines += ["", "## Deal pipeline", ""]
+    for d in deals:
+        md_lines.append(
+            f"- [{d.get('stage')}] {d.get('company')} opp={d.get('opportunity_score')} "
+            f"EV={d.get('expected_value_eur')} next={d.get('next_action')}"
         )
     if digest.get("score_deltas"):
         md_lines += ["", "## Recent score deltas", ""]

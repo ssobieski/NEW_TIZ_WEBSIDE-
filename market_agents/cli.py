@@ -847,6 +847,178 @@ def governance_cmd(
     raise typer.Exit(1)
 
 
+@app.command("contacts")
+def contacts_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    sync: bool = typer.Option(False, "--sync", help="Sync stakeholders z prospectów"),
+    scoreboard: bool = typer.Option(False, "--scoreboard"),
+    company: Optional[str] = typer.Option(None, "--company"),
+    q: Optional[str] = typer.Option(None, "--q"),
+    role: Optional[str] = typer.Option(None, "--role"),
+    name: Optional[str] = typer.Option(None, "--name", help="Upsert ręczny: imię i nazwisko"),
+    title: Optional[str] = typer.Option(None, "--title"),
+    email: Optional[str] = typer.Option(None, "--email"),
+    phone: Optional[str] = typer.Option(None, "--phone"),
+    influence: str = typer.Option("unknown", "--influence"),
+    limit: int = typer.Option(40, "--limit"),
+) -> None:
+    """Baza kontaktów (osoby) powiązana z firmami / prospectami / konkurencją."""
+    from market_agents.contacts import (
+        ContactRegistry,
+        sync_contacts_from_profiles,
+        upsert_manual_contact,
+    )
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    if sync:
+        console.print(sync_contacts_from_profiles(cfg.data_path))
+        return
+    if name and company:
+        console.print(
+            upsert_manual_contact(
+                cfg.data_path,
+                name=name,
+                company=company,
+                title=title or "",
+                email=email or "",
+                phone=phone or "",
+                influence=influence,
+            )
+        )
+        return
+    if name and not company:
+        console.print("[red]Upsert wymaga --name i --company[/red]")
+        raise typer.Exit(1)
+    reg = ContactRegistry.load(cfg.data_path)
+    if scoreboard:
+        rows = reg.scoreboard(limit=limit)
+        table = Table(title=f"Contacts scoreboard ({len(rows)})")
+        table.add_column("Name")
+        table.add_column("Company")
+        table.add_column("Role")
+        table.add_column("Infl")
+        table.add_column("Reach", justify="right")
+        table.add_column("Mail/Tel")
+        for r in rows:
+            table.add_row(
+                str(r["name"])[:28],
+                str(r["company"])[:24],
+                str(r["role"]),
+                str(r["influence_on_purchase"]),
+                str(r["reachability"]),
+                f"{r['emails']}/{r['phones']}",
+            )
+        console.print(table)
+        return
+    rows = reg.list(q=q, company=company, role=role, limit=limit)
+    table = Table(title=f"Contacts ({len(rows)})")
+    table.add_column("ID")
+    table.add_column("Name")
+    table.add_column("Title")
+    table.add_column("Company")
+    table.add_column("Role")
+    for c in rows:
+        table.add_row(
+            c.id[:16],
+            c.name[:24],
+            (c.title or "—")[:28],
+            c.primary_company()[:22],
+            c.role,
+        )
+    console.print(table)
+
+
+@app.command("deals")
+def deals_cmd(
+    config: Optional[Path] = typer.Option(None, "--config", "-c"),
+    sync: bool = typer.Option(False, "--sync", help="Sync deals + strategia z prospectów"),
+    pipeline: bool = typer.Option(False, "--pipeline"),
+    strategy: bool = typer.Option(False, "--strategy", help="Pokaż/odśwież strategię dla --company"),
+    company: Optional[str] = typer.Option(None, "--company"),
+    stage: Optional[str] = typer.Option(None, "--stage"),
+    set_stage: Optional[str] = typer.Option(None, "--set-stage"),
+    deal_id: Optional[str] = typer.Option(None, "--id"),
+    min_opp: float = typer.Option(50.0, "--min-opportunity"),
+    limit: int = typer.Option(30, "--limit"),
+    no_crm: bool = typer.Option(False, "--no-crm"),
+) -> None:
+    """Pipeline dealów: business case, buying center, strategia, next actions."""
+    from market_agents.deals import (
+        DealRegistry,
+        get_deal_strategy,
+        sync_deals_from_prospects,
+    )
+
+    path = _resolve_config(config)
+    cfg = load_config(path)
+    if sync:
+        comps = list(cfg.industry.competitors or [])
+        console.print(
+            sync_deals_from_prospects(
+                cfg.data_path,
+                min_opportunity=min_opp,
+                create_crm=not no_crm,
+                competitors_industry=[str(c) for c in comps],
+            )
+        )
+        return
+    if strategy:
+        if not company and not deal_id:
+            console.print("[red]Podaj --company lub --id[/red]")
+            raise typer.Exit(1)
+        console.print(get_deal_strategy(cfg.data_path, deal_id or company or ""))
+        return
+    reg = DealRegistry.load(cfg.data_path)
+    if set_stage:
+        if not deal_id:
+            console.print("[red]--set-stage wymaga --id[/red]")
+            raise typer.Exit(1)
+        d = reg.set_stage(deal_id, set_stage)
+        if not d:
+            console.print("[red]Brak dealu / zły stage[/red]")
+            raise typer.Exit(1)
+        reg.save(cfg.data_path)
+        console.print({"ok": True, "id": d.id, "stage": d.stage, "probability": d.probability})
+        return
+    if pipeline:
+        rows = reg.pipeline(limit=limit)
+        table = Table(title=f"Deal pipeline ({len(rows)})")
+        table.add_column("Company")
+        table.add_column("Stage")
+        table.add_column("Opp", justify="right")
+        table.add_column("Value", justify="right")
+        table.add_column("EV", justify="right")
+        table.add_column("Next")
+        for r in rows:
+            table.add_row(
+                str(r["company"])[:26],
+                str(r["stage"]),
+                str(int(r["opportunity_score"])) if r.get("opportunity_score") is not None else "—",
+                str(int(r["value_eur_mid"])) if r.get("value_eur_mid") is not None else "—",
+                str(int(r["expected_value_eur"])) if r.get("expected_value_eur") else "—",
+                str(r.get("next_action") or "—")[:36],
+            )
+        console.print(table)
+        return
+    rows = reg.list(stage=stage, company=company, limit=limit)
+    table = Table(title=f"Deals ({len(rows)})")
+    table.add_column("ID")
+    table.add_column("Company")
+    table.add_column("Stage")
+    table.add_column("Contacts", justify="right")
+    table.add_column("Title")
+    for d in rows:
+        table.add_row(
+            d.id[:18],
+            d.company[:24],
+            d.stage,
+            str(len(d.contact_ids)),
+            d.title[:32],
+        )
+    console.print(table)
+
+
 @app.command("crm")
 def crm_cmd(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
