@@ -84,6 +84,8 @@ class Deal:
     scores: dict[str, Any] = field(default_factory=dict)
     sources: list[str] = field(default_factory=list)
     notes: str = ""
+    notion_url: str | None = None
+    outcome: dict[str, Any] = field(default_factory=dict)
     updated_at: str = field(default_factory=utc_now_iso)
     created_at: str = field(default_factory=utc_now_iso)
     origin: str = "local"
@@ -117,6 +119,8 @@ class Deal:
             scores=dict(raw.get("scores") or {}),
             sources=[str(s) for s in (raw.get("sources") or [])][:20],
             notes=str(raw.get("notes") or "")[:2000],
+            notion_url=(str(raw["notion_url"]) if raw.get("notion_url") else None),
+            outcome=dict(raw.get("outcome") or {}),
             updated_at=str(raw.get("updated_at") or utc_now_iso()),
             created_at=str(raw.get("created_at") or utc_now_iso()),
             origin=str(raw.get("origin") or "local"),
@@ -222,6 +226,10 @@ class DealRegistry:
                 existing.sources.append(src)
         if deal.scores:
             existing.scores = {**(existing.scores or {}), **deal.scores}
+        if deal.notion_url and not existing.notion_url:
+            existing.notion_url = deal.notion_url
+        if deal.outcome:
+            existing.outcome = {**(existing.outcome or {}), **deal.outcome}
         if deal.notes:
             if deal.notes[:60] not in (existing.notes or ""):
                 existing.notes = ((existing.notes or "") + " | " + deal.notes).strip(" |")[:2000]
@@ -699,3 +707,316 @@ def get_deal_strategy(data_dir: Path | str, company_or_id: str) -> dict[str, Any
         "contacts": contacts,
         "path": str(path),
     }
+
+
+def record_deal_outcome(
+    data_dir: Path | str,
+    *,
+    deal_id: str,
+    result: str,
+    competitor: str = "",
+    reason: str = "",
+    value_eur: float | None = None,
+    lessons: str = "",
+) -> dict[str, Any]:
+    """Zapisz win/loss i ustaw stage won|lost."""
+    result_norm = (result or "").strip().lower()
+    if result_norm not in {"won", "lost"}:
+        return {"ok": False, "error": "result must be won|lost"}
+    reg = DealRegistry.load(data_dir)
+    deal = reg.get(deal_id)
+    if deal is None:
+        # allow company match
+        deal = reg.find_open_for_company(deal_id)
+        if deal is None:
+            for d in reg.deals:
+                if deal_id.lower() in d.company.lower():
+                    deal = d
+                    break
+    if deal is None:
+        return {"ok": False, "error": f"deal not found: {deal_id}"}
+
+    incumbents = list((deal.competitive_context or {}).get("incumbents") or [])
+    if competitor and competitor not in incumbents:
+        incumbents.append(competitor)
+
+    deal.stage = result_norm
+    deal.probability = STAGE_PROBABILITY.get(result_norm, 0.0)
+    deal.outcome = {
+        "result": result_norm,
+        "competitor": competitor or (incumbents[0] if incumbents else ""),
+        "reason": (reason or "")[:800],
+        "lessons": (lessons or "")[:1200],
+        "value_eur": float(value_eur) if value_eur is not None else deal.value_eur_mid,
+        "closed_at": utc_now_iso(),
+    }
+    if value_eur is not None:
+        deal.value_eur_mid = float(value_eur)
+    deal.competitive_context = {
+        **(deal.competitive_context or {}),
+        "incumbents": incumbents[:12],
+        "outcome_competitor": competitor or "",
+    }
+    deal.updated_at = utc_now_iso()
+    path = reg.save(data_dir)
+    return {"ok": True, "deal": deal.to_dict(), "path": str(path)}
+
+
+def win_loss_report(data_dir: Path | str, *, limit: int = 40) -> dict[str, Any]:
+    """Agregat win/loss vs konkurencja."""
+    reg = DealRegistry.load(data_dir)
+    closed = [d for d in reg.deals if d.stage in {"won", "lost"} or (d.outcome or {}).get("result")]
+    by_competitor: dict[str, dict[str, Any]] = {}
+    rows: list[dict[str, Any]] = []
+    won = lost = 0
+    for d in closed:
+        outcome = d.outcome or {}
+        result = str(outcome.get("result") or d.stage)
+        if result == "won":
+            won += 1
+        elif result == "lost":
+            lost += 1
+        comp = str(outcome.get("competitor") or "").strip() or "unknown"
+        bucket = by_competitor.setdefault(comp, {"competitor": comp, "won": 0, "lost": 0, "deals": []})
+        if result == "won":
+            bucket["won"] += 1
+        elif result == "lost":
+            bucket["lost"] += 1
+        row = {
+            "id": d.id,
+            "company": d.company,
+            "result": result,
+            "competitor": comp,
+            "reason": outcome.get("reason") or "",
+            "value_eur": outcome.get("value_eur") or d.value_eur_mid,
+            "closed_at": outcome.get("closed_at") or d.updated_at,
+        }
+        bucket["deals"].append(row["company"])
+        rows.append(row)
+    rows.sort(key=lambda r: str(r.get("closed_at") or ""), reverse=True)
+    competitors = sorted(
+        by_competitor.values(),
+        key=lambda b: (b["lost"] + b["won"], b["lost"]),
+        reverse=True,
+    )
+    for b in competitors:
+        b["deals"] = b["deals"][:8]
+        total = b["won"] + b["lost"]
+        b["win_rate"] = round(b["won"] / total, 2) if total else None
+    return {
+        "ok": True,
+        "won": won,
+        "lost": lost,
+        "win_rate": round(won / (won + lost), 2) if (won + lost) else None,
+        "by_competitor": competitors[:20],
+        "recent": rows[:limit],
+    }
+
+
+def push_deals_to_notion(
+    config: Any,
+    *,
+    limit: int = 20,
+    open_only: bool = True,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Push dealów bez notion_url do Notion (dzieci deals_parent_page)."""
+    from market_agents.collectors.notion import NotionCollector
+
+    notion_cfg = getattr(getattr(config, "sources", None), "notion", None)
+    if notion_cfg is None or not getattr(notion_cfg, "enabled", False):
+        return {"ok": False, "error": "Notion disabled — włącz sources.notion.enabled"}
+    parent = getattr(notion_cfg, "deals_parent_page", None)
+    if not parent:
+        return {"ok": False, "error": "Brak sources.notion.deals_parent_page w config"}
+
+    data_dir = getattr(config, "data_path", Path("data"))
+    reg = DealRegistry.load(data_dir)
+    rows = [d for d in reg.deals if not d.notion_url]
+    if open_only:
+        rows = [d for d in rows if d.stage not in {"won", "lost"}]
+    rows = rows[:limit]
+
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "would_push": len(rows),
+            "deals": [{"id": d.id, "company": d.company, "stage": d.stage} for d in rows],
+        }
+
+    token_fn = getattr(config, "notion_token", None)
+    token = token_fn() if callable(token_fn) else None
+    if not token:
+        return {"ok": False, "error": f"Brak tokenu Notion ({notion_cfg.token_env})"}
+
+    collector = NotionCollector(notion_cfg, token)
+    pushed = 0
+    errors: list[str] = []
+    for d in rows:
+        try:
+            strat = d.strategy or {}
+            next_actions = strat.get("next_actions") or []
+            body = [
+                f"Company: {d.company}",
+                f"Stage: {d.stage}",
+                f"Opportunity: {d.opportunity_score}",
+                f"Value EUR mid: {d.value_eur_mid}",
+                f"Probability: {d.probability}",
+                f"Incumbents: {', '.join((d.competitive_context or {}).get('incumbents') or [])}",
+                f"Value prop: {strat.get('value_proposition') or '—'}",
+                f"Next: {(next_actions[0] if next_actions else '—')}",
+                f"Win themes: {'; '.join(strat.get('win_themes') or [])}",
+                f"Local deal id: {d.id}",
+            ]
+            created = collector.create_child_page(
+                parent_page_id_or_url=str(parent),
+                title=d.title or f"Deal: {d.company}",
+                body_lines=body,
+            )
+            d.notion_url = created.get("url")
+            d.scores = dict(d.scores or {})
+            d.scores["notion_id"] = created.get("id")
+            d.updated_at = utc_now_iso()
+            reg.save(data_dir)
+            pushed += 1
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{d.id}:{exc}"[:160])
+    path = reg.save(data_dir)
+    return {
+        "ok": pushed > 0 or not errors,
+        "pushed": pushed,
+        "errors": errors[:10],
+        "path": str(path),
+        "with_notion": sum(1 for d in reg.deals if d.notion_url),
+    }
+
+
+def enrich_deal_strategy_with_llm(
+    data_dir: Path | str,
+    company_or_id: str,
+    *,
+    llm: Any | None = None,
+    our_brand: str = "TIZ",
+) -> dict[str, Any]:
+    """
+    Wzbogaca deterministyczną strategię tekstem LLM (pitch, objection handling).
+    Bez LLM / przy błędzie — zwraca bazową strategię bez zmian krytycznych.
+    """
+    base = get_deal_strategy(data_dir, company_or_id)
+    if not base.get("ok"):
+        return base
+    strategy = dict(base.get("strategy") or {})
+    deal = base.get("deal") or {}
+    contacts = base.get("contacts") or []
+
+    if llm is None:
+        strategy["llm_enrichment"] = {
+            "status": "skipped",
+            "reason": "no_llm",
+        }
+        return {**base, "strategy": strategy, "llm_enriched": False}
+
+    system = (
+        f"Jesteś doradcą sprzedaży narzędzi skrawających dla marki {our_brand}. "
+        "Odpowiadasz po polsku, konkretnie, bez ozdobników. "
+        "Zwróć JSON z polami: pitch (string), objection_handling (lista string), "
+        "discovery_questions (lista string), email_opener (string)."
+    )
+    user = json.dumps(
+        {
+            "company": deal.get("company"),
+            "stage": deal.get("stage"),
+            "business_case": deal.get("business_case"),
+            "competitive_context": deal.get("competitive_context"),
+            "strategy": {
+                "value_proposition": strategy.get("value_proposition"),
+                "win_themes": strategy.get("win_themes"),
+                "risks": strategy.get("risks"),
+                "next_actions": strategy.get("next_actions"),
+            },
+            "buying_center": [
+                {
+                    "name": c.get("name"),
+                    "role": c.get("role"),
+                    "influence_on_purchase": c.get("influence_on_purchase"),
+                }
+                for c in contacts[:6]
+            ],
+        },
+        ensure_ascii=False,
+    )
+    try:
+        raw = llm.chat(system, user)
+        parsed = _parse_llm_json(raw)
+        strategy["llm_enrichment"] = {
+            "status": "ok",
+            "pitch": str(parsed.get("pitch") or "")[:1200],
+            "objection_handling": [
+                str(x)[:300] for x in (parsed.get("objection_handling") or [])[:8]
+            ],
+            "discovery_questions": [
+                str(x)[:300] for x in (parsed.get("discovery_questions") or [])[:8]
+            ],
+            "email_opener": str(parsed.get("email_opener") or "")[:800],
+            "generated_at": utc_now_iso(),
+        }
+        # fold pitch into value prop appendix when useful
+        if strategy["llm_enrichment"]["pitch"]:
+            strategy["value_proposition_llm"] = strategy["llm_enrichment"]["pitch"]
+        llm_ok = True
+    except Exception as exc:  # noqa: BLE001
+        strategy["llm_enrichment"] = {
+            "status": "error",
+            "reason": str(exc)[:200],
+        }
+        llm_ok = False
+
+    # persist
+    deals = DealRegistry.load(data_dir)
+    d = deals.get(str(deal.get("id") or ""))
+    if d is None and deal.get("company"):
+        d = deals.find_open_for_company(str(deal["company"]))
+    if d is not None:
+        d.strategy = strategy
+        d.updated_at = utc_now_iso()
+        deals.upsert(d)
+        path = deals.save(data_dir)
+    else:
+        path = None
+    return {
+        **base,
+        "ok": True,
+        "strategy": strategy,
+        "llm_enriched": llm_ok,
+        "path": str(path) if path else base.get("path"),
+    }
+
+
+def _parse_llm_json(text: str) -> dict[str, Any]:
+    text = (text or "").strip()
+    if not text:
+        return {}
+    # strip markdown fences
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:].strip()
+            if part.startswith("{"):
+                text = part
+                break
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                data = json.loads(text[start : end + 1])
+                return data if isinstance(data, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+        return {}

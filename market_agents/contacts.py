@@ -103,6 +103,7 @@ class Contact:
     sources: list[str] = field(default_factory=list)
     verification: dict[str, Any] = field(default_factory=dict)
     notes: str = ""
+    notion_url: str | None = None
     updated_at: str = field(default_factory=utc_now_iso)
     origin: str = "local"
 
@@ -138,6 +139,7 @@ class Contact:
             sources=[str(s) for s in (raw.get("sources") or [])][:20],
             verification=dict(raw.get("verification") or {}),
             notes=str(raw.get("notes") or "")[:2000],
+            notion_url=(str(raw["notion_url"]) if raw.get("notion_url") else None),
             updated_at=str(raw.get("updated_at") or utc_now_iso()),
             origin=str(raw.get("origin") or "local"),
         )
@@ -286,6 +288,8 @@ class ContactRegistry:
                 existing.notes = ((existing.notes or "") + " | " + contact.notes).strip(" |")[:2000]
         if contact.profile:
             existing.profile = {**(existing.profile or {}), **contact.profile}
+        if contact.notion_url and not existing.notion_url:
+            existing.notion_url = contact.notion_url
         existing.updated_at = utc_now_iso()
         return existing, False
 
@@ -637,4 +641,141 @@ def upsert_manual_contact(
         "created": created,
         "contact": saved.to_dict(),
         "path": str(path),
+    }
+
+
+def ingest_contact_seeds(
+    data_dir: Path | str,
+    seed_path: Path | str | None = None,
+) -> dict[str, Any]:
+    """Wczytaj config/contacts.seed.json do contacts.json."""
+    data_dir = Path(data_dir)
+    path = Path(seed_path) if seed_path else Path("config/contacts.seed.json")
+    if not path.is_file():
+        return {"ok": False, "error": f"Brak seed: {path}"}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)[:200]}
+    rows = raw.get("contacts") if isinstance(raw, dict) else raw
+    created = 0
+    updated = 0
+    skipped = 0
+    for row in rows or []:
+        if not isinstance(row, dict):
+            skipped += 1
+            continue
+        name = str(row.get("name") or "").strip()
+        company = str(row.get("company") or "").strip()
+        if not name or not company:
+            skipped += 1
+            continue
+        result = upsert_manual_contact(
+            data_dir,
+            name=name,
+            company=company,
+            title=str(row.get("title") or ""),
+            role=str(row.get("role") or "other"),
+            email=str(row.get("email") or ""),
+            phone=str(row.get("phone") or ""),
+            influence=str(row.get("influence_on_purchase") or row.get("influence") or "unknown"),
+            relation=str(row.get("relation") or "works_at"),
+            notes=str(row.get("notes") or ""),
+        )
+        if result.get("created"):
+            created += 1
+        else:
+            updated += 1
+    reg = ContactRegistry.load(data_dir)
+    return {
+        "ok": True,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "total": len(reg.contacts),
+        "seed": str(path),
+    }
+
+
+def push_contacts_to_notion(
+    config: Any,
+    *,
+    limit: int = 30,
+    only_high_influence: bool = True,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Push kontaktów bez notion_url do Notion (dzieci contacts_parent_page)."""
+    from market_agents.collectors.notion import NotionCollector
+
+    notion_cfg = getattr(getattr(config, "sources", None), "notion", None)
+    if notion_cfg is None or not getattr(notion_cfg, "enabled", False):
+        return {"ok": False, "error": "Notion disabled — włącz sources.notion.enabled"}
+    parent = getattr(notion_cfg, "contacts_parent_page", None)
+    if not parent:
+        return {
+            "ok": False,
+            "error": "Brak sources.notion.contacts_parent_page w config",
+        }
+
+    data_dir = getattr(config, "data_path", Path("data"))
+    reg = ContactRegistry.load(data_dir)
+    rows = [c for c in reg.contacts if not c.notion_url]
+    if only_high_influence:
+        rows = [c for c in rows if c.influence_on_purchase in {"high", "medium"}]
+    rows = rows[:limit]
+
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "would_push": len(rows),
+            "contacts": [
+                {"id": c.id, "name": c.name, "company": c.primary_company()} for c in rows
+            ],
+        }
+
+    token_fn = getattr(config, "notion_token", None)
+    token = token_fn() if callable(token_fn) else None
+    if not token:
+        return {"ok": False, "error": f"Brak tokenu Notion ({notion_cfg.token_env})"}
+
+    collector = NotionCollector(notion_cfg, token)
+    pushed = 0
+    errors: list[str] = []
+    for c in rows:
+        try:
+            emails = ", ".join(str(e.get("value") or "") for e in c.emails[:3])
+            phones = ", ".join(str(p.get("value") or "") for p in c.phones[:3])
+            body = [
+                f"Name: {c.name}",
+                f"Title: {c.title}",
+                f"Role: {c.role}",
+                f"Company: {c.primary_company()}",
+                f"Influence: {c.influence_on_purchase}",
+                f"Emails: {emails or '—'}",
+                f"Phones: {phones or '—'}",
+                f"Competitors: {', '.join(c.competitors_mentioned[:5]) or '—'}",
+                f"Local contact id: {c.id}",
+                f"Notes: {c.notes or '—'}",
+            ]
+            created = collector.create_child_page(
+                parent_page_id_or_url=str(parent),
+                title=f"{c.name} — {c.primary_company()}"[:200],
+                body_lines=body,
+            )
+            c.notion_url = created.get("url")
+            c.verification = dict(c.verification or {})
+            c.verification["notion_id"] = created.get("id")
+            c.updated_at = utc_now_iso()
+            reg.save(data_dir)
+            pushed += 1
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{c.id}:{exc}"[:160])
+    path = reg.save(data_dir)
+    return {
+        "ok": pushed > 0 or not errors,
+        "pushed": pushed,
+        "errors": errors[:10],
+        "path": str(path),
+        "with_notion": sum(1 for c in reg.contacts if c.notion_url),
     }

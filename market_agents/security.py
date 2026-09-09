@@ -210,6 +210,7 @@ SAFE_TOOLS = frozenset(
         "get_deal",
         "deal_pipeline",
         "get_deal_strategy",
+        "win_loss_report",
         "list_suppliers",
         "supplier_scoreboard",
         "list_run_metrics",
@@ -287,6 +288,11 @@ WRITE_TOOLS = frozenset(
         "sync_deals_from_prospects",
         "upsert_deal",
         "set_deal_stage",
+        "ingest_contact_seeds",
+        "record_deal_outcome",
+        "enrich_deal_strategy",
+        "push_contacts_to_notion",
+        "push_deals_to_notion",
     }
 )
 
@@ -296,6 +302,8 @@ SENSITIVE_CLOUD_TOOLS = frozenset(
         "search_notion",
         "fetch_notion_page",
         "push_crm_to_notion",
+        "push_contacts_to_notion",
+        "push_deals_to_notion",
         "search_r2",
         "fetch_r2_object",
     }
@@ -331,7 +339,12 @@ class SecurityPolicy:
             if (
                 name.startswith("search_notion")
                 or name.startswith("fetch_notion")
-                or name == "push_crm_to_notion"
+                or name
+                in {
+                    "push_crm_to_notion",
+                    "push_contacts_to_notion",
+                    "push_deals_to_notion",
+                }
             ):
                 if not self.allow_notion_tools:
                     return False, "Notion tools disabled by security policy"
@@ -340,8 +353,12 @@ class SecurityPolicy:
             if self.strict_tool_mode and name in SENSITIVE_CLOUD_TOOLS:
                 if not (self.allow_notion_tools or self.allow_r2_tools):
                     return False, "cloud tools disabled in strict mode"
-            # Notion CRM push also requires write permission
-            if name == "push_crm_to_notion" and not self.allow_write_tools:
+            # Notion CRM/contacts/deals push also requires write permission
+            if name in {
+                "push_crm_to_notion",
+                "push_contacts_to_notion",
+                "push_deals_to_notion",
+            } and not self.allow_write_tools:
                 return False, "write tools disabled by security policy"
             return True, ""
         if name in WRITE_TOOLS:

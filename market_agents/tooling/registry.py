@@ -179,6 +179,8 @@ class ToolRegistry:
             "contact_scoreboard": self.contact_scoreboard,
             "upsert_contact": self.upsert_contact,
             "sync_contacts_from_prospects": self.sync_contacts_from_prospects,
+            "ingest_contact_seeds": self.ingest_contact_seeds,
+            "push_contacts_to_notion": self.push_contacts_to_notion,
             "list_deals": self.list_deals,
             "get_deal": self.get_deal,
             "deal_pipeline": self.deal_pipeline,
@@ -186,6 +188,10 @@ class ToolRegistry:
             "sync_deals_from_prospects": self.sync_deals_from_prospects,
             "upsert_deal": self.upsert_deal,
             "set_deal_stage": self.set_deal_stage,
+            "record_deal_outcome": self.record_deal_outcome,
+            "win_loss_report": self.win_loss_report_tool,
+            "enrich_deal_strategy": self.enrich_deal_strategy_tool,
+            "push_deals_to_notion": self.push_deals_to_notion,
             "list_suppliers": self.list_suppliers,
             "supplier_scoreboard": self.supplier_scoreboard,
             "score_suppliers": self.score_suppliers,
@@ -2037,6 +2043,100 @@ class ToolRegistry:
                             },
                         },
                         "required": ["id", "stage"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "ingest_contact_seeds",
+                    "description": "Wczytaj seed kontaktów z config/contacts.seed.json.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "push_contacts_to_notion",
+                    "description": (
+                        "Push kontaktów (high/medium influence) do Notion pod "
+                        "sources.notion.contacts_parent_page."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "default": 30},
+                            "only_high_influence": {"type": "boolean", "default": True},
+                            "dry_run": {"type": "boolean", "default": False},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "push_deals_to_notion",
+                    "description": (
+                        "Push otwartych dealów do Notion pod sources.notion.deals_parent_page."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "default": 20},
+                            "open_only": {"type": "boolean", "default": True},
+                            "dry_run": {"type": "boolean", "default": False},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "record_deal_outcome",
+                    "description": (
+                        "Zamknij deal jako won|lost z powodem i konkurentem (win/loss)."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "company": {"type": "string"},
+                            "result": {"type": "string", "enum": ["won", "lost"]},
+                            "competitor": {"type": "string"},
+                            "reason": {"type": "string"},
+                            "value_eur": {"type": "number"},
+                            "lessons": {"type": "string"},
+                        },
+                        "required": ["result"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "win_loss_report",
+                    "description": "Raport win/loss vs konkurencja (agregat + recent).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"limit": {"type": "integer", "default": 40}},
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "enrich_deal_strategy",
+                    "description": (
+                        "Wzbogać strategię deala lokalnym LLM (pitch, objection handling, "
+                        "email opener). Bez LLM zwraca bazową strategię deterministyczną."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "company": {"type": "string"},
+                            "id": {"type": "string"},
+                            "use_llm": {"type": "boolean", "default": True},
+                        },
                     },
                 },
             },
@@ -4700,6 +4800,71 @@ class ToolRegistry:
             return {"ok": False, "error": "deal not found or invalid stage"}
         path = reg.save(self.config.data_path)
         return {"ok": True, "deal": d.to_dict(), "path": str(path)}
+
+    def ingest_contact_seeds(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.contacts import ingest_contact_seeds
+
+        return ingest_contact_seeds(self.config.data_path)
+
+    def push_contacts_to_notion(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.contacts import push_contacts_to_notion
+
+        return push_contacts_to_notion(
+            self.config,
+            limit=int(args.get("limit") or 30),
+            only_high_influence=bool(args.get("only_high_influence", True)),
+            dry_run=bool(args.get("dry_run", False)),
+        )
+
+    def push_deals_to_notion(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import push_deals_to_notion
+
+        return push_deals_to_notion(
+            self.config,
+            limit=int(args.get("limit") or 20),
+            open_only=bool(args.get("open_only", True)),
+            dry_run=bool(args.get("dry_run", False)),
+        )
+
+    def record_deal_outcome(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import record_deal_outcome
+
+        key = str(args.get("id") or args.get("company") or "").strip()
+        if not key:
+            return {"ok": False, "error": "id or company required"}
+        value = args.get("value_eur")
+        return record_deal_outcome(
+            self.config.data_path,
+            deal_id=key,
+            result=str(args.get("result") or ""),
+            competitor=str(args.get("competitor") or ""),
+            reason=str(args.get("reason") or ""),
+            value_eur=float(value) if value is not None else None,
+            lessons=str(args.get("lessons") or ""),
+        )
+
+    def win_loss_report_tool(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import win_loss_report
+
+        return win_loss_report(self.config.data_path, limit=int(args.get("limit") or 40))
+
+    def enrich_deal_strategy_tool(self, args: dict[str, Any]) -> dict[str, Any]:
+        from market_agents.deals import enrich_deal_strategy_with_llm
+
+        key = str(args.get("id") or args.get("company") or "").strip()
+        if not key:
+            return {"ok": False, "error": "company or id required"}
+        llm = None
+        if bool(args.get("use_llm", True)):
+            try:
+                from market_agents.llm import LocalLLM
+
+                llm = LocalLLM(self.config.agents.llm)
+            except Exception:  # noqa: BLE001
+                llm = None
+        return enrich_deal_strategy_with_llm(
+            self.config.data_path, key, llm=llm, our_brand="TIZ"
+        )
 
     def push_crm_to_notion(self, args: dict[str, Any]) -> dict[str, Any]:
         from market_agents.crm_tasks import push_crm_tasks_to_notion

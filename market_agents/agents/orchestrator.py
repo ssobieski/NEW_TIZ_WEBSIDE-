@@ -269,6 +269,20 @@ class Orchestrator:
             getattr(self.config.agents, "post_enrich_crm_notion", False),
             _crm_notion,
         )
+        _step(
+            "contacts_notion",
+            getattr(self.config.agents, "post_enrich_contacts_notion", False),
+            lambda: __import__(
+                "market_agents.contacts", fromlist=["push_contacts_to_notion"]
+            ).push_contacts_to_notion(self.config, limit=30),
+        )
+        _step(
+            "deals_notion",
+            getattr(self.config.agents, "post_enrich_deals_notion", False),
+            lambda: __import__(
+                "market_agents.deals", fromlist=["push_deals_to_notion"]
+            ).push_deals_to_notion(self.config, limit=20),
+        )
         _step("digest", getattr(self.config.agents, "post_enrich_digest", True), _digest)
         if not out["errors"]:
             out.pop("errors", None)

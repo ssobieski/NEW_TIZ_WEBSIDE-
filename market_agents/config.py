@@ -57,6 +57,9 @@ class NotionConfig(BaseModel):
     literature_database: str | None = None
     # Parent page dla opcjonalnego push lokalnych CRM tasks → Notion
     crm_parent_page: str | None = None
+    # Parent pages dla kontaktów (osoby) i dealów (pipeline)
+    contacts_parent_page: str | None = None
+    deals_parent_page: str | None = None
     # Opcjonalnie: query po tytule przy sync
     search_queries: list[str] = Field(default_factory=list)
     max_pages: int = 50
@@ -305,6 +308,11 @@ class AgentsConfig(BaseModel):
     post_enrich_digest: bool = True
     # Kontakty + pipeline dealów (strategia) z prospectów
     post_enrich_contacts_deals: bool = True
+    # Opcjonalny push contacts/deals → Notion (wymaga parent pages + token)
+    post_enrich_contacts_notion: bool = False
+    post_enrich_deals_notion: bool = False
+    # Opcjonalne wzbogacenie strategii deala lokalnym LLM
+    enrich_deal_strategy_llm: bool = False
     crm_min_opportunity: float = 60.0
     deals_min_opportunity: float = 50.0
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)

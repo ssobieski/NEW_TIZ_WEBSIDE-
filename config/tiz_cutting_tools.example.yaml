@@ -592,6 +592,8 @@ sources:
     literature_database: 948d6c02-d3bb-4b30-8c0c-a26f873bf719
     # Parent page for optional CRM task push (crm push-notion)
     # crm_parent_page: <notion-page-id-or-url>
+    # contacts_parent_page: <notion-page-id-or-url>
+    # deals_parent_page: <notion-page-id-or-url>
   cloudflare_r2:
     enabled: false
     account_id_env: CF_ACCOUNT_ID
@@ -645,6 +647,9 @@ agents:
   post_enrich_suppliers: true
   post_enrich_resolve_duplicates: false
   post_enrich_crm_notion: false
+  post_enrich_contacts_notion: false
+  post_enrich_deals_notion: false
+  enrich_deal_strategy_llm: false
   post_enrich_digest: true
   crm_min_opportunity: 60
   agentic:

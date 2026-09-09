@@ -851,7 +851,10 @@ def governance_cmd(
 def contacts_cmd(
     config: Optional[Path] = typer.Option(None, "--config", "-c"),
     sync: bool = typer.Option(False, "--sync", help="Sync stakeholders z prospectów"),
+    seed: bool = typer.Option(False, "--seed", help="Wczytaj config/contacts.seed.json"),
     scoreboard: bool = typer.Option(False, "--scoreboard"),
+    push_notion: bool = typer.Option(False, "--push-notion"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
     company: Optional[str] = typer.Option(None, "--company"),
     q: Optional[str] = typer.Option(None, "--q"),
     role: Optional[str] = typer.Option(None, "--role"),
@@ -865,14 +868,22 @@ def contacts_cmd(
     """Baza kontaktów (osoby) powiązana z firmami / prospectami / konkurencją."""
     from market_agents.contacts import (
         ContactRegistry,
+        ingest_contact_seeds,
+        push_contacts_to_notion,
         sync_contacts_from_profiles,
         upsert_manual_contact,
     )
 
     path = _resolve_config(config)
     cfg = load_config(path)
+    if seed:
+        console.print(ingest_contact_seeds(cfg.data_path))
+        return
     if sync:
         console.print(sync_contacts_from_profiles(cfg.data_path))
+        return
+    if push_notion:
+        console.print(push_contacts_to_notion(cfg, limit=limit, dry_run=dry_run))
         return
     if name and company:
         console.print(
@@ -935,6 +946,13 @@ def deals_cmd(
     sync: bool = typer.Option(False, "--sync", help="Sync deals + strategia z prospectów"),
     pipeline: bool = typer.Option(False, "--pipeline"),
     strategy: bool = typer.Option(False, "--strategy", help="Pokaż/odśwież strategię dla --company"),
+    enrich_llm: bool = typer.Option(False, "--enrich-llm", help="Wzbogać strategię lokalnym LLM"),
+    win_loss: bool = typer.Option(False, "--win-loss", help="Raport win/loss vs konkurencja"),
+    push_notion: bool = typer.Option(False, "--push-notion"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    outcome: Optional[str] = typer.Option(None, "--outcome", help="won|lost — zamknij deal"),
+    competitor: Optional[str] = typer.Option(None, "--competitor", help="Przy --outcome: vs kto"),
+    reason: Optional[str] = typer.Option(None, "--reason"),
     company: Optional[str] = typer.Option(None, "--company"),
     stage: Optional[str] = typer.Option(None, "--stage"),
     set_stage: Optional[str] = typer.Option(None, "--set-stage"),
@@ -946,8 +964,12 @@ def deals_cmd(
     """Pipeline dealów: business case, buying center, strategia, next actions."""
     from market_agents.deals import (
         DealRegistry,
+        enrich_deal_strategy_with_llm,
         get_deal_strategy,
+        push_deals_to_notion,
+        record_deal_outcome,
         sync_deals_from_prospects,
+        win_loss_report,
     )
 
     path = _resolve_config(config)
@@ -961,6 +983,43 @@ def deals_cmd(
                 create_crm=not no_crm,
                 competitors_industry=[str(c) for c in comps],
             )
+        )
+        return
+    if win_loss:
+        console.print(win_loss_report(cfg.data_path, limit=limit))
+        return
+    if push_notion:
+        console.print(push_deals_to_notion(cfg, limit=limit, dry_run=dry_run))
+        return
+    if outcome:
+        key = deal_id or company
+        if not key:
+            console.print("[red]--outcome wymaga --id lub --company[/red]")
+            raise typer.Exit(1)
+        console.print(
+            record_deal_outcome(
+                cfg.data_path,
+                deal_id=key,
+                result=outcome,
+                competitor=competitor or "",
+                reason=reason or "",
+            )
+        )
+        return
+    if enrich_llm:
+        key = deal_id or company
+        if not key:
+            console.print("[red]--enrich-llm wymaga --company lub --id[/red]")
+            raise typer.Exit(1)
+        llm = None
+        try:
+            from market_agents.llm import LocalLLM
+
+            llm = LocalLLM(cfg.agents.llm)
+        except Exception:  # noqa: BLE001
+            llm = None
+        console.print(
+            enrich_deal_strategy_with_llm(cfg.data_path, key, llm=llm, our_brand="TIZ")
         )
         return
     if strategy:
