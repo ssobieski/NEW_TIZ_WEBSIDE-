@@ -75,6 +75,8 @@ def knowledge_counts(data_dir: Path | str) -> dict[str, int]:
         "prospects": _role_count(profiles_path, ("prospect",)),
         "crm_tasks_open": _crm_open(knowledge / "crm_tasks.json"),
         "crm_with_notion": _crm_with_notion(knowledge / "crm_tasks.json"),
+        "contacts": _json_count(knowledge / "contacts.json", "contacts"),
+        "deals_open": _deals_open(knowledge / "deals.json"),
         "tenders": _json_count(knowledge / "tenders.json", "signals"),
         "literature": _json_count(knowledge / "literature.json", "items"),
         "pricelists": _json_count(knowledge / "available_pricelists.json", "items"),
@@ -151,6 +153,21 @@ def _crm_with_notion(path: Path) -> int:
         raw = json.loads(path.read_text(encoding="utf-8"))
         tasks = raw.get("tasks") if isinstance(raw, dict) else raw
         return sum(1 for t in (tasks or []) if isinstance(t, dict) and t.get("notion_url"))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _deals_open(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        deals = raw.get("deals") if isinstance(raw, dict) else raw
+        return sum(
+            1
+            for d in (deals or [])
+            if isinstance(d, dict) and d.get("stage") not in {"won", "lost"}
+        )
     except Exception:  # noqa: BLE001
         return 0
 

@@ -223,6 +223,18 @@ class Orchestrator:
                 ),
             )
 
+        def _contacts_deals():
+            from market_agents.deals import sync_deals_from_prospects
+
+            return sync_deals_from_prospects(
+                data_dir,
+                min_opportunity=float(
+                    getattr(self.config.agents, "deals_min_opportunity", 50.0) or 50.0
+                ),
+                create_crm=False,  # CRM już z _crm; unikamy podwójnego create
+                competitors_industry=list(self.config.industry.competitors or []),
+            )
+
         def _crm_notion():
             from market_agents.crm_tasks import push_crm_tasks_to_notion
 
@@ -248,9 +260,28 @@ class Orchestrator:
         _step("suppliers", getattr(self.config.agents, "post_enrich_suppliers", True), _suppliers)
         _step("crm", getattr(self.config.agents, "post_enrich_crm_tasks", True), _crm)
         _step(
+            "contacts_deals",
+            getattr(self.config.agents, "post_enrich_contacts_deals", True),
+            _contacts_deals,
+        )
+        _step(
             "crm_notion",
             getattr(self.config.agents, "post_enrich_crm_notion", False),
             _crm_notion,
+        )
+        _step(
+            "contacts_notion",
+            getattr(self.config.agents, "post_enrich_contacts_notion", False),
+            lambda: __import__(
+                "market_agents.contacts", fromlist=["push_contacts_to_notion"]
+            ).push_contacts_to_notion(self.config, limit=30),
+        )
+        _step(
+            "deals_notion",
+            getattr(self.config.agents, "post_enrich_deals_notion", False),
+            lambda: __import__(
+                "market_agents.deals", fromlist=["push_deals_to_notion"]
+            ).push_deals_to_notion(self.config, limit=20),
         )
         _step("digest", getattr(self.config.agents, "post_enrich_digest", True), _digest)
         if not out["errors"]:

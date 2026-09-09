@@ -1,0 +1,21 @@
+[
+  {
+    "name": "Example Purchaser",
+    "title": "Purchasing Manager",
+    "role": "purchasing",
+    "company": "Example Auto Tier2 CNC",
+    "influence_on_purchase": "high",
+    "relation": "buys_for",
+    "email": "",
+    "notes": "Seed — zastąp realnymi kontaktami"
+  },
+  {
+    "name": "Example Competitor Rep",
+    "title": "Area Sales Manager",
+    "role": "sales",
+    "company": "Sandvik Coromant",
+    "influence_on_purchase": "medium",
+    "relation": "competitor_rep",
+    "notes": "Kontakt konkurencji (publiczny / z targów)"
+  }
+]
