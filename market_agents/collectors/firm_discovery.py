@@ -4,10 +4,9 @@ import re
 from typing import Any
 from urllib.parse import quote_plus
 
-import feedparser
-
 from market_agents.collectors.base import BaseCollector
 from market_agents.config import FirmDiscoveryConfig
+from market_agents.feeds import parse_feed
 from market_agents.firms import (
     KnownFirmsIndex,
     extract_candidate_firm_names,
@@ -50,7 +49,7 @@ class FirmDiscoveryCollector(BaseCollector):
 
         for feed_url in feed_urls:
             try:
-                entries = feedparser.parse(feed_url).entries
+                entries = parse_feed(feed_url).entries
             except Exception as exc:  # noqa: BLE001
                 print(f"[firm_discovery] feed error: {exc}")
                 continue

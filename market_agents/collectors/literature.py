@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 
 from market_agents.collectors.base import BaseCollector
 from market_agents.config import LiteratureSource
+from market_agents.feeds import UnsafeXMLError, parse_xml
 from market_agents.literature import (
     LITERATURE_KINDS,
     classify_literature_kind,
@@ -142,8 +143,8 @@ class LiteratureCollector(BaseCollector):
                 "error": "empty feed",
             }
         try:
-            root = ET.fromstring(text)
-        except ET.ParseError as exc:
+            root = parse_xml(text)
+        except (ET.ParseError, UnsafeXMLError) as exc:
             return {
                 "ok": False,
                 "mode": "feed",
