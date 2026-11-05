@@ -78,7 +78,7 @@ fi
 
 cat > "$HOME/.tiz_dell_env" <<EOF
 export VLLM_BASE_URL=http://127.0.0.1:${PORT}
-export HOST=0.0.0.0
+export HOST=\${HOST:-127.0.0.1}
 export PORT=${PORT}
 export TP=${TP}
 export MODEL=${MODEL}
@@ -90,16 +90,19 @@ echo
 if [[ "$GPU_OK" == "1" ]]; then
   echo "==> Gotowe. Start vLLM:"
   echo "    source $HOME/.tiz_dell_env"
+  echo "    export VLLM_API_KEY=\"\$(openssl rand -hex 32)\"   # ten sam klucz na kliencie"
   echo "    bash scripts/run_vllm_a100.sh"
+  echo "    # przez VPN: HOST=<dell-vpn-ip> + firewall tylko dla sieci VPN"
 else
   echo "==> Bootstrap częściowy (bez GPU)."
   echo "    Najpierw napraw NVIDIA / passthrough, potem:"
   echo "    bash scripts/dell_gpu_diagnose.sh"
   echo "    source .venv/bin/activate && pip install vllm"
+  echo "    export VLLM_API_KEY=\"\$(openssl rand -hex 32)\""
   echo "    bash scripts/run_vllm_a100.sh"
 fi
 echo
-echo "Health (po starcie vLLM):"
-echo "    curl -s http://127.0.0.1:${PORT}/v1/models"
-echo "Z laptopa (VPN):"
-echo "    curl -s http://200.0.0.110:${PORT}/v1/models"
+echo "Health (po starcie vLLM, z VLLM_API_KEY w env):"
+echo "    bash scripts/check_dell_vllm.sh"
+echo "Z laptopa (VPN, HOST=<dell-vpn-ip> na Dellu):"
+echo "    VLLM_BASE_URL=http://200.0.0.110:${PORT} MARKET_AGENTS_LLM_API_KEY=<klucz> bash scripts/check_dell_vllm.sh"

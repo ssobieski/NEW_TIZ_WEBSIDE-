@@ -405,7 +405,7 @@ def _apply_llm_env_overrides(cfg: AppConfig) -> None:
 
     MARKET_AGENTS_LLM_BASE_URL or VLLM_BASE_URL → llm.base_url
     MARKET_AGENTS_LLM_MODEL or VLLM_MODEL → llm.model
-    MARKET_AGENTS_LLM_API_KEY → llm.api_key
+    MARKET_AGENTS_LLM_API_KEY or VLLM_API_KEY → llm.api_key
     """
     base = (
         os.environ.get("MARKET_AGENTS_LLM_BASE_URL")
@@ -421,8 +421,8 @@ def _apply_llm_env_overrides(cfg: AppConfig) -> None:
     ).strip()
     if model:
         cfg.llm.model = model
-    api_key = os.environ.get("MARKET_AGENTS_LLM_API_KEY")
-    if api_key is not None and api_key != "":
+    api_key = os.environ.get("MARKET_AGENTS_LLM_API_KEY") or os.environ.get("VLLM_API_KEY")
+    if api_key:
         cfg.llm.api_key = api_key
 
 
