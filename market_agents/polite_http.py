@@ -4,6 +4,8 @@ import json
 import random
 import threading
 import time
+import zlib
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -89,6 +91,165 @@ def _parse_retry_after(value: str | None) -> float | None:
         return max(0.0, float(value))
     except ValueError:
         return None
+
+
+# Only encodings that _CappedDecoder can expand with a bounded output size.
+ACCEPT_ENCODING = "gzip, deflate"
+
+
+class _CappedDecoder:
+    """zlib decoder whose cumulative output never exceeds ``limit`` + 1 bytes."""
+
+    def __init__(self, encoding: str, limit: int) -> None:
+        self._encoding = encoding
+        self._limit = limit
+        self._produced = 0
+        self._first = True
+        wbits = zlib.MAX_WBITS | 16 if encoding == "gzip" else zlib.MAX_WBITS
+        self._obj = zlib.decompressobj(wbits)
+
+    def _account(self, out: bytes) -> bytes:
+        self._produced += len(out)
+        if self._produced > self._limit:
+            raise CrawlBlockedError(
+                f"response too large (decoded body > {self._limit} bytes)"
+            )
+        return out
+
+    def decode(self, data: bytes) -> bytes:
+        room = self._limit - self._produced + 1
+        try:
+            out = self._obj.decompress(data, room)
+        except zlib.error as exc:
+            if self._encoding == "deflate" and self._first:
+                # Some servers send raw deflate without the zlib header.
+                self._first = False
+                self._obj = zlib.decompressobj(-zlib.MAX_WBITS)
+                return self.decode(data)
+            raise httpx.DecodingError(str(exc)) from exc
+        self._first = False
+        return self._account(out)
+
+    def flush(self) -> bytes:
+        try:
+            return self._account(self._obj.flush())
+        except zlib.error as exc:
+            raise httpx.DecodingError(str(exc)) from exc
+
+
+def read_capped_body(response: httpx.Response, max_bytes: int) -> bytes:
+    """Read a streamed response, stopping once wire or decoded size passes max_bytes."""
+    clen = response.headers.get("content-length")
+    if clen and clen.strip().isdigit() and int(clen) > max_bytes:
+        raise CrawlBlockedError(f"response too large ({clen} > {max_bytes})")
+    decoders = [
+        _CappedDecoder(enc, max_bytes)
+        for enc in reversed(
+            [
+                part.strip().lower()
+                for part in response.headers.get("content-encoding", "").split(",")
+            ]
+        )
+        if enc in {"gzip", "deflate"}
+    ]
+    body = bytearray()
+    received = 0
+
+    def _append(chunk: bytes) -> None:
+        body.extend(chunk)
+        if len(body) > max_bytes:
+            raise CrawlBlockedError(f"response too large (> {max_bytes} bytes)")
+
+    for raw in response.iter_raw():
+        received += len(raw)
+        if received > max_bytes:
+            raise CrawlBlockedError(f"response too large (> {max_bytes} bytes)")
+        chunk = raw
+        for decoder in decoders:
+            chunk = decoder.decode(chunk)
+        _append(chunk)
+    tail = b""
+    for decoder in decoders:
+        if tail:
+            tail = decoder.decode(tail)
+        tail += decoder.flush()
+    _append(tail)
+    return bytes(body)
+
+
+def send_capped(
+    client: httpx.Client,
+    request: httpx.Request,
+    *,
+    max_bytes: int,
+    max_redirects: int,
+    check_response: Callable[[httpx.Response], None] | None = None,
+) -> httpx.Response:
+    """
+    Send ``request`` and return a fully read response whose body is at most
+    ``max_bytes``. Redirects are followed here rather than by httpx, which
+    would buffer each redirect body in full.
+    """
+    history: list[httpx.Response] = []
+    while True:
+        response = client.send(request, stream=True, follow_redirects=False)
+        try:
+            next_request = response.next_request
+            if next_request is None:
+                if check_response is not None:
+                    check_response(response)
+                body = read_capped_body(response, max_bytes)
+        finally:
+            response.close()
+        if next_request is None:
+            break
+        if len(history) >= max_redirects:
+            raise httpx.TooManyRedirects(
+                "Exceeded maximum allowed redirects.", request=next_request
+            )
+        history.append(response)
+        request = next_request
+
+    headers = [
+        (key, value)
+        for key, value in response.headers.multi_items()
+        if key.lower() != "content-encoding"
+    ]
+    result = httpx.Response(
+        response.status_code,
+        headers=headers,
+        stream=httpx.ByteStream(body),
+        request=response.request,
+        extensions=response.extensions,
+        history=history,
+        default_encoding=response.default_encoding,
+    )
+    result.read()
+    result.elapsed = response.elapsed
+    return result
+
+
+def fetch_capped(
+    url: str,
+    *,
+    max_bytes: int,
+    timeout: float = 35.0,
+    max_redirects: int = 3,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """One-off GET with the streaming size cap (no robots / host pacing)."""
+    req_headers = {
+        "User-Agent": DEFAULT_USER_AGENT,
+        **(headers or {}),
+        "Accept-Encoding": ACCEPT_ENCODING,
+    }
+    with httpx.Client(timeout=timeout, headers=req_headers) as client:
+        return send_capped(
+            client,
+            client.build_request("GET", url),
+            max_bytes=int(max_bytes),
+            max_redirects=max(0, int(max_redirects)),
+        )
 
 
 class AdaptivePoliteFetcher:
@@ -261,10 +422,12 @@ class AdaptivePoliteFetcher:
             try:
                 with httpx.Client(
                     timeout=10,
-                    follow_redirects=True,
-                    headers={"User-Agent": self.policy.user_agent},
+                    headers={
+                        "User-Agent": self.policy.user_agent,
+                        "Accept-Encoding": ACCEPT_ENCODING,
+                    },
                 ) as client:
-                    resp = client.get(robots_url)
+                    resp = self._send(client, client.build_request("GET", robots_url))
                     if resp.status_code >= 400:
                         self._robots[host] = None
                         self._robots_checked_at[host] = now
@@ -366,13 +529,13 @@ class AdaptivePoliteFetcher:
         if not self.policy.enabled:
             with httpx.Client(
                 timeout=timeout or self.policy.timeout_seconds,
-                follow_redirects=True,
-                max_redirects=max(0, int(self.policy.max_redirects)),
-                headers={"User-Agent": self.policy.user_agent, **(headers or {})},
+                headers={
+                    "User-Agent": self.policy.user_agent,
+                    **(headers or {}),
+                    "Accept-Encoding": ACCEPT_ENCODING,
+                },
             ) as client:
-                response = client.request(method, url, headers=headers)
-                self._assert_public_response(response)
-                return response
+                return self._send(client, client.build_request(method, url))
 
         host = self.host_of(url)
         if not host:
@@ -397,16 +560,14 @@ class AdaptivePoliteFetcher:
                     "Accept": "text/html,application/xhtml+xml,application/pdf,*/*;q=0.8",
                     "Accept-Language": "en-US,en;q=0.8,pl;q=0.7",
                     **(headers or {}),
+                    "Accept-Encoding": ACCEPT_ENCODING,
                 }
                 started = time.time()
                 with httpx.Client(
                     timeout=timeout or self.policy.timeout_seconds,
-                    follow_redirects=True,
-                    max_redirects=max(0, int(self.policy.max_redirects)),
                     headers=req_headers,
                 ) as client:
-                    response = client.request(method, url)
-                self._assert_public_response(response)
+                    response = self._send(client, client.build_request(method, url))
                 latency = time.time() - started
                 self._host_state(host).last_request_at = time.time()
 
@@ -434,17 +595,6 @@ class AdaptivePoliteFetcher:
                     self._on_fail(host, response.status_code)
                     response.raise_for_status()
 
-                clen = response.headers.get("content-length")
-                max_bytes = int(self.policy.max_response_bytes)
-                if clen and int(clen) > max_bytes:
-                    raise CrawlBlockedError(
-                        f"response too large ({clen} > {max_bytes})"
-                    )
-                if len(response.content) > max_bytes:
-                    raise CrawlBlockedError(
-                        f"response too large ({len(response.content)} bytes)"
-                    )
-
                 self._on_success(host, latency, response.status_code)
                 return response
             except CrawlBlockedError:
@@ -469,6 +619,15 @@ class AdaptivePoliteFetcher:
 
         assert last_exc is not None
         raise last_exc
+
+    def _send(self, client: httpx.Client, request: httpx.Request) -> httpx.Response:
+        return send_capped(
+            client,
+            request,
+            max_bytes=int(self.policy.max_response_bytes),
+            max_redirects=max(0, int(self.policy.max_redirects)),
+            check_response=self._assert_public_response,
+        )
 
     def _assert_public_response(self, response: httpx.Response) -> None:
         """Po redirectach — sprawdź finalny host (SSRF via redirect)."""

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+import httpx
 
 from market_agents.config import (
     AgenticConfig,
@@ -21,18 +23,22 @@ from market_agents.polite_http import (
 from market_agents.tools import ToolRegistry
 
 
-def _mock_response(status: int = 200, text: str = "ok", headers: dict | None = None):
-    resp = MagicMock()
-    resp.status_code = status
-    resp.text = text
-    resp.content = text.encode()
-    resp.headers = headers or {}
-    resp.url = "https://example.com/x"
-    resp.request = MagicMock()
-    resp.raise_for_status = MagicMock()
-    if status >= 400 and status not in {403, 429, 503}:
-        resp.raise_for_status.side_effect = Exception(f"HTTP {status}")
-    return resp
+def _mock_client(status: int = 200, text: str = "ok", headers: dict | None = None):
+    """Patch httpx.Client so every instance answers from a MockTransport."""
+    real_client = httpx.Client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status,
+            headers={"Content-Type": "text/plain; charset=utf-8", **(headers or {})},
+            stream=httpx.ByteStream(text.encode()),
+        )
+
+    def factory(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return real_client(*args, **kwargs)
+
+    return patch("httpx.Client", side_effect=factory)
 
 
 def test_polite_fetcher_spaces_requests_per_host(tmp_path: Path):
@@ -47,10 +53,7 @@ def test_polite_fetcher_spaces_requests_per_host(tmp_path: Path):
         per_host_concurrency=1,
     )
     fetcher = AdaptivePoliteFetcher(policy=policy, data_dir=tmp_path)
-    with patch("httpx.Client") as client_cls:
-        client = MagicMock()
-        client_cls.return_value.__enter__.return_value = client
-        client.request.return_value = _mock_response(200, "hello")
+    with _mock_client(200, "hello"):
         t0 = time.time()
         fetcher.get_text("https://example.com/a")
         fetcher.get_text("https://example.com/b")
@@ -70,12 +73,7 @@ def test_429_triggers_cooldown(tmp_path: Path):
         cooldown_on_block_seconds=2.0,
     )
     fetcher = AdaptivePoliteFetcher(policy=policy, data_dir=tmp_path)
-    with patch("httpx.Client") as client_cls:
-        client = MagicMock()
-        client_cls.return_value.__enter__.return_value = client
-        client.request.return_value = _mock_response(
-            429, "slow down", headers={"Retry-After": "30"}
-        )
+    with _mock_client(429, "slow down", headers={"Retry-After": "30"}):
         try:
             fetcher.get("https://blocked.example/page")
         except Exception:
@@ -96,10 +94,7 @@ def test_403_raises_crawl_blocked(tmp_path: Path):
         cooldown_on_block_seconds=5.0,
     )
     fetcher = AdaptivePoliteFetcher(policy=policy, data_dir=tmp_path)
-    with patch("httpx.Client") as client_cls:
-        client = MagicMock()
-        client_cls.return_value.__enter__.return_value = client
-        client.request.return_value = _mock_response(403, "forbidden")
+    with _mock_client(403, "forbidden"):
         try:
             fetcher.get("https://deny.example/x")
             raised = False
