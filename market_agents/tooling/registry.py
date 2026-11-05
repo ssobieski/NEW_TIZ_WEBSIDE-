@@ -60,7 +60,11 @@ from market_agents.product_tech import (
     extract_tech_schema,
 )
 from market_agents.polite_http import build_fetcher_from_config
-from market_agents.governance import GovernanceEngine
+from market_agents.governance import (
+    GovernanceEngine,
+    ParseStrategyCall,
+    bind_parse_strategy_call,
+)
 from market_agents.security import (
     SecurityPolicy,
     enforce_r2_key_prefix,
@@ -2177,8 +2181,9 @@ class ToolRegistry:
         handler = self._handlers.get(name)
         if not handler:
             return {"ok": False, "error": f"unknown tool: {name}"}
+        bound = bind_parse_strategy_call(name, arguments or {})
         # AI governance (policy-as-code) — przed cybersecurity tool policy
-        gov = self._governance.authorize_tool(name, arguments or {})
+        gov = self._governance.authorize_tool(name, arguments or {}, bound=bound)
         if not gov.allowed:
             return {
                 "ok": False,
@@ -2221,7 +2226,10 @@ class ToolRegistry:
                     "matched_rules": fetch_gov.matched_rules,
                 }
         try:
-            result = handler(arguments or {})
+            if bound is not None:
+                result = handler(arguments or {}, bound=bound)  # type: ignore[call-arg]
+            else:
+                result = handler(arguments or {})
             if self._security.redact_traces and isinstance(result, dict):
                 # lekka redakcja stringów w wyniku
                 for key, val in list(result.items()):
@@ -3508,13 +3516,17 @@ class ToolRegistry:
             "learn_enabled": bool(self.config.agents.agentic.learn_parse_rules),
         }
 
-    def upsert_parse_rule(self, args: dict[str, Any]) -> dict[str, Any]:
+    def upsert_parse_rule(
+        self, args: dict[str, Any], *, bound: ParseStrategyCall | None = None
+    ) -> dict[str, Any]:
+        bound = bound or bind_parse_strategy_call("upsert_parse_rule", args)
         host_or_url = str(args.get("host_or_url") or "").strip()
-        if not host_or_url:
+        if not host_or_url or bound is None or not bound.host:
             return {"ok": False, "error": "host_or_url required"}
         try:
             result = self._parse_rules.upsert(
                 host_or_url,
+                host=bound.host,
                 preferred_method=str(args.get("preferred_method") or "auto"),
                 css_selector=str(args.get("css_selector") or ""),
                 drop_selectors=list(args.get("drop_selectors") or []) or None,
@@ -3535,18 +3547,24 @@ class ToolRegistry:
         )
         return {**result, "path": str(path)}
 
-    def rate_parse(self, args: dict[str, Any]) -> dict[str, Any]:
+    def rate_parse(
+        self, args: dict[str, Any], *, bound: ParseStrategyCall | None = None
+    ) -> dict[str, Any]:
+        bound = bound or bind_parse_strategy_call("rate_parse", args)
         url = str(args.get("url") or "").strip()
-        if not url:
+        if not url or bound is None or not bound.host:
             return {"ok": False, "error": "url required"}
         quality = float(args.get("quality_0_to_1") or 0)
         result = self._parse_rules.rate(
             url,
+            host=bound.host,
             quality_0_to_1=quality,
-            parse_method=str(args.get("parse_method") or "") or None,
-            css_selector=str(args.get("css_selector") or "") or None,
+            parse_method=bound.parse_method,
+            css_selector=bound.css_selector,
             notes=str(args.get("notes") or ""),
         )
+        if not result.get("ok"):
+            return result
         path = self._parse_rules.save(self.config.data_path)
         self.parser.rules = self._parse_rules
         self.memory.add(
@@ -3563,7 +3581,7 @@ class ToolRegistry:
         ):
             rule = result["rule"]
             promoted = self._parsing_skills.promote_host_rule(
-                url,
+                bound.host,
                 preferred_method=str(rule.get("preferred_method") or "auto"),
                 css_selector=str(rule.get("css_selector") or ""),
                 notes=f"auto-promote from rate_parse q={quality:.2f}",
@@ -3597,7 +3615,11 @@ class ToolRegistry:
         )
         return {"ok": True, "count": len(rows), "skills": rows}
 
-    def learn_parsing_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+    def learn_parsing_skill(
+        self, args: dict[str, Any], *, bound: ParseStrategyCall | None = None
+    ) -> dict[str, Any]:
+        bound = bound or bind_parse_strategy_call("learn_parsing_skill", args)
+        strategy = bound is not None and bound.changes_strategy
         name = str(args.get("name") or "").strip()
         if not name:
             return {"ok": False, "error": "name required"}
@@ -3607,11 +3629,13 @@ class ToolRegistry:
                 skill_id=str(args.get("skill_id") or "").strip() or None,
                 category=str(args.get("category") or "generic"),
                 description=str(args.get("description") or ""),
-                preferred_method=str(args.get("preferred_method") or "auto"),
-                css_selectors=list(args.get("css_selectors") or []) or None,
-                drop_selectors=list(args.get("drop_selectors") or []) or None,
+                preferred_method=str(args.get("preferred_method") or "auto") if strategy else "auto",
+                css_selectors=(list(args.get("css_selectors") or []) or None) if strategy else None,
+                drop_selectors=(list(args.get("drop_selectors") or []) or None) if strategy else None,
                 link_keywords=list(args.get("link_keywords") or []) or None,
-                extract_patterns=list(args.get("extract_patterns") or []) or None,
+                extract_patterns=(list(args.get("extract_patterns") or []) or None)
+                if strategy
+                else None,
                 hints=list(args.get("hints") or []) or None,
                 applies_to_hosts=list(args.get("applies_to_hosts") or []) or None,
                 applies_to_kinds=list(args.get("applies_to_kinds") or []) or None,
@@ -3619,7 +3643,7 @@ class ToolRegistry:
                 taught_by=str(args.get("taught_by") or "parsing_agent"),
                 notes=str(args.get("notes") or ""),
                 examples=list(args.get("examples") or []) or None,
-                merge=bool(args.get("merge", True)),
+                merge=bool(args.get("merge", True)) if strategy else True,
             )
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
@@ -3632,17 +3656,23 @@ class ToolRegistry:
         )
         return {**result, "path": str(path)}
 
-    def improve_parsing_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+    def improve_parsing_skill(
+        self, args: dict[str, Any], *, bound: ParseStrategyCall | None = None
+    ) -> dict[str, Any]:
+        bound = bound or bind_parse_strategy_call("improve_parsing_skill", args)
+        strategy = bound is not None and bound.changes_strategy
         skill_id = str(args.get("skill_id") or "").strip()
         if not skill_id:
             return {"ok": False, "error": "skill_id required"}
         result = self._parsing_skills.improve(
             skill_id,
-            preferred_method=str(args.get("preferred_method") or "") or None,
-            css_selectors=list(args.get("css_selectors") or []) or None,
-            drop_selectors=list(args.get("drop_selectors") or []) or None,
+            preferred_method=(str(args.get("preferred_method") or "") or None) if strategy else None,
+            css_selectors=(list(args.get("css_selectors") or []) or None) if strategy else None,
+            drop_selectors=(list(args.get("drop_selectors") or []) or None) if strategy else None,
             link_keywords=list(args.get("link_keywords") or []) or None,
-            extract_patterns=list(args.get("extract_patterns") or []) or None,
+            extract_patterns=(list(args.get("extract_patterns") or []) or None)
+            if strategy
+            else None,
             hints=list(args.get("hints") or []) or None,
             applies_to_hosts=list(args.get("applies_to_hosts") or []) or None,
             applies_to_kinds=list(args.get("applies_to_kinds") or []) or None,
@@ -3675,12 +3705,15 @@ class ToolRegistry:
         path = self._parsing_skills.save(self.config.data_path)
         return {**result, "path": str(path)}
 
-    def promote_host_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+    def promote_host_skill(
+        self, args: dict[str, Any], *, bound: ParseStrategyCall | None = None
+    ) -> dict[str, Any]:
+        bound = bound or bind_parse_strategy_call("promote_host_skill", args)
         host_or_url = str(args.get("host_or_url") or "").strip()
-        if not host_or_url:
+        if not host_or_url or bound is None or not bound.host:
             return {"ok": False, "error": "host_or_url required"}
         result = self._parsing_skills.promote_host_rule(
-            host_or_url,
+            bound.host,
             preferred_method=str(args.get("preferred_method") or "auto"),
             css_selector=str(args.get("css_selector") or ""),
             category=str(args.get("category") or "generic"),

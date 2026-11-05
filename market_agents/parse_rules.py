@@ -146,8 +146,13 @@ class SiteParseRulesStore:
         notes: str = "",
         origin: str = "agent",
         last_ok_url: str = "",
+        host: str | None = None,
     ) -> dict[str, Any]:
-        host = host_from_url(host_or_url) if "://" in host_or_url else host_or_url.lower().strip()
+        """`host` (already authorized / normalized) wins over `host_or_url`."""
+        if not host:
+            host = (
+                host_from_url(host_or_url) if "://" in host_or_url else host_or_url.lower().strip()
+            )
         if host.startswith("www."):
             host = host[4:]
         if not host:
@@ -156,6 +161,8 @@ class SiteParseRulesStore:
         if method not in PARSE_METHODS:
             raise ValueError(f"Nieznana metoda={method}. Dozwolone: {', '.join(PARSE_METHODS)}")
         existing = self.rules.get(host)
+        if existing is not None and existing.origin == "manual" and origin != "manual":
+            raise ValueError(f"reguła hosta {host} jest ręczna (origin=manual) — tylko operator może ją zmienić")
         rule = SiteParseRule(
             host=host,
             preferred_method=method,
@@ -182,17 +189,33 @@ class SiteParseRulesStore:
         css_selector: str | None = None,
         notes: str = "",
         success_threshold: float = 0.55,
+        host: str | None = None,
     ) -> dict[str, Any]:
-        """Zapisz feedback jakości parse → wzmocnij lub osłab regułę hosta."""
-        host = host_from_url(url)
+        """
+        Zapisz feedback jakości parse → wzmocnij lub osłab regułę hosta.
+        `host` (already authorized / normalized) wins over the host in `url`.
+        Reguły origin=manual nie zmieniają metody ani selektora.
+        """
+        host = host or host_from_url(url)
+        if host.startswith("www."):
+            host = host[4:]
         if not host:
             return {"ok": False, "error": "nie udało się wyciągnąć hosta z URL"}
-        rule = self.rules.get(host) or SiteParseRule(host=host, origin="auto")
+        set_method = parse_method if parse_method in PARSE_METHODS and parse_method != "auto" else None
+        set_selector = str(css_selector).strip() if css_selector is not None else ""
+        existing = self.rules.get(host)
+        if existing is not None and existing.origin == "manual" and (set_method or set_selector):
+            return {
+                "ok": False,
+                "error": f"reguła hosta {host} jest ręczna (origin=manual) — tylko operator może ją zmienić",
+                "manual": True,
+            }
+        rule = existing or SiteParseRule(host=host, origin="auto")
         score = max(0.0, min(1.0, float(quality_0_to_1)))
-        if parse_method and parse_method in PARSE_METHODS and parse_method != "auto":
-            rule.preferred_method = parse_method
-        if css_selector is not None and str(css_selector).strip():
-            rule.css_selector = str(css_selector).strip()
+        if set_method:
+            rule.preferred_method = set_method
+        if set_selector:
+            rule.css_selector = set_selector
             if rule.preferred_method == "auto":
                 rule.preferred_method = "css"
         if notes:

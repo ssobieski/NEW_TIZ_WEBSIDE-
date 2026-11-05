@@ -12,7 +12,7 @@ Poniżej mapa zagrożeń i wdrożone mechanizmy.
 | T-03 | Hijack fleet knowledge pack | Path tylko pod `fleet/outbox`, allowlista plików, brak symlinków |
 | T-05 | R2 key escape | `enforce_r2_key_prefix` |
 | T-07 | Wyciek sekretów w traces | `redact_secrets` w traces / tool errors / R2 excerpts |
-| T-08 | Poisoning parse rules | `auto_promote_host_skills: false` (default) |
+| T-08 | Poisoning parse rules | `require_approval` dla każdej zmiany selektora / metody (`upsert_parse_rule`, `rate_parse`, `learn/improve_parsing_skill`, `promote_host_skill`); grant wiązany z hostem zapisu; reguły `origin: manual` nienadpisywalne przez agenta; `auto_promote_host_skills: false` (default) |
 
 ## Konfiguracja (`agents.security` + `agents.crawl`)
 
