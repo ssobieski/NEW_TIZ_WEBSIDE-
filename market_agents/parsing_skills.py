@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from tld import get_tld
 
 from market_agents.parse_rules import PARSE_METHODS
 
@@ -29,13 +32,55 @@ def _slug(text: str) -> str:
 
 def _host(url_or_host: str) -> str:
     raw = (url_or_host or "").strip().lower()
-    if "://" in raw:
-        host = (urlparse(raw).netloc or "").lower()
-    else:
-        host = raw
+    if not raw:
+        return ""
+    try:
+        host = urlparse(raw if "://" in raw else "//" + raw).hostname or ""
+    except ValueError:
+        return ""
+    host = host.rstrip(".")
     if host.startswith("www."):
         host = host[4:]
     return host
+
+
+@lru_cache(maxsize=4096)
+def _is_registrable_host(host: str) -> bool:
+    """True when host is a registrable domain (or below one) per the Public Suffix List."""
+    if not host or len(host) > 253:
+        return False
+    labels = host.split(".")
+    if len(labels) < 2 or any(not label for label in labels):
+        return False
+    parsed = get_tld(host, fix_protocol=True, fail_silently=True, as_object=True)
+    if parsed is None or not parsed.domain:
+        return False
+    return parsed.fld != parsed.tld
+
+
+def _scope_host(value: str) -> str:
+    host = _host(value)
+    return host if _is_registrable_host(host) else ""
+
+
+def _scope_hosts(values: list[str] | None, *, strict: bool) -> list[str]:
+    out: list[str] = []
+    for value in values or []:
+        host = _scope_host(value)
+        if host:
+            out.append(host)
+        elif strict:
+            raise ValueError(
+                f"applies_to_hosts={value!r}: wymagana domena rejestrowalna "
+                "(nie sam sufiks publiczny, np. com / co.uk)"
+            )
+    return out
+
+
+def _host_in_scope(host: str, scope: str) -> bool:
+    if not _is_registrable_host(scope):
+        return False
+    return host == scope or host.endswith("." + scope)
 
 
 def _str_list(value: Any) -> list[str]:
@@ -126,7 +171,7 @@ class ParsingSkill:
             link_keywords=_str_list(raw.get("link_keywords")),
             extract_patterns=_str_list(raw.get("extract_patterns")),
             hints=_str_list(raw.get("hints")),
-            applies_to_hosts=[_host(h) for h in _str_list(raw.get("applies_to_hosts")) if _host(h)],
+            applies_to_hosts=_scope_hosts(_str_list(raw.get("applies_to_hosts")), strict=False),
             applies_to_kinds=_str_list(raw.get("applies_to_kinds")),
             url_contains=_str_list(raw.get("url_contains")),
             version=max(1, int(raw.get("version") or 1)),
@@ -522,9 +567,10 @@ class ParsingSkillsStore:
             score = 0.0
             if kind_l and kind_l in [k.lower() for k in skill.applies_to_kinds]:
                 score += 3.0
-            if host and host in skill.applies_to_hosts:
+            scopes = [h for h in skill.applies_to_hosts if _host_in_scope(host, h)] if host else []
+            if host in scopes:
                 score += 4.0
-            elif host and any(host.endswith(h) for h in skill.applies_to_hosts):
+            elif scopes:
                 score += 2.5
             for frag in skill.url_contains:
                 if frag.lower() in url_l:
@@ -568,6 +614,7 @@ class ParsingSkillsStore:
         cat = (category or "generic").strip().lower()
         if cat not in SKILL_CATEGORIES:
             raise ValueError(f"Nieznana kategoria={cat}. Dozwolone: {', '.join(SKILL_CATEGORIES)}")
+        hosts = _scope_hosts(applies_to_hosts, strict=True)
 
         if existing and merge:
             skill = ParsingSkill(
@@ -581,10 +628,7 @@ class ParsingSkillsStore:
                 link_keywords=_merge_unique(existing.link_keywords, link_keywords),
                 extract_patterns=_merge_unique(existing.extract_patterns, extract_patterns),
                 hints=_merge_unique(existing.hints, hints),
-                applies_to_hosts=_merge_unique(
-                    existing.applies_to_hosts,
-                    [_host(h) for h in (applies_to_hosts or []) if _host(h)],
-                ),
+                applies_to_hosts=_merge_unique(existing.applies_to_hosts, hosts),
                 applies_to_kinds=_merge_unique(existing.applies_to_kinds, applies_to_kinds),
                 url_contains=_merge_unique(existing.url_contains, url_contains),
                 version=existing.version,
@@ -610,7 +654,7 @@ class ParsingSkillsStore:
                 link_keywords=list(link_keywords or []),
                 extract_patterns=list(extract_patterns or []),
                 hints=list(hints or []),
-                applies_to_hosts=[_host(h) for h in (applies_to_hosts or []) if _host(h)],
+                applies_to_hosts=hosts,
                 applies_to_kinds=list(applies_to_kinds or []),
                 url_contains=list(url_contains or []),
                 taught_by=taught_by,
@@ -648,6 +692,10 @@ class ParsingSkillsStore:
         skill = self.get(skill_id)
         if skill is None:
             return {"ok": False, "error": f"unknown skill: {skill_id}"}
+        try:
+            hosts = _scope_hosts(applies_to_hosts, strict=True)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
         if preferred_method:
             method = preferred_method.strip().lower()
             if method not in PARSE_METHODS:
@@ -664,10 +712,7 @@ class ParsingSkillsStore:
         if hints is not None:
             skill.hints = _merge_unique(skill.hints, hints)
         if applies_to_hosts is not None:
-            skill.applies_to_hosts = _merge_unique(
-                skill.applies_to_hosts,
-                [_host(h) for h in applies_to_hosts if _host(h)],
-            )
+            skill.applies_to_hosts = _merge_unique(skill.applies_to_hosts, hosts)
         if applies_to_kinds is not None:
             skill.applies_to_kinds = _merge_unique(skill.applies_to_kinds, applies_to_kinds)
         if url_contains is not None:
@@ -719,6 +764,11 @@ class ParsingSkillsStore:
         host = _host(host_or_url)
         if not host:
             return {"ok": False, "error": "host wymagany"}
+        if not _is_registrable_host(host):
+            return {
+                "ok": False,
+                "error": f"host={host!r}: wymagana domena rejestrowalna (nie sam sufiks publiczny)",
+            }
         return self.learn(
             skill_id=_slug(f"host-{host}"),
             name=f"Host skill: {host}",
