@@ -1,20 +1,94 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import random
+import socket
 import threading
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
+import httpcore
 import httpx
+
+from market_agents.security import (
+    SecurityError,
+    address_is_public,
+    resolve_public_addresses,
+    validate_fetch_url,
+)
 
 DEFAULT_USER_AGENT = (
     "MarketAgentsLocal/0.3 (+local research; polite adaptive crawler; contact: local-only)"
 )
+
+
+class _PublicAddressBackend(httpcore.NetworkBackend):
+    """
+    SSRF guard na poziomie socketu: nazwa jest rozwiązywana raz, każdy adres
+    musi być publiczny, connect() idzie na zaakceptowany literał IP, a peer
+    jest sprawdzany zanim zostanie wysłany request / odczytane body.
+    """
+
+    def __init__(self, *, check_resolved: bool) -> None:
+        self._inner = httpcore.SyncBackend()
+        self._check_resolved = check_resolved
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.NetworkStream:
+        if not self._check_resolved:
+            return self._inner.connect_tcp(
+                host, port, timeout, local_address, socket_options
+            )
+        try:
+            addresses = resolve_public_addresses(host, port)
+        except socket.gaierror as exc:
+            raise httpcore.ConnectError(str(exc)) from exc
+        last_exc: Exception | None = None
+        for address in addresses:
+            try:
+                stream = self._inner.connect_tcp(
+                    address, port, timeout, local_address, socket_options
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last_exc = exc
+                continue
+            try:
+                peer = str(stream.get_extra_info("socket").getpeername()[0])
+                peer_ok = address_is_public(peer) and ipaddress.ip_address(
+                    peer.split("%", 1)[0]
+                ) == ipaddress.ip_address(address)
+            except Exception:  # noqa: BLE001
+                peer_ok = False
+            if not peer_ok:
+                stream.close()
+                raise SecurityError(f"SSRF blocked: connected peer not accepted: {host}")
+            return stream
+        assert last_exc is not None
+        raise last_exc
+
+    def connect_unix_socket(self, *args: Any, **kwargs: Any) -> httpcore.NetworkStream:
+        raise SecurityError("SSRF blocked: unix sockets not allowed")
+
+
+class _PublicAddressTransport(httpx.HTTPTransport):
+    def __init__(self, *, check_resolved: bool) -> None:
+        super().__init__()
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(),
+            keepalive_expiry=5.0,
+            network_backend=_PublicAddressBackend(check_resolved=check_resolved),
+        )
 
 
 @dataclass
@@ -243,6 +317,50 @@ class AdaptivePoliteFetcher:
         if elapsed < delay:
             time.sleep(delay - elapsed)
 
+    def _validate_hop(self, url: str) -> str:
+        return validate_fetch_url(
+            url,
+            allowed_hosts=self.policy.allowed_hosts or None,
+            allow_private=not bool(self.policy.block_private_networks),
+            resolve_dns=False,
+        )
+
+    def _client(
+        self, *, timeout: float, headers: dict[str, str] | None = None
+    ) -> httpx.Client:
+        return httpx.Client(
+            timeout=timeout,
+            follow_redirects=False,
+            headers=headers,
+            transport=_PublicAddressTransport(
+                check_resolved=bool(self.policy.block_private_networks)
+                and bool(self.policy.resolve_dns_for_ssrf)
+            ),
+        )
+
+    def _send(
+        self,
+        client: httpx.Client,
+        method: str,
+        url: str,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Redirecty obsługiwane ręcznie: każdy hop przechodzi walidację przed wysłaniem."""
+        response = client.request(method, self._validate_hop(url), headers=headers)
+        max_redirects = max(0, int(self.policy.max_redirects))
+        hops = 0
+        while isinstance(response.next_request, httpx.Request):
+            next_request = response.next_request
+            if hops >= max_redirects:
+                raise httpx.TooManyRedirects(
+                    "Exceeded maximum allowed redirects.", request=next_request
+                )
+            self._validate_hop(str(next_request.url))
+            response.close()
+            response = client.send(next_request)
+            hops += 1
+        return response
+
     def _allowed_by_robots(self, url: str) -> bool:
         if not self.policy.respect_robots_txt:
             return True
@@ -259,12 +377,11 @@ class AdaptivePoliteFetcher:
             robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
             parser = RobotFileParser()
             try:
-                with httpx.Client(
+                with self._client(
                     timeout=10,
-                    follow_redirects=True,
                     headers={"User-Agent": self.policy.user_agent},
                 ) as client:
-                    resp = client.get(robots_url)
+                    resp = self._send(client, "GET", robots_url)
                     if resp.status_code >= 400:
                         self._robots[host] = None
                         self._robots_checked_at[host] = now
@@ -351,28 +468,15 @@ class AdaptivePoliteFetcher:
         timeout: float | None = None,
         max_retries: int | None = None,
     ) -> httpx.Response:
-        from market_agents.security import SecurityError, validate_fetch_url
-
         try:
-            url = validate_fetch_url(
-                url,
-                allowed_hosts=self.policy.allowed_hosts or None,
-                allow_private=not bool(self.policy.block_private_networks),
-                resolve_dns=bool(self.policy.resolve_dns_for_ssrf),
-            )
+            url = self._validate_hop(url)
         except SecurityError as exc:
             raise CrawlBlockedError(str(exc)) from exc
 
         if not self.policy.enabled:
-            with httpx.Client(
-                timeout=timeout or self.policy.timeout_seconds,
-                follow_redirects=True,
-                max_redirects=max(0, int(self.policy.max_redirects)),
-                headers={"User-Agent": self.policy.user_agent, **(headers or {})},
-            ) as client:
-                response = client.request(method, url, headers=headers)
-                self._assert_public_response(response)
-                return response
+            return self.fetch_once(
+                url, method=method, headers=headers, timeout=timeout
+            )
 
         host = self.host_of(url)
         if not host:
@@ -399,14 +503,11 @@ class AdaptivePoliteFetcher:
                     **(headers or {}),
                 }
                 started = time.time()
-                with httpx.Client(
+                with self._client(
                     timeout=timeout or self.policy.timeout_seconds,
-                    follow_redirects=True,
-                    max_redirects=max(0, int(self.policy.max_redirects)),
                     headers=req_headers,
                 ) as client:
-                    response = client.request(method, url)
-                self._assert_public_response(response)
+                    response = self._send(client, method, url)
                 latency = time.time() - started
                 self._host_state(host).last_request_at = time.time()
 
@@ -449,6 +550,8 @@ class AdaptivePoliteFetcher:
                 return response
             except CrawlBlockedError:
                 raise
+            except SecurityError as exc:
+                raise CrawlBlockedError(str(exc)) from exc
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if not isinstance(exc, httpx.HTTPStatusError):
@@ -470,21 +573,23 @@ class AdaptivePoliteFetcher:
         assert last_exc is not None
         raise last_exc
 
-    def _assert_public_response(self, response: httpx.Response) -> None:
-        """Po redirectach — sprawdź finalny host (SSRF via redirect)."""
-        if not self.policy.block_private_networks:
-            return
-        from market_agents.security import SecurityError, validate_fetch_url
-
+    def fetch_once(
+        self,
+        url: str,
+        *,
+        method: str = "GET",
+        headers: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
+        """Pojedynczy request z SSRF guard, bez throttlingu/robots (np. feedy RSS)."""
         try:
-            validate_fetch_url(
-                str(response.url),
-                allowed_hosts=self.policy.allowed_hosts or None,
-                allow_private=False,
-                resolve_dns=bool(self.policy.resolve_dns_for_ssrf),
-            )
+            with self._client(
+                timeout=timeout or self.policy.timeout_seconds,
+                headers={"User-Agent": self.policy.user_agent, **(headers or {})},
+            ) as client:
+                return self._send(client, method, url)
         except SecurityError as exc:
-            raise CrawlBlockedError(f"SSRF blocked after redirect: {exc}") from exc
+            raise CrawlBlockedError(str(exc)) from exc
 
     def get_text(self, url: str, **kwargs: Any) -> str:
         return self.get(url, **kwargs).text
