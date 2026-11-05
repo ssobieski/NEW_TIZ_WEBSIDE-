@@ -4401,6 +4401,7 @@ class ToolRegistry:
                 self.config.sources.firm_discovery,
                 known,
                 lookback_hours=max(self.config.agents.lookback_hours, 168),
+                fetcher=self._fetcher,
             )
             for item in collector.collect(max_items=limit):
                 firms = (item.analysis or {}).get("new_firms") or []

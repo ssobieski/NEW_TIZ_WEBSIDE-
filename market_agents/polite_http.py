@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
+import httpcore
 import httpx
 
 DEFAULT_USER_AGENT = (
@@ -80,6 +81,107 @@ class HostHealth:
 
 class CrawlBlockedError(RuntimeError):
     """Host w cooldown / robots disallow / soft-ban."""
+
+
+class _GuardedNetworkBackend(httpcore.NetworkBackend):
+    """
+    SSRF guard na poziomie połączenia TCP (każdy hop, także redirect).
+    DNS rozwiązywany raz; łączymy się z dokładnie tym IP, które przeszło kontrolę.
+    """
+
+    def __init__(self, *, block_private: bool) -> None:
+        self._block_private = block_private
+        self._inner = httpcore.SyncBackend()
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.NetworkStream:
+        from market_agents.security import SecurityError, resolve_connect_addresses
+
+        try:
+            addresses = resolve_connect_addresses(
+                host, port, allow_private=not self._block_private
+            )
+        except SecurityError as exc:
+            raise CrawlBlockedError(str(exc)) from exc
+        except OSError as exc:
+            raise httpcore.ConnectError(str(exc)) from exc
+        last_exc: Exception | None = None
+        for addr in addresses:
+            try:
+                return self._inner.connect_tcp(
+                    addr,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last_exc = exc
+        assert last_exc is not None
+        raise last_exc
+
+    def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.NetworkStream:
+        raise CrawlBlockedError("unix socket connections are not allowed")
+
+    def sleep(self, seconds: float) -> None:
+        self._inner.sleep(seconds)
+
+
+class _GuardedTransport(httpx.HTTPTransport):
+    """HTTPTransport bez proxy z env, łączący się wyłącznie przez _GuardedNetworkBackend."""
+
+    def __init__(self, *, block_private: bool) -> None:
+        super().__init__()
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(),
+            network_backend=_GuardedNetworkBackend(block_private=block_private),
+        )
+
+
+def guarded_client(
+    policy: CrawlPolicy,
+    *,
+    timeout: float,
+    headers: dict[str, str] | None = None,
+) -> httpx.Client:
+    """
+    httpx.Client dla URL-i z zewnątrz: każdy hop (także redirect) jest walidowany
+    przed wysłaniem, a połączenie TCP idzie tylko na zweryfikowany publiczny IP.
+    """
+    from market_agents.security import SecurityError, validate_fetch_url
+
+    def _check_hop(request: httpx.Request) -> None:
+        try:
+            validate_fetch_url(
+                str(request.url),
+                allowed_hosts=policy.allowed_hosts or None,
+                allow_private=not bool(policy.block_private_networks),
+                resolve_dns=False,
+            )
+        except SecurityError as exc:
+            raise CrawlBlockedError(f"{exc} ({request.url})") from exc
+
+    return httpx.Client(
+        timeout=timeout,
+        follow_redirects=True,
+        max_redirects=max(0, int(policy.max_redirects)),
+        headers=headers,
+        transport=_GuardedTransport(
+            block_private=bool(policy.block_private_networks)
+        ),
+        event_hooks={"request": [_check_hop]},
+    )
 
 
 def _parse_retry_after(value: str | None) -> float | None:
@@ -259,9 +361,9 @@ class AdaptivePoliteFetcher:
             robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
             parser = RobotFileParser()
             try:
-                with httpx.Client(
+                with guarded_client(
+                    self.policy,
                     timeout=10,
-                    follow_redirects=True,
                     headers={"User-Agent": self.policy.user_agent},
                 ) as client:
                     resp = client.get(robots_url)
@@ -364,15 +466,7 @@ class AdaptivePoliteFetcher:
             raise CrawlBlockedError(str(exc)) from exc
 
         if not self.policy.enabled:
-            with httpx.Client(
-                timeout=timeout or self.policy.timeout_seconds,
-                follow_redirects=True,
-                max_redirects=max(0, int(self.policy.max_redirects)),
-                headers={"User-Agent": self.policy.user_agent, **(headers or {})},
-            ) as client:
-                response = client.request(method, url, headers=headers)
-                self._assert_public_response(response)
-                return response
+            return self.get_guarded(url, method=method, headers=headers, timeout=timeout)
 
         host = self.host_of(url)
         if not host:
@@ -399,10 +493,9 @@ class AdaptivePoliteFetcher:
                     **(headers or {}),
                 }
                 started = time.time()
-                with httpx.Client(
+                with guarded_client(
+                    self.policy,
                     timeout=timeout or self.policy.timeout_seconds,
-                    follow_redirects=True,
-                    max_redirects=max(0, int(self.policy.max_redirects)),
                     headers=req_headers,
                 ) as client:
                     response = client.request(method, url)
@@ -470,6 +563,35 @@ class AdaptivePoliteFetcher:
         assert last_exc is not None
         raise last_exc
 
+    def get_guarded(
+        self,
+        url: str,
+        *,
+        method: str = "GET",
+        headers: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> httpx.Response:
+        """Pojedynczy request z SSRF guard (każdy hop), bez robots/throttlingu."""
+        from market_agents.security import SecurityError, validate_fetch_url
+
+        try:
+            url = validate_fetch_url(
+                url,
+                allowed_hosts=self.policy.allowed_hosts or None,
+                allow_private=not bool(self.policy.block_private_networks),
+                resolve_dns=bool(self.policy.resolve_dns_for_ssrf),
+            )
+        except SecurityError as exc:
+            raise CrawlBlockedError(str(exc)) from exc
+        with guarded_client(
+            self.policy,
+            timeout=timeout or self.policy.timeout_seconds,
+            headers={"User-Agent": self.policy.user_agent, **(headers or {})},
+        ) as client:
+            response = client.request(method, url)
+            self._assert_public_response(response)
+            return response
+
     def _assert_public_response(self, response: httpx.Response) -> None:
         """Po redirectach — sprawdź finalny host (SSRF via redirect)."""
         if not self.policy.block_private_networks:
@@ -491,6 +613,33 @@ class AdaptivePoliteFetcher:
 
     def get_bytes(self, url: str, **kwargs: Any) -> bytes:
         return self.get(url, **kwargs).content
+
+
+def parse_feed(url: str, fetcher: AdaptivePoliteFetcher | None = None) -> Any:
+    """
+    feedparser.parse(url) sam pobiera URL (urllib, redirecty, bez SSRF guard) —
+    pobierz przez guarded client, a feedparserowi daj tylko treść.
+    """
+    import io
+
+    import feedparser
+
+    fetcher = fetcher or AdaptivePoliteFetcher.shared()
+    try:
+        response = fetcher.get_guarded(
+            url,
+            headers={
+                "Accept": "application/rss+xml, application/atom+xml, "
+                "application/xml;q=0.9, */*;q=0.8"
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        return feedparser.FeedParserDict(entries=[], bozo=1, bozo_exception=exc)
+    content_type = response.headers.get("content-type")
+    return feedparser.parse(
+        io.BytesIO(response.content),
+        response_headers={"content-type": content_type} if content_type else None,
+    )
 
 
 def build_fetcher_from_config(config: Any) -> AdaptivePoliteFetcher:
