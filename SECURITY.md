@@ -13,6 +13,7 @@ Poniżej mapa zagrożeń i wdrożone mechanizmy.
 | T-05 | R2 key escape | `enforce_r2_key_prefix` |
 | T-07 | Wyciek sekretów w traces | `redact_secrets` w traces / tool errors / R2 excerpts |
 | T-08 | Poisoning parse rules | `auto_promote_host_skills: false` (default) |
+| T-09 | Worker feedback (inbox) poza inbox | `fleet-absorb` otwiera katalogi/pliki przez fd z `O_NOFOLLOW`, allowlista plików, `ABSORBED` przez rename w katalogu packa; push rsync bez `-l` (`-rtz`) |
 
 ## Konfiguracja (`agents.security` + `agents.crawl`)
 

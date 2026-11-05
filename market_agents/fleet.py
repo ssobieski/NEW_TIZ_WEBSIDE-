@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import closing
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -324,26 +327,57 @@ class FleetSync:
             "worker_id": self.worker_id,
         }
 
+    def _iter_feedback_packs(self) -> Iterator[tuple[str, str, int]]:
+        """Yield (worker_id, pack_name, pack_fd) for real directories under inbox.
+
+        Symlinked worker/pack directories are skipped. pack_fd is only valid
+        until the next iteration step.
+        """
+        from market_agents.security import open_dir_nofollow
+
+        inbox_fd = open_dir_nofollow(self.inbox)
+        if inbox_fd is None:
+            return
+        try:
+            for worker_name in sorted(os.listdir(inbox_fd)):
+                worker_fd = open_dir_nofollow(worker_name, dir_fd=inbox_fd)
+                if worker_fd is None:
+                    continue
+                try:
+                    for pack_name in sorted(os.listdir(worker_fd)):
+                        pack_fd = open_dir_nofollow(pack_name, dir_fd=worker_fd)
+                        if pack_fd is None:
+                            continue
+                        try:
+                            yield worker_name, pack_name, pack_fd
+                        finally:
+                            os.close(pack_fd)
+                finally:
+                    os.close(worker_fd)
+        finally:
+            os.close(inbox_fd)
+
+    def _feedback_meta(self, worker_name: str, pack_name: str, pack_fd: int) -> dict[str, Any]:
+        from market_agents.security import is_regular_file_at, read_regular_file_at
+
+        meta: dict[str, Any] = {}
+        raw = read_regular_file_at("manifest.json", dir_fd=pack_fd)
+        if raw is not None:
+            try:
+                parsed = json.loads(raw)
+            except Exception:  # noqa: BLE001
+                parsed = None
+            if isinstance(parsed, dict):
+                meta.update(parsed)
+        meta["worker_id"] = worker_name
+        meta["path"] = str(self.inbox / worker_name / pack_name)
+        meta["absorbed"] = is_regular_file_at("ABSORBED", dir_fd=pack_fd)
+        return meta
+
     def list_feedback(self) -> list[dict[str, Any]]:
         self.ensure_dirs()
-        rows: list[dict[str, Any]] = []
-        if not self.inbox.exists():
-            return rows
-        for worker_dir in sorted(self.inbox.iterdir()):
-            if not worker_dir.is_dir():
-                continue
-            for pack in sorted(worker_dir.iterdir()):
-                if not pack.is_dir():
-                    continue
-                manifest_path = pack / "manifest.json"
-                meta: dict[str, Any] = {"worker_id": worker_dir.name, "path": str(pack)}
-                if manifest_path.exists():
-                    try:
-                        meta.update(json.loads(manifest_path.read_text(encoding="utf-8")))
-                    except Exception:  # noqa: BLE001
-                        pass
-                rows.append(meta)
-        return rows
+        with closing(self._iter_feedback_packs()) as packs:
+            return [self._feedback_meta(w, p, fd) for w, p, fd in packs]
 
     def absorb_feedback(self, limit: int = 50) -> dict[str, Any]:
         """
@@ -351,38 +385,45 @@ class FleetSync:
         - merge crawl_health (max delay, sum counts)
         - merge site_parse_rules (wyższa success_count wygrywa)
         """
+        from market_agents.security import (
+            is_regular_file_at,
+            read_regular_file_at,
+            write_file_at,
+        )
+
         if self.fleet.role not in {"central", "both"}:
             return {"ok": False, "error": "absorb_feedback tylko dla role=central|both"}
         self.ensure_dirs()
-        pending = [
-            p
-            for p in self.list_feedback()
-            if not (Path(str(p.get("path") or "")) / "ABSORBED").exists()
-        ][:limit]
+        processed = 0
         absorbed = 0
         merged_hosts = 0
         merged_rules = 0
         signals_appended = 0
-        for pack_meta in pending:
-            pack = Path(str(pack_meta.get("path") or ""))
-            if not pack.exists():
-                continue
-            crawl_src = pack / "crawl_health.json"
-            if crawl_src.exists():
-                merged_hosts += self._merge_crawl_health(crawl_src)
-            rules_src = pack / "site_parse_rules.json"
-            if rules_src.exists():
-                merged_rules += self._merge_parse_rules(rules_src)
-            tail = pack / "items_tail.jsonl"
-            if tail.exists():
-                signals_appended += self._absorb_items_tail(
-                    tail, worker_id=str(pack_meta.get("worker_id") or pack.parent.name)
-                )
-            (pack / "ABSORBED").write_text(
-                json.dumps({"absorbed_at": time.time()}, indent=2),
-                encoding="utf-8",
-            )
-            absorbed += 1
+        with closing(self._iter_feedback_packs()) as packs:
+            for worker_name, _pack_name, pack_fd in packs:
+                if processed >= limit:
+                    break
+                if is_regular_file_at("ABSORBED", dir_fd=pack_fd):
+                    continue
+                processed += 1
+                crawl_raw = read_regular_file_at("crawl_health.json", dir_fd=pack_fd)
+                if crawl_raw is not None:
+                    merged_hosts += self._merge_crawl_health(_parse_json_obj(crawl_raw))
+                rules_raw = read_regular_file_at("site_parse_rules.json", dir_fd=pack_fd)
+                if rules_raw is not None:
+                    merged_rules += self._merge_parse_rules(_parse_json_obj(rules_raw))
+                tail_raw = read_regular_file_at("items_tail.jsonl", dir_fd=pack_fd)
+                if tail_raw is not None:
+                    signals_appended += self._append_signals(tail_raw, worker_id=worker_name)
+                try:
+                    write_file_at(
+                        "ABSORBED",
+                        json.dumps({"absorbed_at": time.time()}, indent=2),
+                        dir_fd=pack_fd,
+                    )
+                except OSError:
+                    continue
+                absorbed += 1
         return {
             "ok": True,
             "absorbed_packs": absorbed,
@@ -392,6 +433,12 @@ class FleetSync:
         }
 
     def _absorb_items_tail(self, src: Path, *, worker_id: str) -> int:
+        from market_agents.security import read_regular_file_at
+
+        raw = read_regular_file_at(src, dir_fd=None)
+        return self._append_signals(raw or "", worker_id=worker_id)
+
+    def _append_signals(self, text: str, *, worker_id: str) -> int:
         """Append worker signal metadata into data/fleet/inbox_signals.jsonl (dedupe by URL)."""
         dest = self.sync_root / "inbox_signals.jsonl"
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -407,7 +454,7 @@ class FleetSync:
                     continue
         appended = 0
         with dest.open("a", encoding="utf-8") as fh:
-            for line in src.read_text(encoding="utf-8").splitlines():
+            for line in text.splitlines():
                 try:
                     row = json.loads(line)
                 except Exception:  # noqa: BLE001
@@ -424,9 +471,8 @@ class FleetSync:
                 appended += 1
         return appended
 
-    def _merge_crawl_health(self, src: Path) -> int:
+    def _merge_crawl_health(self, incoming: dict[str, Any]) -> int:
         dest = self.knowledge_dir / "crawl_health.json"
-        incoming = _load_json(src)
         current = _load_json(dest) if dest.exists() else {"hosts": []}
         cur_hosts = {
             h.get("host"): h
@@ -476,9 +522,8 @@ class FleetSync:
         dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return changed
 
-    def _merge_parse_rules(self, src: Path) -> int:
+    def _merge_parse_rules(self, incoming: dict[str, Any]) -> int:
         dest = self.knowledge_dir / "site_parse_rules.json"
-        incoming = _load_json(src)
         current = _load_json(dest) if dest.exists() else {"rules": []}
         in_rules = incoming.get("rules", incoming if isinstance(incoming, list) else [])
         cur_rules = current.get("rules", current if isinstance(current, list) else [])
@@ -535,7 +580,7 @@ class FleetSync:
         self.ensure_dirs()
         latest = self.latest_knowledge_pack()
         feedback = self.list_feedback()
-        pending = [f for f in feedback if not (Path(f["path"]) / "ABSORBED").exists()]
+        pending = [f for f in feedback if not f["absorbed"]]
         return {
             "ok": True,
             "role": self.fleet.role,
@@ -551,7 +596,14 @@ class FleetSync:
 
 def _load_json(path: Path) -> dict[str, Any]:
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        return _parse_json_obj(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _parse_json_obj(text: str) -> dict[str, Any]:
+    try:
+        raw = json.loads(text)
     except Exception:  # noqa: BLE001
         return {}
     return raw if isinstance(raw, dict) else {"rules": raw}

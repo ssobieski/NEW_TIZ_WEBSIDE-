@@ -464,7 +464,7 @@ Sync katalogu (przykład rsync z crona na VPS):
 ```bash
 rsync -az user@gpu-host:/opt/tiz/data/fleet/ ./data/fleet/
 # … worker cycle …
-rsync -az ./data/fleet/inbox/ user@gpu-host:/opt/tiz/data/fleet/inbox/
+rsync -rtz ./data/fleet/inbox/ user@gpu-host:/opt/tiz/data/fleet/inbox/
 ```
 
 CLI: `fleet-status`, `fleet-publish`, `fleet-pull`, `fleet-push`, `fleet-absorb`, `worker`.
