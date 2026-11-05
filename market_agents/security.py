@@ -14,8 +14,11 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
 import socket
+import stat
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -434,6 +437,107 @@ def iter_safe_pack_files(
             continue
         out.append(src)
     return out
+
+
+# --- Worker feedback (inbox) access ----------------------------------------
+# Inbox content is written by workers, so every lookup below is relative to a
+# directory fd that was itself opened with O_NOFOLLOW. Paths are never
+# re-resolved by name after a check.
+
+FLEET_ALLOWED_FEEDBACK = frozenset(
+    {
+        "crawl_health.json",
+        "site_parse_rules.json",
+        "items_tail.jsonl",
+        "manifest.json",
+    }
+)
+
+_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+_DIR_NOFOLLOW_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | _CLOEXEC
+_READ_NOFOLLOW_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | _CLOEXEC
+_CREATE_NOFOLLOW_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | _CLOEXEC
+
+
+def _single_component(name: str) -> str:
+    if not name or name in {".", ".."} or "/" in name or "\x00" in name:
+        raise SecurityError(f"unsafe path component: {name!r}")
+    return name
+
+
+def open_dir_nofollow(path: str | Path, *, dir_fd: int | None = None) -> int | None:
+    """Open a real directory (not a symlink) and return its fd, else None.
+
+    With dir_fd, path must be a single name inside that directory.
+    """
+    name = os.fspath(path)
+    if dir_fd is not None:
+        _single_component(name)
+    try:
+        return os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=dir_fd)
+    except OSError:
+        return None
+
+
+def is_regular_file_at(name: str, *, dir_fd: int) -> bool:
+    try:
+        st = os.stat(_single_component(name), dir_fd=dir_fd, follow_symlinks=False)
+    except OSError:
+        return False
+    return stat.S_ISREG(st.st_mode)
+
+
+def read_regular_file_at(
+    name: str,
+    *,
+    dir_fd: int | None,
+    allowlist: Iterable[str] = FLEET_ALLOWED_FEEDBACK,
+) -> str | None:
+    """Read an allowlisted regular file without following symlinks; None if unsafe/missing."""
+    name = os.fspath(name)
+    if dir_fd is not None:
+        _single_component(name)
+    if os.path.basename(name) not in set(allowlist):
+        return None
+    try:
+        fd = os.open(name, _READ_NOFOLLOW_FLAGS, dir_fd=dir_fd)
+    except OSError:
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(fd, 1 << 20)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return b"".join(chunks).decode("utf-8", errors="replace")
+
+
+def write_file_at(name: str, data: str, *, dir_fd: int) -> None:
+    """Atomically (re)place name inside dir_fd; an existing symlink is replaced, never followed."""
+    name = _single_component(name)
+    tmp = f".{name}.{uuid.uuid4().hex}.tmp"
+    fd = os.open(tmp, _CREATE_NOFOLLOW_FLAGS, 0o644, dir_fd=dir_fd)
+    try:
+        try:
+            view = memoryview(data.encode("utf-8"))
+            while view:
+                view = view[os.write(fd, view):]
+        finally:
+            os.close(fd)
+        os.replace(tmp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
 
 
 def enforce_r2_key_prefix(key: str, prefix: str) -> str:

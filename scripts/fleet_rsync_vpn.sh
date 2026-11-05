@@ -45,7 +45,8 @@ case "$ACTION" in
     ;;
   push)
     echo "==> push $LOCAL_FLEET_PATH/inbox → Dell inbox"
-    rsync -az \
+    # -rtz (not -a): symlinks and device/special files are never sent to central.
+    rsync -rtz \
       "${LOCAL_FLEET_PATH}/inbox/" \
       "${DELL_SSH}:${DELL_FLEET_PATH}/inbox/"
     echo "==> OK push (na Dellu: python -m market_agents fleet-absorb --republish)"
