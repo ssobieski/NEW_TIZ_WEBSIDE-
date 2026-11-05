@@ -2449,7 +2449,9 @@ class ToolRegistry:
                 key = enforce_r2_key_prefix(key, self.config.sources.cloudflare_r2.prefix)
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "error": safe_error(exc), "security": True}
-        text = redact_secrets(self._get_r2().get_text(key), max_chars=max_chars)
+        # Read past max_chars so a secret straddling the cut is still matched by redaction.
+        raw = self._get_r2().get_text(key, max_chars=max(0, max_chars) + 512)
+        text = redact_secrets(raw, max_chars=max_chars)
         return {
             "ok": True,
             "key": key,

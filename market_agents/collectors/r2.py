@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import json
 from typing import Any
 from urllib.parse import unquote
@@ -8,6 +9,61 @@ import httpx
 
 from market_agents.config import CloudflareR2Config
 from market_agents.models import MarketItem
+
+_COLLECT_MAX_CHARS = 50_000
+_SEARCH_MAX_CHARS = 8_000
+_READ_CHUNK_BYTES = 8_192
+
+
+class R2ObjectTooLargeError(RuntimeError):
+    """Obiekt R2 przekracza CloudflareR2Config.max_object_bytes."""
+
+
+def _read_text(body: Any, *, key: str, max_chars: int | None, max_bytes: int) -> str:
+    # Każdy znak to co najmniej jeden bajt, więc proszenie o (max_chars - chars)
+    # bajtów nigdy nie czyta tekstu ASCII ponad limit znaków.
+    raw = bytearray()
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    parts: list[str] = []
+    chars = 0
+    utf8 = True
+    while max_chars is None or chars < max_chars:
+        want = _READ_CHUNK_BYTES
+        if max_chars is not None:
+            want = min(want, max_chars - chars)
+        if len(raw) >= max_bytes:
+            if body.read(1):
+                raise R2ObjectTooLargeError(
+                    f"R2 object {key} exceeds {max_bytes} bytes"
+                )
+            chunk = b""
+        else:
+            chunk = body.read(min(want, max_bytes - len(raw)))
+        if not chunk:
+            if utf8:
+                try:
+                    tail = decoder.decode(b"", final=True)
+                except UnicodeDecodeError:
+                    utf8 = False
+                    parts = [raw.decode("latin-1")]
+                else:
+                    parts.append(tail)
+            break
+        raw += chunk
+        if utf8:
+            try:
+                piece = decoder.decode(bytes(chunk))
+            except UnicodeDecodeError:
+                utf8 = False
+                parts = [raw.decode("latin-1")]
+                chars = len(raw)
+                continue
+        else:
+            piece = bytes(chunk).decode("latin-1")
+        parts.append(piece)
+        chars += len(piece)
+    text = "".join(parts)
+    return text if max_chars is None else text[:max_chars]
 
 
 class CloudflareR2Collector:
@@ -74,7 +130,7 @@ class CloudflareR2Collector:
                 )
                 continue
             try:
-                body = self.get_text(key)
+                body = self.get_text(key, max_chars=_COLLECT_MAX_CHARS)
             except Exception as exc:  # noqa: BLE001
                 print(f"[r2] read {key}: {exc}")
                 continue
@@ -85,7 +141,7 @@ class CloudflareR2Collector:
                     url=f"r2://{self.config.bucket}/{key}",
                     source="cloudflare_r2",
                     summary=excerpt[:400],
-                    content=body[:50000],
+                    content=body,
                     tags=["r2", "archive", "text"],
                     relevance_score=0.5,
                     analysis={"r2_key": key, "chars": len(body)},
@@ -116,15 +172,28 @@ class CloudflareR2Collector:
             token = resp.get("NextContinuationToken")
         return keys[:limit]
 
-    def get_text(self, key: str) -> str:
+    def get_text(self, key: str, max_chars: int | None = None) -> str:
+        """
+        Zwraca tekst obiektu. Z max_chars czyta tylko tyle bajtów, ile trzeba
+        na max_chars znaków. Obiekt ponad max_object_bytes jest odrzucany:
+        po Content-Length odpowiedzi GET przed odczytem treści, a bez niego
+        (chunked) po przekroczeniu limitu w trakcie strumieniowania.
+        """
         client = self._s3()
         obj = client.get_object(Bucket=self.config.bucket, Key=key)
-        raw = obj["Body"].read()
-        # try utf-8 then latin-1
+        body = obj["Body"]
         try:
-            return raw.decode("utf-8")
-        except UnicodeDecodeError:
-            return raw.decode("latin-1", errors="replace")
+            ceiling = int(self.config.max_object_bytes)
+            length = obj.get("ContentLength")
+            if length is not None and int(length) > ceiling:
+                raise R2ObjectTooLargeError(
+                    f"R2 object {key} too large ({length} > {ceiling} bytes)"
+                )
+            if max_chars is not None and max_chars <= 0:
+                return ""
+            return _read_text(body, key=key, max_chars=max_chars, max_bytes=ceiling)
+        finally:
+            body.close()
 
     def get_json(self, key: str) -> Any:
         return json.loads(self.get_text(key))
@@ -142,7 +211,7 @@ class CloudflareR2Collector:
                     score += 1
             if score == 0 and self._is_text_key(key):
                 try:
-                    text = self.get_text(key)[:8000].lower()
+                    text = self.get_text(key, max_chars=_SEARCH_MAX_CHARS).lower()
                     score += sum(1 for token in q.split() if len(token) > 2 and token in text)
                 except Exception:  # noqa: BLE001
                     continue

@@ -77,6 +77,8 @@ class CloudflareR2Config(BaseModel):
     prefix: str = "monitoring/"
     endpoint_url: str | None = None  # domyślnie https://<account>.r2.cloudflarestorage.com
     max_objects: int = 100
+    # obiekty większe niż ten limit (Content-Length lub faktycznie odczytane bajty) są odrzucane
+    max_object_bytes: int = Field(default=15_000_000, gt=0)
     # rozszerzenia traktowane jako źródła tekstowe
     text_extensions: list[str] = Field(
         default_factory=lambda: [
