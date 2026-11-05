@@ -679,6 +679,7 @@ def security_cmd(
         allow_notion_tools=bool(getattr(sec, "allow_notion_tools", True)),
         allow_r2_tools=bool(getattr(sec, "allow_r2_tools", True)),
         strict_tool_mode=bool(getattr(sec, "strict_tool_mode", False)),
+        strict_allowed_tools=list(getattr(sec, "strict_allowed_tools", None) or []),
         redact_traces=bool(getattr(sec, "redact_traces", True)),
         fleet_allowlist_only=bool(getattr(sec, "fleet_allowlist_only", True)),
         enforce_r2_prefix=bool(getattr(sec, "enforce_r2_prefix", True)),

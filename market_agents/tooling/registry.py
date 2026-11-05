@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -86,6 +87,7 @@ class ToolRegistry:
         self.config = config
         self.memory = memory
         self._fetcher = build_fetcher_from_config(config)
+        self._security = self._build_security_policy(config)
         self._parse_rules = (
             SiteParseRulesStore.load(data_dir=config.data_path)
             if config.agents.agentic.learn_parse_rules
@@ -99,7 +101,8 @@ class ToolRegistry:
             self._parsing_skills = ParsingSkillsStore()
         self.parser = IntelligentParser(
             rules=self._parse_rules if config.agents.agentic.learn_parse_rules else None,
-            learn=bool(config.agents.agentic.learn_parse_rules),
+            learn=bool(config.agents.agentic.learn_parse_rules)
+            and self._security.persistence_allowed("fetch_and_parse"),
             fetcher=self._fetcher,
         )
         self.candidates = candidates or []
@@ -107,7 +110,6 @@ class ToolRegistry:
         self.structured: list[dict[str, Any]] = []
         self._notion: NotionCollector | None = None
         self._r2 = None
-        self._security = self._build_security_policy(config)
         self._governance = GovernanceEngine.from_config(config)
         self._handlers: dict[str, ToolFn] = {
             "list_candidates": self.list_candidates,
@@ -222,6 +224,7 @@ class ToolRegistry:
             allow_notion_tools=bool(getattr(sec, "allow_notion_tools", True)),
             allow_r2_tools=bool(getattr(sec, "allow_r2_tools", True)),
             strict_tool_mode=bool(getattr(sec, "strict_tool_mode", False)),
+            strict_allowed_tools=list(getattr(sec, "strict_allowed_tools", None) or []),
             redact_traces=bool(getattr(sec, "redact_traces", True)),
             trace_tool_result_max_chars=int(
                 getattr(sec, "trace_tool_result_max_chars", 4000)
@@ -2273,6 +2276,7 @@ class ToolRegistry:
         if css_selector is not None:
             css_selector = str(css_selector).strip() or None
         bypass_cache = bool(args.get("bypass_cache"))
+        persist = self._security.persistence_allowed("fetch_and_parse")
         if url in self.parsed_cache and not bypass_cache and not force_method and css_selector is None:
             doc = self.parsed_cache[url]
         else:
@@ -2289,8 +2293,8 @@ class ToolRegistry:
                         item.published_at = doc.published_at
                     from market_agents.ontology import attach_domain_context
 
-                    attach_domain_context(item, ontology=self._get_ontology(), ingest=True)
-            if self.config.agents.agentic.learn_parse_rules:
+                    attach_domain_context(item, ontology=self._get_ontology(), ingest=persist)
+            if self.config.agents.agentic.learn_parse_rules and persist:
                 self._parse_rules.save(self.config.data_path)
         hint = None
         if (not doc.ok) or len(doc.text) < 200:
@@ -2535,7 +2539,9 @@ class ToolRegistry:
         """Skan hubów katalogów pod kątem dostępnych cenników."""
         max_sources = int(args.get("max_sources") or 12)
         max_links = int(args.get("max_links_per_source") or 40)
-        register = bool(args.get("register", True))
+        register = bool(args.get("register", True)) and self._security.persistence_allowed(
+            "discover_pricelists"
+        )
         source_name = str(args.get("source_name") or "").strip()
         url = str(args.get("url") or "").strip()
 
@@ -2652,7 +2658,9 @@ class ToolRegistry:
         """Skan hubów katalogów pod kątem handbooków / cutting data / ISO 13399."""
         max_sources = int(args.get("max_sources") or 12)
         max_links = int(args.get("max_links_per_source") or 40)
-        register = bool(args.get("register", True))
+        register = bool(args.get("register", True)) and self._security.persistence_allowed(
+            "discover_product_tech"
+        )
         source_name = str(args.get("source_name") or "").strip()
         url = str(args.get("url") or "").strip()
 
@@ -2783,7 +2791,9 @@ class ToolRegistry:
         text = str(args.get("text") or "")
         url = str(args.get("url") or "").strip() or None
         brand = str(args.get("brand") or "") or None
-        register = bool(args.get("register", True))
+        register = bool(args.get("register", True)) and self._security.persistence_allowed(
+            "extract_product_tech_schema"
+        )
         if not text and url:
             max_pages = int(args.get("max_pages") or 10)
             collector = self._resolve_catalog({**args, "url": url})
@@ -3106,7 +3116,9 @@ class ToolRegistry:
 
     def discover_literature(self, args: dict[str, Any]) -> dict[str, Any]:
         max_items = int(args.get("max_items") or 25)
-        register = args.get("register", True)
+        register = args.get("register", True) and self._security.persistence_allowed(
+            "discover_literature"
+        )
         collector = self._resolve_literature(args)
         result = collector.discover_items(max_items=max_items)
         registered = 0
@@ -3234,7 +3246,9 @@ class ToolRegistry:
     def extract_domain_context_tool(self, args: dict[str, Any]) -> dict[str, Any]:
         text = str(args.get("text") or "").strip()
         url = str(args.get("url") or "").strip()
-        ingest = args.get("ingest", True)
+        ingest = args.get("ingest", True) and self._security.persistence_allowed(
+            "extract_domain_context"
+        )
         if url and not text:
             try:
                 doc = self.parser.parse_url(url)
@@ -3329,6 +3343,9 @@ class ToolRegistry:
         return result
 
     def list_known_firms(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._list_known_firms(args, tool="list_known_firms")
+
+    def _list_known_firms(self, args: dict[str, Any], *, tool: str) -> dict[str, Any]:
         query = str(args.get("query") or "").strip().lower()
         limit = int(args.get("limit") or 50)
         live = bool(args.get("live"))
@@ -3337,16 +3354,25 @@ class ToolRegistry:
         cache_path = self.config.data_path / "knowledge" / "known_firms.json"
         seed_path = Path("config/known_firms.seed.json")
         source = "cache"
+        notion_ok = self._security.notion_allowed(tool)
 
+        if live and not notion_ok:
+            return {
+                "ok": False,
+                "error": "Notion access disabled by security policy",
+                "tool": tool,
+                "security": True,
+            }
         if live:
             firms = self._get_notion().list_known_firms(
                 limit=max(limit, 200),
                 enrich_presentations=True,
             )
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(
-                json.dumps(firms, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            if self._security.persistence_allowed(tool):
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(
+                    json.dumps(firms, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
             source = "notion_live"
         elif cache_path.exists():
             try:
@@ -3357,6 +3383,13 @@ class ToolRegistry:
         elif seed_path.exists():
             firms = json.loads(seed_path.read_text(encoding="utf-8"))
             source = "seed"
+        elif not notion_ok:
+            return {
+                "ok": False,
+                "error": "Brak cache/seed; Notion access disabled by security policy",
+                "tool": tool,
+                "security": True,
+            }
         else:
             try:
                 firms = self._get_notion().list_known_firms(
@@ -3420,8 +3453,10 @@ class ToolRegistry:
         if not company:
             return {"ok": False, "error": "company required"}
         live = bool(args.get("live"))
-        listed = self.list_known_firms(
-            {"query": company, "limit": 20, "live": live, "include_presentation": True}
+        notion_ok = self._security.notion_allowed("get_firm_presentation")
+        listed = self._list_known_firms(
+            {"query": company, "limit": 20, "live": live, "include_presentation": True},
+            tool="get_firm_presentation",
         )
         if not listed.get("ok"):
             return listed
@@ -3446,7 +3481,7 @@ class ToolRegistry:
             }
         presentation = str(match.get("presentation") or "").strip()
         notion_url = str(match.get("notion_url") or match.get("id") or "")
-        if (live or not presentation) and notion_url:
+        if (live or not presentation) and notion_url and notion_ok:
             try:
                 doc = self.fetch_notion_page({"page_id_or_url": notion_url})
                 if doc.get("ok") and doc.get("text"):
@@ -3742,7 +3777,9 @@ class ToolRegistry:
         limit = int(args.get("limit") or 30)
         parse_candidates = args.get("parse_candidates", True)
         scan_notion = bool(args.get("scan_notion_cache"))
-        persist = args.get("persist", True)
+        persist = args.get("persist", True) and self._security.persistence_allowed(
+            "discover_relations"
+        )
         known = self._get_known()
         graph = self._get_relations()
         found: list[dict[str, Any]] = []
@@ -3895,13 +3932,17 @@ class ToolRegistry:
         company = str(args.get("company") or "").strip()
         if not company:
             return {"ok": False, "error": "company required"}
+        persist = self._security.persistence_allowed("score_firm_profile")
         reg = self._get_profiles()
+        if not persist:
+            reg = copy.deepcopy(reg)
         p = reg.get(company)
         if not p:
             return {"ok": False, "error": f"brak profilu: {company}"}
         p = reg.upsert(p)
-        reg.save(self.config.data_path)
-        return {"ok": True, "company": p.company, "scores": p.scores}
+        if persist:
+            reg.save(self.config.data_path)
+        return {"ok": True, "company": p.company, "scores": p.scores, "persisted": persist}
 
     def build_firm_profiles(self, args: dict[str, Any]) -> dict[str, Any]:
         reg = self._get_profiles()
@@ -3973,7 +4014,10 @@ class ToolRegistry:
         company = str(args.get("company") or "").strip()
         if not company:
             return {"ok": False, "error": "company required"}
+        persist = self._security.persistence_allowed("enrich_firm_profile")
         reg = self._get_profiles()
+        if not persist:
+            reg = copy.deepcopy(reg)
         p = reg.get(company)
         if not p:
             # stub from known firms
@@ -4002,9 +4046,11 @@ class ToolRegistry:
             return {"ok": False, "error": safe_error(exc), "url": url}
         extracted = extract_contacts_from_html(str(html), base_url=str(final_url), company=company)
         p = reg.apply_enrichment(p, extracted)
-        reg.save(self.config.data_path)
+        if persist:
+            reg.save(self.config.data_path)
         return {
             "ok": True,
+            "persisted": persist,
             "company": p.company,
             "url": final_url,
             "extracted": {
@@ -4121,7 +4167,9 @@ class ToolRegistry:
             return {"ok": False, "error": "company required"}
         url = str(args.get("url") or "").strip()
         text = str(args.get("text") or "")
-        persist = bool(args.get("persist", True))
+        persist = bool(args.get("persist", True)) and self._security.persistence_allowed(
+            "analyze_prospect"
+        )
         assumptions = load_vertical_assumptions()
         if text.strip():
             analysis = analyze_prospect_text(
@@ -4159,7 +4207,9 @@ class ToolRegistry:
         url = str(args.get("url") or "").strip()
         company = str(args.get("company") or "").strip() or None
         title = str(args.get("title") or "")
-        persist = bool(args.get("persist", False))
+        persist = bool(args.get("persist", False)) and self._security.persistence_allowed(
+            "parse_tender"
+        )
         if text.strip():
             analysis = parse_tender_text(
                 text, company=company, title=title, url=url, source="tool"
