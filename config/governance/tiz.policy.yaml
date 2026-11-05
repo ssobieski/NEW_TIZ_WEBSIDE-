@@ -83,6 +83,17 @@ rules:
       tool: upsert_parse_rule
     obligations: [human_approval, audit]
 
+  - id: approval-resolve-firm-duplicates-apply
+    priority: 185
+    effect: require_approval
+    reason: "resolve_firm_duplicates dry_run=false scala profile i przepisuje CRM/relacje — wymaga zatwierdzenia operatora"
+    match:
+      action: tool_call
+      tool: resolve_firm_duplicates
+      arg_equals:
+        dry_run: false
+    obligations: [human_approval, audit]
+
   # --- Rate limits / soft controls -----------------------------------------
   - id: rate-limit-deep-fetch
     priority: 120
