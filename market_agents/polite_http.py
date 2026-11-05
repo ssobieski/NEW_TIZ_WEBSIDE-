@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import random
+import socket
 import threading
 import time
+import zlib
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Iterator
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
+import httpcore
 import httpx
 
 DEFAULT_USER_AGENT = (
@@ -89,6 +92,174 @@ def _parse_retry_after(value: str | None) -> float | None:
         return max(0.0, float(value))
     except ValueError:
         return None
+
+
+class _PublicOnlyNetworkBackend(httpcore.SyncBackend):
+    """Resolve once, refuse private/metadata addresses, connect to the checked address."""
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.NetworkStream:
+        from market_agents.security import address_is_blocked
+
+        try:
+            infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except OSError as exc:
+            raise httpcore.ConnectError(f"DNS resolution failed for {host}: {exc}") from exc
+        addresses = list(dict.fromkeys(str(info[4][0]) for info in infos))
+        if not addresses:
+            raise httpcore.ConnectError(f"no addresses for {host}")
+        for addr in addresses:
+            blocked, reason = address_is_blocked(addr)
+            if blocked:
+                raise CrawlBlockedError(f"SSRF blocked: {host} → {reason}")
+        last_exc: Exception | None = None
+        for addr in addresses:
+            try:
+                return super().connect_tcp(
+                    addr,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last_exc = exc
+        assert last_exc is not None
+        raise last_exc
+
+
+_DECODABLE_ENCODINGS = {"gzip", "x-gzip", "deflate"}
+
+
+class _CappedStream(httpx.SyncByteStream):
+    """Body stream that stops (and drops the connection) past max_bytes, raw or decoded."""
+
+    def __init__(
+        self,
+        stream: httpx.SyncByteStream,
+        max_bytes: int,
+        encoding: str,
+        length_known: bool,
+    ) -> None:
+        self._stream = stream
+        self._max = max(0, int(max_bytes))
+        self._encoding = encoding
+        self._length_known = length_known
+
+    def _too_large(self, size: int) -> CrawlBlockedError:
+        return CrawlBlockedError(f"response too large (limit {self._max} bytes, read {size})")
+
+    def __iter__(self) -> Iterator[bytes]:
+        raw_total = 0
+        out_total = 0
+        inflater = None
+        started = False
+        if self._encoding in _DECODABLE_ENCODINGS:
+            inflater = zlib.decompressobj(zlib.MAX_WBITS | 32)
+        for chunk in self._stream:
+            raw_total += len(chunk)
+            # Without a Content-Length, reaching the cap means stop now: waiting for
+            # the next read to prove the body is longer lets the peer keep sending.
+            if raw_total > self._max or (raw_total == self._max and not self._length_known):
+                raise self._too_large(raw_total)
+            if inflater is None:
+                if chunk:
+                    yield chunk
+                continue
+            data = chunk
+            while data:
+                try:
+                    piece = inflater.decompress(data, max(1, self._max - out_total))
+                except zlib.error as exc:
+                    if self._encoding == "deflate" and not started:
+                        inflater = zlib.decompressobj(-zlib.MAX_WBITS)
+                        started = True
+                        continue
+                    raise httpx.DecodingError(str(exc)) from exc
+                started = True
+                out_total += len(piece)
+                if out_total >= self._max:
+                    raise self._too_large(out_total)
+                if piece:
+                    yield piece
+                data = inflater.unconsumed_tail
+        if inflater is not None:
+            piece = inflater.flush()
+            out_total += len(piece)
+            if out_total >= self._max:
+                raise self._too_large(out_total)
+            if piece:
+                yield piece
+
+    def close(self) -> None:
+        self._stream.close()
+
+
+class GuardedTransport(httpx.HTTPTransport):
+    """
+    Transport dla każdego requestu fetchera (także hopów redirect):
+    URL check przed wysłaniem, IP check przy connect, limit bajtów przy czytaniu.
+    """
+
+    def __init__(self, policy: CrawlPolicy) -> None:
+        super().__init__()
+        self.policy = policy
+        if policy.block_private_networks:
+            self._pool = httpcore.ConnectionPool(
+                ssl_context=httpx.create_ssl_context(),
+                keepalive_expiry=5.0,
+                network_backend=_PublicOnlyNetworkBackend(),
+            )
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        from market_agents.security import SecurityError, validate_fetch_url
+
+        try:
+            validate_fetch_url(
+                str(request.url),
+                allowed_hosts=self.policy.allowed_hosts or None,
+                allow_private=not bool(self.policy.block_private_networks),
+                resolve_dns=False,
+            )
+        except SecurityError as exc:
+            raise CrawlBlockedError(str(exc)) from exc
+        request.headers["Accept-Encoding"] = "gzip, deflate"
+        response = super().handle_request(request)
+        try:
+            return self._capped(response)
+        except BaseException:
+            response.close()
+            raise
+
+    def _capped(self, response: httpx.Response) -> httpx.Response:
+        max_bytes = int(self.policy.max_response_bytes)
+        clen = (response.headers.get("content-length") or "").strip()
+        if clen.isdigit() and int(clen) > max_bytes:
+            raise CrawlBlockedError(f"response too large ({clen} > {max_bytes})")
+        encoding = (response.headers.get("content-encoding") or "identity").strip().lower()
+        if encoding == "identity":
+            headers = response.headers.raw
+        elif encoding in _DECODABLE_ENCODINGS:
+            headers = [
+                (k, v)
+                for k, v in response.headers.raw
+                if k.lower() not in {b"content-encoding", b"content-length"}
+            ]
+        else:
+            raise CrawlBlockedError(f"unsupported content-encoding: {encoding}")
+        assert isinstance(response.stream, httpx.SyncByteStream)
+        return httpx.Response(
+            status_code=response.status_code,
+            headers=headers,
+            stream=_CappedStream(response.stream, max_bytes, encoding, clen.isdigit()),
+            extensions=response.extensions,
+        )
 
 
 class AdaptivePoliteFetcher:
@@ -262,7 +433,9 @@ class AdaptivePoliteFetcher:
                 with httpx.Client(
                     timeout=10,
                     follow_redirects=True,
+                    max_redirects=max(0, int(self.policy.max_redirects)),
                     headers={"User-Agent": self.policy.user_agent},
+                    transport=GuardedTransport(self.policy),
                 ) as client:
                     resp = client.get(robots_url)
                     if resp.status_code >= 400:
@@ -369,10 +542,9 @@ class AdaptivePoliteFetcher:
                 follow_redirects=True,
                 max_redirects=max(0, int(self.policy.max_redirects)),
                 headers={"User-Agent": self.policy.user_agent, **(headers or {})},
+                transport=GuardedTransport(self.policy),
             ) as client:
-                response = client.request(method, url, headers=headers)
-                self._assert_public_response(response)
-                return response
+                return client.request(method, url, headers=headers)
 
         host = self.host_of(url)
         if not host:
@@ -404,9 +576,9 @@ class AdaptivePoliteFetcher:
                     follow_redirects=True,
                     max_redirects=max(0, int(self.policy.max_redirects)),
                     headers=req_headers,
+                    transport=GuardedTransport(self.policy),
                 ) as client:
                     response = client.request(method, url)
-                self._assert_public_response(response)
                 latency = time.time() - started
                 self._host_state(host).last_request_at = time.time()
 
@@ -469,22 +641,6 @@ class AdaptivePoliteFetcher:
 
         assert last_exc is not None
         raise last_exc
-
-    def _assert_public_response(self, response: httpx.Response) -> None:
-        """Po redirectach — sprawdź finalny host (SSRF via redirect)."""
-        if not self.policy.block_private_networks:
-            return
-        from market_agents.security import SecurityError, validate_fetch_url
-
-        try:
-            validate_fetch_url(
-                str(response.url),
-                allowed_hosts=self.policy.allowed_hosts or None,
-                allow_private=False,
-                resolve_dns=bool(self.policy.resolve_dns_for_ssrf),
-            )
-        except SecurityError as exc:
-            raise CrawlBlockedError(f"SSRF blocked after redirect: {exc}") from exc
 
     def get_text(self, url: str, **kwargs: Any) -> str:
         return self.get(url, **kwargs).text

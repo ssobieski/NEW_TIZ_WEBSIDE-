@@ -4,9 +4,7 @@ import re
 from typing import Any
 from urllib.parse import quote_plus
 
-import feedparser
-
-from market_agents.collectors.base import BaseCollector
+from market_agents.collectors.base import BaseCollector, fetch_feed
 from market_agents.config import FirmDiscoveryConfig
 from market_agents.firms import (
     KnownFirmsIndex,
@@ -14,6 +12,7 @@ from market_agents.firms import (
     filter_new_firms,
 )
 from market_agents.models import MarketItem
+from market_agents.polite_http import AdaptivePoliteFetcher
 
 
 class FirmDiscoveryCollector(BaseCollector):
@@ -29,10 +28,12 @@ class FirmDiscoveryCollector(BaseCollector):
         config: FirmDiscoveryConfig,
         known: KnownFirmsIndex,
         lookback_hours: int = 168,
+        fetcher: AdaptivePoliteFetcher | None = None,
     ) -> None:
         self.config = config
         self.known = known
         self.lookback_hours = lookback_hours
+        self.fetcher = fetcher or AdaptivePoliteFetcher.shared()
 
     def collect(self, max_items: int = 20) -> list[MarketItem]:
         if not self.config.enabled:
@@ -50,7 +51,7 @@ class FirmDiscoveryCollector(BaseCollector):
 
         for feed_url in feed_urls:
             try:
-                entries = feedparser.parse(feed_url).entries
+                entries = fetch_feed(self.fetcher, feed_url).entries
             except Exception as exc:  # noqa: BLE001
                 print(f"[firm_discovery] feed error: {exc}")
                 continue

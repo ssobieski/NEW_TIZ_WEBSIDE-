@@ -41,6 +41,8 @@ class SecurityError(RuntimeError):
 
 
 def _is_private_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
     return bool(
         ip.is_private
         or ip.is_loopback
@@ -48,7 +50,19 @@ def _is_private_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         or ip.is_reserved
         or ip.is_multicast
         or ip.is_unspecified
+        or not ip.is_global
     )
+
+
+def address_is_blocked(addr: str) -> tuple[bool, str]:
+    """Sprawdź pojedynczy adres IP (np. wynik getaddrinfo) — fail-closed."""
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return True, f"unparseable address: {addr}"
+    if _is_private_ip(ip) or str(ip) in _METADATA_HOSTS:
+        return True, f"private/metadata IP: {ip}"
+    return False, ""
 
 
 def host_is_blocked(host: str, *, resolve_dns: bool = True) -> tuple[bool, str]:
@@ -60,12 +74,11 @@ def host_is_blocked(host: str, *, resolve_dns: bool = True) -> tuple[bool, str]:
         return True, f"blocked hostname: {host}"
     # literal IP?
     try:
-        ip = ipaddress.ip_address(host)
-        if _is_private_ip(ip) or str(ip) in _METADATA_HOSTS:
-            return True, f"private/metadata IP: {ip}"
-        return False, ""
+        ipaddress.ip_address(host)
     except ValueError:
         pass
+    else:
+        return address_is_blocked(host)
     if not resolve_dns:
         return False, ""
     try:
@@ -75,13 +88,10 @@ def host_is_blocked(host: str, *, resolve_dns: bool = True) -> tuple[bool, str]:
         # ale unikamy resolve→private via later check if we can
         return False, ""
     for info in infos:
-        addr = info[4][0]
-        try:
-            ip = ipaddress.ip_address(addr)
-        except ValueError:
-            continue
-        if _is_private_ip(ip) or str(ip) in _METADATA_HOSTS:
-            return True, f"DNS resolves to private/metadata IP: {host}→{ip}"
+        addr = str(info[4][0])
+        blocked, _ = address_is_blocked(addr)
+        if blocked:
+            return True, f"DNS resolves to private/metadata IP: {host}→{addr}"
     return False, ""
 
 
