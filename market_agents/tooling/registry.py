@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from market_agents.approvals import ApprovalScope
 from market_agents.collectors.catalog import CatalogCollector
 from market_agents.collectors.firm_discovery import FirmDiscoveryCollector
 from market_agents.collectors.media import IndustryMediaCollector, extract_exhibitors_from_html
@@ -49,9 +51,9 @@ from market_agents.ontology import (
     MachiningOntology,
     extract_domain_context,
 )
-from market_agents.parse_rules import PARSE_METHODS, SiteParseRulesStore
+from market_agents.parse_rules import PARSE_METHODS, SiteParseRulesStore, rule_scope
 from market_agents.parsing import IntelligentParser, ParsedDocument
-from market_agents.parsing_skills import SKILL_CATEGORIES, ParsingSkillsStore
+from market_agents.parsing_skills import SKILL_CATEGORIES, ParsingSkillsStore, skill_scope
 from market_agents.pricelists import PricelistRegistry
 from market_agents.product_tech import (
     ProductTechRegistry,
@@ -72,6 +74,17 @@ from market_agents.security import (
 
 
 ToolFn = Callable[[dict[str, Any]], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class KnowledgeWrite:
+    """A planned shared-knowledge write: `commit` stores exactly the objects `scope` describes."""
+
+    scope: ApprovalScope
+    commit: Callable[[], dict[str, Any]]
+
+
+KnowledgePlanner = Callable[[dict[str, Any]], "KnowledgeWrite | dict[str, Any]"]
 
 
 class ToolRegistry:
@@ -199,6 +212,16 @@ class ToolRegistry:
             "extract_product_tech_schema": self.extract_product_tech_schema,
             "security_status": self.security_status_tool,
             "governance_status": self.governance_status_tool,
+        }
+        # Writes to the shared, fleet-published parsing stores. call() authorizes the
+        # planned object's scope and commits that same object (see _call_knowledge_write).
+        self._knowledge_planners: dict[str, KnowledgePlanner] = {
+            "upsert_parse_rule": self._plan_upsert_parse_rule,
+            "rate_parse": self._plan_rate_parse,
+            "learn_parsing_skill": self._plan_learn_parsing_skill,
+            "improve_parsing_skill": self._plan_improve_parsing_skill,
+            "rate_parsing_skill": self._plan_rate_parsing_skill,
+            "promote_host_skill": self._plan_promote_host_skill,
         }
         self._known: KnownFirmsIndex | None = None
         self._relations: FirmRelationsGraph | None = None
@@ -2177,6 +2200,9 @@ class ToolRegistry:
         handler = self._handlers.get(name)
         if not handler:
             return {"ok": False, "error": f"unknown tool: {name}"}
+        planner = self._knowledge_planners.get(name)
+        if planner is not None:
+            return self._call_knowledge_write(name, planner, arguments or {})
         # AI governance (policy-as-code) — przed cybersecurity tool policy
         gov = self._governance.authorize_tool(name, arguments or {})
         if not gov.allowed:
@@ -2240,6 +2266,44 @@ class ToolRegistry:
             return result
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": safe_error(exc), "tool": name}
+
+    def _call_knowledge_write(
+        self, name: str, planner: KnowledgePlanner, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Plan (no side effects) → authorize the planned object's hosts → commit that object.
+        The commit refuses if the stored object changed after it was planned.
+        """
+        try:
+            plan = planner(arguments)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": safe_error(exc), "tool": name}
+        if not isinstance(plan, KnowledgeWrite):
+            return plan
+        gov = self._governance.authorize_tool(name, arguments, approval_scope=plan.scope)
+        if not gov.allowed:
+            return {
+                "ok": False,
+                "error": gov.reason,
+                "tool": name,
+                "governance": True,
+                "effect": gov.effect,
+                "matched_rules": gov.matched_rules,
+            }
+        allowed, reason = self._security.tool_allowed(name)
+        if not allowed:
+            return {"ok": False, "error": reason, "tool": name, "security": True}
+        try:
+            result = plan.commit()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": safe_error(exc), "tool": name}
+        if gov.effect in {"monitor", "redact"} and isinstance(result, dict):
+            result.setdefault("governance", {"effect": gov.effect, "rules": gov.matched_rules})
+        return result
+
+    @staticmethod
+    def _run_knowledge_write(plan: KnowledgeWrite | dict[str, Any]) -> dict[str, Any]:
+        return plan.commit() if isinstance(plan, KnowledgeWrite) else plan
 
     def security_status_tool(self, args: dict[str, Any]) -> dict[str, Any]:
         return security_status(self._security)
@@ -3509,11 +3573,14 @@ class ToolRegistry:
         }
 
     def upsert_parse_rule(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._run_knowledge_write(self._plan_upsert_parse_rule(args))
+
+    def _plan_upsert_parse_rule(self, args: dict[str, Any]) -> KnowledgeWrite | dict[str, Any]:
         host_or_url = str(args.get("host_or_url") or "").strip()
         if not host_or_url:
             return {"ok": False, "error": "host_or_url required"}
         try:
-            result = self._parse_rules.upsert(
+            planned = self._parse_rules.plan_upsert(
                 host_or_url,
                 preferred_method=str(args.get("preferred_method") or "auto"),
                 css_selector=str(args.get("css_selector") or ""),
@@ -3524,56 +3591,89 @@ class ToolRegistry:
             )
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
-        path = self._parse_rules.save(self.config.data_path)
-        # refresh parser rules reference
-        self.parser.rules = self._parse_rules
-        self.memory.add(
-            "parse_rule",
-            f"upsert {result['rule']['host']} method={result['rule']['preferred_method']} "
-            f"css={result['rule'].get('css_selector') or '-'}",
-            meta=result["rule"],
-        )
-        return {**result, "path": str(path)}
+        rule, previous = planned["rule"], planned["previous"]
+
+        def commit() -> dict[str, Any]:
+            self._parse_rules.commit(rule, previous=previous)
+            path = self._parse_rules.save(self.config.data_path)
+            # refresh parser rules reference
+            self.parser.rules = self._parse_rules
+            row = rule.to_dict()
+            self.memory.add(
+                "parse_rule",
+                f"upsert {row['host']} method={row['preferred_method']} "
+                f"css={row.get('css_selector') or '-'}",
+                meta=row,
+            )
+            return {"ok": True, "upserted": True, "rule": row, "path": str(path)}
+
+        return KnowledgeWrite(scope=rule_scope(previous, rule), commit=commit)
 
     def rate_parse(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._run_knowledge_write(self._plan_rate_parse(args))
+
+    def _plan_rate_parse(self, args: dict[str, Any]) -> KnowledgeWrite | dict[str, Any]:
         url = str(args.get("url") or "").strip()
         if not url:
             return {"ok": False, "error": "url required"}
         quality = float(args.get("quality_0_to_1") or 0)
-        result = self._parse_rules.rate(
+        planned = self._parse_rules.plan_rate(
             url,
             quality_0_to_1=quality,
             parse_method=str(args.get("parse_method") or "") or None,
             css_selector=str(args.get("css_selector") or "") or None,
             notes=str(args.get("notes") or ""),
         )
-        path = self._parse_rules.save(self.config.data_path)
-        self.parser.rules = self._parse_rules
-        self.memory.add(
-            "parse_rate",
-            f"rate {url} q={quality:.2f}",
-            meta=result.get("rule") or {},
-        )
-        promoted = None
+        if not planned.get("ok"):
+            return planned
+        rule, previous = planned["rule"], planned["previous"]
+        scope = rule_scope(previous, rule)
+        promote: dict[str, Any] | None = None
         if (
             self.config.agents.agentic.learn_parsing_skills
             and self.config.agents.agentic.auto_promote_host_skills
             and quality >= 0.75
-            and result.get("rule")
         ):
-            rule = result["rule"]
-            promoted = self._parsing_skills.promote_host_rule(
-                url,
-                preferred_method=str(rule.get("preferred_method") or "auto"),
-                css_selector=str(rule.get("css_selector") or ""),
-                notes=f"auto-promote from rate_parse q={quality:.2f}",
-                taught_by="parsing_agent",
-            )
-            self._parsing_skills.save(self.config.data_path)
-        out = {**result, "path": str(path)}
-        if promoted:
-            out["promoted_skill"] = promoted.get("skill")
-        return out
+            try:
+                promote = self._parsing_skills.plan_promote_host_rule(
+                    url,
+                    preferred_method=rule.preferred_method or "auto",
+                    css_selector=rule.css_selector or "",
+                    notes=f"auto-promote from rate_parse q={quality:.2f}",
+                    taught_by="parsing_agent",
+                )
+            except ValueError:
+                promote = None
+            if promote is not None and promote.get("ok"):
+                scope = scope.union(skill_scope(promote["previous"], promote["skill"]))
+            else:
+                promote = None
+
+        def commit() -> dict[str, Any]:
+            if promote is not None:
+                skill = promote["skill"]
+                if self._parsing_skills.skills.get(skill.id) is not promote["previous"]:
+                    raise ValueError(f"skill {skill.id} changed since it was planned")
+            self._parse_rules.commit(rule, previous=previous)
+            if promote is not None:
+                self._parsing_skills.commit(promote["skill"], previous=promote["previous"])
+            path = self._parse_rules.save(self.config.data_path)
+            self.parser.rules = self._parse_rules
+            row = rule.to_dict()
+            self.memory.add("parse_rate", f"rate {url} q={quality:.2f}", meta=row)
+            out = {
+                "ok": True,
+                "rated": True,
+                "quality": planned["quality"],
+                "rule": row,
+                "path": str(path),
+            }
+            if promote is not None:
+                self._parsing_skills.save(self.config.data_path)
+                out["promoted_skill"] = promote["skill"].to_dict()
+            return out
+
+        return KnowledgeWrite(scope=scope, commit=commit)
 
     def list_parsing_skills(self, args: dict[str, Any]) -> dict[str, Any]:
         rows = self._parsing_skills.list_skills(
@@ -3597,12 +3697,30 @@ class ToolRegistry:
         )
         return {"ok": True, "count": len(rows), "skills": rows}
 
+    def _bind_skill_write(
+        self, planned: dict[str, Any], *, result: dict[str, Any], memory_note: str | None
+    ) -> KnowledgeWrite:
+        skill, previous = planned["skill"], planned["previous"]
+
+        def commit() -> dict[str, Any]:
+            self._parsing_skills.commit(skill, previous=previous)
+            path = self._parsing_skills.save(self.config.data_path)
+            row = skill.to_dict()
+            if memory_note:
+                self.memory.add("parsing_skill", memory_note, meta=row)
+            return {"ok": True, **result, "skill": row, "path": str(path)}
+
+        return KnowledgeWrite(scope=skill_scope(previous, skill), commit=commit)
+
     def learn_parsing_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._run_knowledge_write(self._plan_learn_parsing_skill(args))
+
+    def _plan_learn_parsing_skill(self, args: dict[str, Any]) -> KnowledgeWrite | dict[str, Any]:
         name = str(args.get("name") or "").strip()
         if not name:
             return {"ok": False, "error": "name required"}
         try:
-            result = self._parsing_skills.learn(
+            planned = self._parsing_skills.plan_learn(
                 name=name,
                 skill_id=str(args.get("skill_id") or "").strip() or None,
                 category=str(args.get("category") or "generic"),
@@ -3623,20 +3741,21 @@ class ToolRegistry:
             )
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
-        path = self._parsing_skills.save(self.config.data_path)
-        self.memory.add(
-            "parsing_skill",
-            f"learn {result['skill']['id']} v{result['skill']['version']} "
-            f"({result.get('action')})",
-            meta=result.get("skill") or {},
+        skill = planned["skill"]
+        return self._bind_skill_write(
+            planned,
+            result={"action": planned["action"]},
+            memory_note=f"learn {skill.id} v{skill.version} ({planned['action']})",
         )
-        return {**result, "path": str(path)}
 
     def improve_parsing_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._run_knowledge_write(self._plan_improve_parsing_skill(args))
+
+    def _plan_improve_parsing_skill(self, args: dict[str, Any]) -> KnowledgeWrite | dict[str, Any]:
         skill_id = str(args.get("skill_id") or "").strip()
         if not skill_id:
             return {"ok": False, "error": "skill_id required"}
-        result = self._parsing_skills.improve(
+        planned = self._parsing_skills.plan_improve(
             skill_id,
             preferred_method=str(args.get("preferred_method") or "") or None,
             css_selectors=list(args.get("css_selectors") or []) or None,
@@ -3650,53 +3769,60 @@ class ToolRegistry:
             notes=str(args.get("notes") or ""),
             taught_by=str(args.get("taught_by") or "parsing_agent"),
         )
-        if not result.get("ok"):
-            return result
-        path = self._parsing_skills.save(self.config.data_path)
-        self.memory.add(
-            "parsing_skill",
-            f"improve {skill_id} → v{result['skill']['version']}",
-            meta=result.get("skill") or {},
+        if not planned.get("ok"):
+            return planned
+        return self._bind_skill_write(
+            planned,
+            result={"improved": True},
+            memory_note=f"improve {skill_id} → v{planned['skill'].version}",
         )
-        return {**result, "path": str(path)}
 
     def rate_parsing_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._run_knowledge_write(self._plan_rate_parsing_skill(args))
+
+    def _plan_rate_parsing_skill(self, args: dict[str, Any]) -> KnowledgeWrite | dict[str, Any]:
         skill_id = str(args.get("skill_id") or "").strip()
         if not skill_id:
             return {"ok": False, "error": "skill_id required"}
-        result = self._parsing_skills.rate(
+        planned = self._parsing_skills.plan_rate(
             skill_id,
             quality_0_to_1=float(args.get("quality_0_to_1") or 0),
             notes=str(args.get("notes") or ""),
             taught_by=str(args.get("taught_by") or "parsing_agent"),
         )
-        if not result.get("ok"):
-            return result
-        path = self._parsing_skills.save(self.config.data_path)
-        return {**result, "path": str(path)}
+        if not planned.get("ok"):
+            return planned
+        return self._bind_skill_write(
+            planned,
+            result={"rated": True, "quality": planned["quality"]},
+            memory_note=None,
+        )
 
     def promote_host_skill(self, args: dict[str, Any]) -> dict[str, Any]:
+        return self._run_knowledge_write(self._plan_promote_host_skill(args))
+
+    def _plan_promote_host_skill(self, args: dict[str, Any]) -> KnowledgeWrite | dict[str, Any]:
         host_or_url = str(args.get("host_or_url") or "").strip()
         if not host_or_url:
             return {"ok": False, "error": "host_or_url required"}
-        result = self._parsing_skills.promote_host_rule(
-            host_or_url,
-            preferred_method=str(args.get("preferred_method") or "auto"),
-            css_selector=str(args.get("css_selector") or ""),
-            category=str(args.get("category") or "generic"),
-            notes=str(args.get("notes") or ""),
-            taught_by=str(args.get("taught_by") or "parsing_agent"),
+        try:
+            planned = self._parsing_skills.plan_promote_host_rule(
+                host_or_url,
+                preferred_method=str(args.get("preferred_method") or "auto"),
+                css_selector=str(args.get("css_selector") or ""),
+                category=str(args.get("category") or "generic"),
+                notes=str(args.get("notes") or ""),
+                taught_by=str(args.get("taught_by") or "parsing_agent"),
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if not planned.get("ok"):
+            return planned
+        return self._bind_skill_write(
+            planned,
+            result={"action": planned["action"]},
+            memory_note=f"promote host → {planned['skill'].id}",
         )
-        if not result.get("ok"):
-            return result
-        path = self._parsing_skills.save(self.config.data_path)
-        self.memory.add(
-            "parsing_skill",
-            f"promote host → {result['skill']['id']}",
-            meta=result.get("skill") or {},
-        )
-        return {**result, "path": str(path)}
-
 
     def list_relations(self, args: dict[str, Any]) -> dict[str, Any]:
         graph = self._get_relations()

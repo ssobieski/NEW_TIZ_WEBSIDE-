@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 import yaml
 
+from market_agents.approvals import ApprovalScope
 from market_agents.security import (
     FETCH_TOOLS,
     SAFE_TOOLS,
@@ -36,6 +37,13 @@ ActionType = Literal[
     "fleet_publish",
     "llm_output",
 ]
+
+# Their arguments do not identify the skill that ends up written (skill_id may name an
+# existing skill with other hosts; applies_to_hosts / kinds / url_contains decide where
+# it applies). Without an object-derived ApprovalScope only tool-wide grants count.
+SCOPE_REQUIRED_APPROVAL_TOOLS = frozenset(
+    {"learn_parsing_skill", "improve_parsing_skill", "rate_parsing_skill"}
+)
 
 
 class GovernanceError(RuntimeError):
@@ -69,6 +77,7 @@ class PolicyRequest:
     actor: str = "agent"
     run_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    approval_scope: ApprovalScope | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -442,6 +451,7 @@ class GovernanceEngine:
                 actor=req.actor,
                 run_id=req.run_id,
                 metadata=dict(req.metadata or {}),
+                approval_scope=req.approval_scope,
             )
         if not self.enabled:
             return PolicyDecision(
@@ -485,24 +495,34 @@ class GovernanceEngine:
             from market_agents.approvals import ApprovalStore, normalize_host
 
             store = ApprovalStore.load(self.audit_dir)
-            company = None
-            host = None
-            if req.args:
-                company = str(req.args.get("company") or "").strip() or None
-                host_raw = str(
-                    req.args.get("host_or_url")
-                    or req.args.get("host")
-                    or req.args.get("url")
-                    or ""
-                ).strip()
-                host = normalize_host(host_raw) or host_raw or None
-            grant = store.is_approved(req.tool or "", company=company, host=host)
-            if grant:
+            grants = []
+            if req.approval_scope is not None:
+                grants = store.grants_for_scope(req.tool or "", req.approval_scope)
+            else:
+                company = None
+                host = None
+                if req.args and req.tool not in SCOPE_REQUIRED_APPROVAL_TOOLS:
+                    company = str(req.args.get("company") or "").strip() or None
+                    host_raw = str(
+                        req.args.get("host_or_url")
+                        or req.args.get("host")
+                        or req.args.get("url")
+                        or ""
+                    ).strip()
+                    host = normalize_host(host_raw) or host_raw or None
+                legacy = store.is_approved(req.tool or "", company=company, host=host)
+                grants = [legacy] if legacy else []
+            if grants:
+                grant = grants[0]
                 decision = PolicyDecision(
                     effect="allow",
                     allowed=True,
                     reason=f"operator approval {grant.id} by {grant.approved_by}",
-                    matched_rules=list(dict.fromkeys(decision.matched_rules + [f"approval:{grant.id}"])),
+                    matched_rules=list(
+                        dict.fromkeys(
+                            decision.matched_rules + [f"approval:{g.id}" for g in grants]
+                        )
+                    ),
                     obligations=list(dict.fromkeys(decision.obligations + ["audit", "approved"])),
                     policy_id=self.pack.id if self.pack else None,
                     mode=self.mode,
@@ -517,7 +537,9 @@ class GovernanceEngine:
         arguments: dict[str, Any] | None = None,
         *,
         run_id: str | None = None,
+        approval_scope: ApprovalScope | None = None,
     ) -> PolicyDecision:
+        """approval_scope: hosts of the object the call will write; grants are matched to it."""
         args = arguments or {}
         url = str(args.get("url") or "").strip() or None
         return self.evaluate(
@@ -527,6 +549,7 @@ class GovernanceEngine:
                 url=url,
                 args=args,
                 run_id=run_id,
+                approval_scope=approval_scope,
             )
         )
 
@@ -623,6 +646,22 @@ def builtin_default_pack() -> PolicyPack:
                     "effect": "require_approval",
                     "reason": "promote_host_skill requires human approval",
                     "match": {"action": "tool_call", "tool": "promote_host_skill"},
+                },
+                {
+                    "id": "approval-parsing-knowledge-write",
+                    "priority": 150,
+                    "effect": "require_approval",
+                    "reason": "shared parsing skill / parse rule writes require human approval",
+                    "match": {
+                        "action": "tool_call",
+                        "tool_in": [
+                            "learn_parsing_skill",
+                            "improve_parsing_skill",
+                            "rate_parsing_skill",
+                            "upsert_parse_rule",
+                            "rate_parse",
+                        ],
+                    },
                 },
                 {
                     "id": "worker-deny-write",

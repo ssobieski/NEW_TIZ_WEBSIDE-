@@ -88,6 +88,12 @@ python -m market_agents governance revoke --id <grant_id>
 
 Granty: `data/governance/approvals.json`.
 
+Zapisy do współdzielonej bazy parsowania (`learn_parsing_skill`, `improve_parsing_skill`,
+`rate_parsing_skill`, `promote_host_skill`, `upsert_parse_rule`, `rate_parse`) wymagają
+zatwierdzenia. Grant z `--host` jest dopasowywany do hostów zapisywanego obiektu
+(`applies_to_hosts` skilla przed i po zmianie / host reguły), a nie do argumentów wywołania;
+skill działający też po `applies_to_kinds` / `url_contains` (np. seedy) wymaga grantu bez `--host`.
+
 ## Relacja do cybersecurity
 
 | Warstwa | Odpowiedzialność |

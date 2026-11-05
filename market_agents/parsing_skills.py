@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 from dataclasses import asdict, dataclass, field
@@ -7,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from market_agents.approvals import ApprovalScope
 from market_agents.parse_rules import PARSE_METHODS
 
 SKILL_CATEGORIES = (
@@ -139,6 +141,23 @@ class ParsingSkill:
             notes=str(raw.get("notes") or "")[:500],
             examples=_str_list(raw.get("examples"))[:12],
         )
+
+
+def skill_scope(*skills: ParsingSkill | None) -> ApprovalScope:
+    """Hosts the given skill versions apply to (union); open if any matches by kind/URL."""
+    scope = ApprovalScope()
+    for skill in skills:
+        if skill is None:
+            continue
+        scope = scope.union(
+            ApprovalScope(
+                hosts=tuple(skill.applies_to_hosts),
+                host_confined=bool(skill.applies_to_hosts)
+                and not skill.applies_to_kinds
+                and not skill.url_contains,
+            )
+        )
+    return scope
 
 
 def default_seed_skills() -> list[ParsingSkill]:
@@ -524,22 +543,36 @@ class ParsingSkillsStore:
                 score += 3.0
             if host and host in skill.applies_to_hosts:
                 score += 4.0
-            elif host and any(host.endswith(h) for h in skill.applies_to_hosts):
+            elif host and any(host.endswith("." + h) for h in skill.applies_to_hosts):
                 score += 2.5
             for frag in skill.url_contains:
                 if frag.lower() in url_l:
                     score += 1.5
+            # Quality only ranks skills that already match; it must not make a
+            # host-scoped skill apply to unrelated hosts.
+            if score <= 0:
+                continue
             score += 0.1 * skill.avg_quality
             score += 0.02 * skill.success_count
-            if score > 0:
-                scored.append((score, skill))
+            scored.append((score, skill))
         scored.sort(key=lambda x: (-x[0], x[1].id))
         return [
             {**skill.to_dict(), "match_score": round(score, 3)}
             for score, skill in scored[:limit]
         ]
 
-    def learn(
+    def commit(self, skill: ParsingSkill, *, previous: ParsingSkill | None) -> None:
+        """Store a planned skill, only if the slot still holds the version it was planned from."""
+        if self.skills.get(skill.id) is not previous:
+            raise ValueError(f"skill {skill.id} changed since it was planned")
+        self.skills[skill.id] = skill
+
+    def learn(self, **kwargs: Any) -> dict[str, Any]:
+        plan = self.plan_learn(**kwargs)
+        self.commit(plan["skill"], previous=plan["previous"])
+        return {"ok": True, "action": plan["action"], "skill": plan["skill"].to_dict()}
+
+    def plan_learn(
         self,
         *,
         name: str,
@@ -625,10 +658,16 @@ class ParsingSkillsStore:
             )
             action = "created" if not existing else "replaced"
 
-        self.skills[sid] = skill
-        return {"ok": True, "action": action, "skill": skill.to_dict()}
+        return {"ok": True, "action": action, "skill": skill, "previous": existing}
 
-    def improve(
+    def improve(self, skill_id: str, **kwargs: Any) -> dict[str, Any]:
+        plan = self.plan_improve(skill_id, **kwargs)
+        if not plan.get("ok"):
+            return plan
+        self.commit(plan["skill"], previous=plan["previous"])
+        return {"ok": True, "improved": True, "skill": plan["skill"].to_dict()}
+
+    def plan_improve(
         self,
         skill_id: str,
         *,
@@ -645,9 +684,10 @@ class ParsingSkillsStore:
         taught_by: str = "agent",
         bump_version: bool = True,
     ) -> dict[str, Any]:
-        skill = self.get(skill_id)
-        if skill is None:
+        previous = self.get(skill_id)
+        if previous is None:
             return {"ok": False, "error": f"unknown skill: {skill_id}"}
+        skill = copy.deepcopy(previous)
         if preferred_method:
             method = preferred_method.strip().lower()
             if method not in PARSE_METHODS:
@@ -678,10 +718,21 @@ class ParsingSkillsStore:
         skill.shared = True
         if bump_version:
             skill.version += 1
-        self.skills[skill.id] = skill
-        return {"ok": True, "improved": True, "skill": skill.to_dict()}
+        return {"ok": True, "skill": skill, "previous": previous}
 
-    def rate(
+    def rate(self, skill_id: str, **kwargs: Any) -> dict[str, Any]:
+        plan = self.plan_rate(skill_id, **kwargs)
+        if not plan.get("ok"):
+            return plan
+        self.commit(plan["skill"], previous=plan["previous"])
+        return {
+            "ok": True,
+            "rated": True,
+            "quality": plan["quality"],
+            "skill": plan["skill"].to_dict(),
+        }
+
+    def plan_rate(
         self,
         skill_id: str,
         *,
@@ -690,9 +741,10 @@ class ParsingSkillsStore:
         success_threshold: float = 0.55,
         taught_by: str = "agent",
     ) -> dict[str, Any]:
-        skill = self.get(skill_id)
-        if skill is None:
+        previous = self.get(skill_id)
+        if previous is None:
             return {"ok": False, "error": f"unknown skill: {skill_id}"}
+        skill = copy.deepcopy(previous)
         score = max(0.0, min(1.0, float(quality_0_to_1)))
         skill.quality_sum += score
         if score >= success_threshold:
@@ -702,10 +754,16 @@ class ParsingSkillsStore:
         if notes:
             skill.notes = (skill.notes + " | " + notes).strip(" |")[:500]
         skill.taught_by = taught_by or skill.taught_by
-        self.skills[skill.id] = skill
-        return {"ok": True, "rated": True, "quality": score, "skill": skill.to_dict()}
+        return {"ok": True, "quality": score, "skill": skill, "previous": previous}
 
-    def promote_host_rule(
+    def promote_host_rule(self, host_or_url: str, **kwargs: Any) -> dict[str, Any]:
+        plan = self.plan_promote_host_rule(host_or_url, **kwargs)
+        if not plan.get("ok"):
+            return plan
+        self.commit(plan["skill"], previous=plan["previous"])
+        return {"ok": True, "action": plan["action"], "skill": plan["skill"].to_dict()}
+
+    def plan_promote_host_rule(
         self,
         host_or_url: str,
         *,
@@ -719,7 +777,7 @@ class ParsingSkillsStore:
         host = _host(host_or_url)
         if not host:
             return {"ok": False, "error": "host wymagany"}
-        return self.learn(
+        return self.plan_learn(
             skill_id=_slug(f"host-{host}"),
             name=f"Host skill: {host}",
             category=category if category in SKILL_CATEGORIES else "generic",
