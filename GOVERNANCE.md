@@ -88,6 +88,15 @@ python -m market_agents governance revoke --id <grant_id>
 
 Granty: `data/governance/approvals.json`.
 
+`resolve_firm_duplicates` z `dry_run=false` scala profile tylko z grantem dopasowanym
+przez governance w tym samym wywołaniu (inaczej zawsze podgląd, także gdy governance
+jest wyłączone lub w trybie `monitor`). Grant z `--company` ogranicza scalanie do grup
+z tą firmą. `threshold < 0.9` (także w CLI `resolve-firms --apply`) = tylko podgląd.
+
+```bash
+python -m market_agents governance approve --tool resolve_firm_duplicates --company "Sandvik Coromant AB" --by jan
+```
+
 ## Relacja do cybersecurity
 
 | Warstwa | Odpowiedzialność |

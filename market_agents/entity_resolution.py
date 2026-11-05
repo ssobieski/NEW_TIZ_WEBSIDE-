@@ -8,6 +8,7 @@ i przepisuje CRM + relacje na kanoniczną nazwę.
 from __future__ import annotations
 
 import json
+import math
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -229,14 +230,65 @@ def rewrite_relation_endpoints(data_dir: Path | str, alias_map: dict[str, str]) 
     return n
 
 
+DEFAULT_MERGE_THRESHOLD = 0.92
+# Below this, SequenceMatcher ratios group unrelated firms; such runs are preview-only.
+MIN_MERGE_THRESHOLD = 0.9
+
+
+def _coerce_threshold(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        t = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(t):
+        return None
+    return t
+
+
+def _group_mentions(group: list[FirmProfile], company_norm: str) -> bool:
+    for p in group:
+        for name in [p.company, *(p.aliases or [])]:
+            if normalize_firm_name(name) == company_norm:
+                return True
+    return False
+
+
 def resolve_golden_records(
     data_dir: Path | str,
     *,
-    threshold: float = 0.92,
+    threshold: float = DEFAULT_MERGE_THRESHOLD,
     dry_run: bool = False,
+    company: str | None = None,
 ) -> dict[str, Any]:
+    """Find / merge duplicate firm profiles.
+
+    Applies only when ``dry_run is False`` and the threshold is a finite number
+    >= MIN_MERGE_THRESHOLD; otherwise returns a preview. ``company`` limits the
+    merge to groups containing that firm (by name or alias).
+    """
+    dry_run = dry_run is not False
+    blocked: str | None = None
+    requested = _coerce_threshold(threshold)
+    if requested is None:
+        threshold = DEFAULT_MERGE_THRESHOLD
+        if not dry_run:
+            blocked = "invalid threshold"
+    elif requested < MIN_MERGE_THRESHOLD:
+        threshold = MIN_MERGE_THRESHOLD
+        if not dry_run:
+            blocked = f"threshold below minimum {MIN_MERGE_THRESHOLD}"
+    else:
+        threshold = requested
+    if blocked:
+        dry_run = True
+
     reg = FirmProfileRegistry.load(data_dir)
     groups = find_duplicate_groups(list(reg.profiles.values()), threshold=threshold)
+    if company is not None:
+        company_norm = normalize_firm_name(str(company))
+        groups = [g for g in groups if company_norm and _group_mentions(g, company_norm)]
     merges: list[dict[str, Any]] = []
     for group in groups:
         # prefer profile with most sources / websites
@@ -286,16 +338,22 @@ def resolve_golden_records(
         alias_map = flatten_alias_map({**prior, **alias_map})
         crm_rewritten = rewrite_crm_companies(data_dir, alias_map)
         relations_rewritten = rewrite_relation_endpoints(data_dir, alias_map)
-    return {
+    out: dict[str, Any] = {
         "ok": True,
         "duplicate_groups": len(groups),
         "merges": merges,
         "dry_run": dry_run,
+        "threshold": threshold,
         "path": path,
         "profiles_after": len(reg.profiles),
         "crm_rewritten": crm_rewritten,
         "relations_rewritten": relations_rewritten,
     }
+    if company is not None:
+        out["company"] = str(company)
+    if blocked:
+        out["apply_blocked"] = blocked
+    return out
 
 
 def canonical_name(name: str, registry: FirmProfileRegistry) -> str:

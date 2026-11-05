@@ -83,9 +83,13 @@ class PolicyDecision:
     obligations: list[str] = field(default_factory=list)
     policy_id: str | None = None
     mode: str = "enforce"  # enforce | monitor
+    # Operator grant that turned require_approval into allow (None otherwise).
+    grant: Any = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        row = asdict(self)
+        row.pop("grant", None)
+        return row
 
 
 @dataclass
@@ -506,6 +510,7 @@ class GovernanceEngine:
                     obligations=list(dict.fromkeys(decision.obligations + ["audit", "approved"])),
                     policy_id=self.pack.id if self.pack else None,
                     mode=self.mode,
+                    grant=grant,
                 )
         decision = self._apply_rate_limits(req, decision)
         self._audit(req, decision)
@@ -623,6 +628,17 @@ def builtin_default_pack() -> PolicyPack:
                     "effect": "require_approval",
                     "reason": "promote_host_skill requires human approval",
                     "match": {"action": "tool_call", "tool": "promote_host_skill"},
+                },
+                {
+                    "id": "approval-resolve-firm-duplicates-apply",
+                    "priority": 145,
+                    "effect": "require_approval",
+                    "reason": "resolve_firm_duplicates apply requires human approval",
+                    "match": {
+                        "action": "tool_call",
+                        "tool": "resolve_firm_duplicates",
+                        "arg_equals": {"dry_run": False},
+                    },
                 },
                 {
                     "id": "worker-deny-write",

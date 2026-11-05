@@ -73,6 +73,9 @@ from market_agents.security import (
 
 ToolFn = Callable[[dict[str, Any]], dict[str, Any]]
 
+# Handlers that act only on the operator grant matched by governance for this call.
+_GRANT_BOUND_TOOLS = frozenset({"resolve_firm_duplicates"})
+
 
 class ToolRegistry:
     """Narzędzia dla agenta ReAct — parsing + katalogi/PDF + Notion + R2."""
@@ -1827,13 +1830,18 @@ class ToolRegistry:
                     "name": "resolve_firm_duplicates",
                     "description": (
                         "Golden record: znajdź / scal duplikaty profili firm "
-                        "(domyślnie dry_run=true)."
+                        "(domyślnie dry_run=true). Scalanie (dry_run=false) wymaga "
+                        "zatwierdzenia operatora; threshold < 0.9 = tylko podgląd."
                     ),
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "dry_run": {"type": "boolean", "default": True},
                             "threshold": {"type": "number", "default": 0.92},
+                            "company": {
+                                "type": "string",
+                                "description": "Ogranicz do grup zawierających tę firmę",
+                            },
                         },
                     },
                 },
@@ -2174,11 +2182,13 @@ class ToolRegistry:
                 arguments = json.loads(arguments) if arguments.strip() else {}
             except json.JSONDecodeError:
                 arguments = {}
+        # Governance and the handler must see the same values: copy once, use only the copy.
+        arguments = dict(arguments) if isinstance(arguments, dict) else {}
         handler = self._handlers.get(name)
         if not handler:
             return {"ok": False, "error": f"unknown tool: {name}"}
         # AI governance (policy-as-code) — przed cybersecurity tool policy
-        gov = self._governance.authorize_tool(name, arguments or {})
+        gov = self._governance.authorize_tool(name, arguments)
         if not gov.allowed:
             return {
                 "ok": False,
@@ -2221,7 +2231,10 @@ class ToolRegistry:
                     "matched_rules": fetch_gov.matched_rules,
                 }
         try:
-            result = handler(arguments or {})
+            if name in _GRANT_BOUND_TOOLS:
+                result = handler(arguments, approval=gov.grant)
+            else:
+                result = handler(arguments)
             if self._security.redact_traces and isinstance(result, dict):
                 # lekka redakcja stringów w wyniku
                 for key, val in list(result.items()):
@@ -4341,14 +4354,47 @@ class ToolRegistry:
         self._profiles = reg.profiles
         return result
 
-    def resolve_firm_duplicates(self, args: dict[str, Any]) -> dict[str, Any]:
-        from market_agents.entity_resolution import resolve_golden_records
+    def resolve_firm_duplicates(
+        self, args: dict[str, Any], *, approval: Any = None
+    ) -> dict[str, Any]:
+        """Preview by default. Merging needs dry_run=false AND the operator grant
+        that governance matched for this call (passed in by ``call``)."""
+        from market_agents.approvals import ApprovalGrant
+        from market_agents.entity_resolution import (
+            DEFAULT_MERGE_THRESHOLD,
+            resolve_golden_records,
+        )
+
+        wants_apply = args.get("dry_run", True) is False
+        threshold = args.get("threshold")
+        if threshold is None:
+            threshold = DEFAULT_MERGE_THRESHOLD
+        company = str(args.get("company") or "").strip() or None
+
+        grant = (
+            approval
+            if isinstance(approval, ApprovalGrant)
+            and approval.tool == "resolve_firm_duplicates"
+            else None
+        )
+        apply = wants_apply and grant is not None
+        if apply and grant.company:
+            company = grant.company
 
         result = resolve_golden_records(
             self.config.data_path,
-            threshold=float(args.get("threshold") or 0.92),
-            dry_run=bool(args.get("dry_run", True)),
+            threshold=threshold,
+            dry_run=not apply,
+            company=company,
         )
+        if wants_apply and grant is None:
+            result.setdefault(
+                "apply_blocked",
+                "operator approval required (governance approve "
+                "--tool resolve_firm_duplicates); preview only",
+            )
+        if apply:
+            result["approval_id"] = grant.id
         if not result.get("dry_run"):
             self._profiles = None
         return result
