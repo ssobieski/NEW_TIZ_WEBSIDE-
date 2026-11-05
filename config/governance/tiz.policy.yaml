@@ -83,6 +83,21 @@ rules:
       tool: upsert_parse_rule
     obligations: [human_approval, audit]
 
+  - id: approval-parse-strategy-change
+    priority: 185
+    effect: require_approval
+    reason: "Zmiana css_selector / metody parsowania wymaga przeglądu (poisoning risk)"
+    description: >
+      rate_parse z parse_method/css_selector oraz learn/improve_parsing_skill
+      z selektorami, drop_selectors, extract_patterns lub metodą.
+      Sama ocena jakości (quality_0_to_1) nie wymaga zatwierdzenia.
+    match:
+      action: tool_call
+      tool_in: [rate_parse, learn_parsing_skill, improve_parsing_skill]
+      metadata:
+        parse_strategy_change: true
+    obligations: [human_approval, audit]
+
   # --- Rate limits / soft controls -----------------------------------------
   - id: rate-limit-deep-fetch
     priority: 120

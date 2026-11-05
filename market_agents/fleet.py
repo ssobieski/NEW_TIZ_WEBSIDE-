@@ -498,9 +498,13 @@ class FleetSync:
                 continue
             prev_score = int(prev.get("success_count") or 0) - int(prev.get("fail_count") or 0)
             new_score = int(row.get("success_count") or 0) - int(row.get("fail_count") or 0)
-            if new_score > prev_score or (
-                new_score == prev_score
-                and int(row.get("success_count") or 0) > int(prev.get("success_count") or 0)
+            local_manual = prev.get("origin") == "manual" and row.get("origin") != "manual"
+            if not local_manual and (
+                new_score > prev_score
+                or (
+                    new_score == prev_score
+                    and int(row.get("success_count") or 0) > int(prev.get("success_count") or 0)
+                )
             ):
                 merged = dict(prev)
                 merged.update({k: v for k, v in row.items() if v not in (None, "", [])})

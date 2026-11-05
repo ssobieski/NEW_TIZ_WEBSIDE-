@@ -20,6 +20,8 @@ from urllib.parse import urlparse
 
 import yaml
 
+from market_agents.approvals import normalize_host
+from market_agents.parse_rules import PARSE_METHODS
 from market_agents.security import (
     FETCH_TOOLS,
     SAFE_TOOLS,
@@ -58,6 +60,77 @@ def tool_tier(name: str) -> str:
     return "unknown"
 
 
+# Tools that write CSS selectors / parse methods later applied to fetched pages.
+PARSE_STRATEGY_TOOLS = frozenset(
+    {
+        "upsert_parse_rule",
+        "rate_parse",
+        "learn_parsing_skill",
+        "improve_parsing_skill",
+        "promote_host_skill",
+    }
+)
+PARSE_STRATEGY_RULE_ID = "builtin:approval-parse-strategy-change"
+
+
+@dataclass(frozen=True)
+class ParseStrategyCall:
+    """
+    Parse-strategy write bound once from tool arguments.
+
+    Governance authorizes `scope`; the handler must act on `host`,
+    `parse_method` and `css_selector` from this object, never re-read args.
+    `host=None` means no host scope: only tool-wide grants apply.
+    """
+
+    tool: str
+    changes_strategy: bool
+    host: str | None = None
+    parse_method: str | None = None
+    css_selector: str | None = None
+
+    @property
+    def scope(self) -> dict[str, str | None]:
+        return {"host": self.host, "company": None}
+
+    def metadata(self) -> dict[str, Any]:
+        return {"parse_strategy_change": self.changes_strategy}
+
+
+def bind_parse_strategy_call(name: str, args: dict[str, Any] | None) -> ParseStrategyCall | None:
+    if name not in PARSE_STRATEGY_TOOLS:
+        return None
+    args = args or {}
+    if name == "rate_parse":
+        method = str(args.get("parse_method") or "").strip().lower()
+        if method not in PARSE_METHODS or method == "auto":
+            method = ""
+        selector = str(args.get("css_selector") or "").strip()
+        return ParseStrategyCall(
+            tool=name,
+            changes_strategy=bool(method or selector),
+            host=normalize_host(str(args.get("url") or "")) or None,
+            parse_method=method or None,
+            css_selector=selector or None,
+        )
+    if name in {"upsert_parse_rule", "promote_host_skill"}:
+        return ParseStrategyCall(
+            tool=name,
+            changes_strategy=True,
+            host=normalize_host(str(args.get("host_or_url") or "")) or None,
+        )
+    extraction = any(
+        args.get(key) for key in ("css_selectors", "drop_selectors", "extract_patterns")
+    )
+    if name == "learn_parsing_skill":
+        method = str(args.get("preferred_method") or "auto").strip().lower()
+        changes = extraction or method != "auto" or not bool(args.get("merge", True))
+    else:
+        changes = extraction or bool(str(args.get("preferred_method") or ""))
+    # Skills are matched across hosts, so a host-scoped grant never covers them.
+    return ParseStrategyCall(tool=name, changes_strategy=bool(changes), host=None)
+
+
 @dataclass
 class PolicyRequest:
     action: ActionType
@@ -69,6 +142,8 @@ class PolicyRequest:
     actor: str = "agent"
     run_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Bound grant scope ({"host", "company"}); None = derive from args.
+    scope: dict[str, str | None] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -83,6 +158,7 @@ class PolicyDecision:
     obligations: list[str] = field(default_factory=list)
     policy_id: str | None = None
     mode: str = "enforce"  # enforce | monitor
+    scope: dict[str, str | None] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -442,6 +518,7 @@ class GovernanceEngine:
                 actor=req.actor,
                 run_id=req.run_id,
                 metadata=dict(req.metadata or {}),
+                scope=dict(req.scope) if req.scope is not None else None,
             )
         if not self.enabled:
             return PolicyDecision(
@@ -476,18 +553,36 @@ class GovernanceEngine:
             mode=self.mode,
             deny_require_approval=self.deny_require_approval,
         )
+        # Floor independent of the loaded pack: a selector / method write needs
+        # the same operator approval as upsert_parse_rule.
+        if (req.metadata or {}).get("parse_strategy_change") and decision.effect not in {
+            "deny",
+            "require_approval",
+        }:
+            decision = PolicyDecision(
+                effect="require_approval",
+                allowed=not (self.mode == "enforce" and self.deny_require_approval),
+                reason="zmiana selektora / metody parsowania wymaga zatwierdzenia operatora",
+                matched_rules=list(dict.fromkeys(decision.matched_rules + [PARSE_STRATEGY_RULE_ID])),
+                obligations=list(dict.fromkeys(decision.obligations + ["human_approval", "audit"])),
+                policy_id=self.pack.id,
+                mode=self.mode,
+            )
         # Operator allowlist: require_approval → allow if grant exists
         if (
             decision.effect == "require_approval"
             and not decision.allowed
             and self.mode == "enforce"
         ):
-            from market_agents.approvals import ApprovalStore, normalize_host
+            from market_agents.approvals import ApprovalStore
 
             store = ApprovalStore.load(self.audit_dir)
             company = None
             host = None
-            if req.args:
+            if req.scope is not None:
+                company = req.scope.get("company") or None
+                host = req.scope.get("host") or None
+            elif req.args:
                 company = str(req.args.get("company") or "").strip() or None
                 host_raw = str(
                     req.args.get("host_or_url")
@@ -508,6 +603,7 @@ class GovernanceEngine:
                     mode=self.mode,
                 )
         decision = self._apply_rate_limits(req, decision)
+        decision.scope = dict(req.scope) if req.scope is not None else None
         self._audit(req, decision)
         return decision
 
@@ -517,9 +613,12 @@ class GovernanceEngine:
         arguments: dict[str, Any] | None = None,
         *,
         run_id: str | None = None,
+        bound: ParseStrategyCall | None = None,
     ) -> PolicyDecision:
         args = arguments or {}
         url = str(args.get("url") or "").strip() or None
+        if bound is None:
+            bound = bind_parse_strategy_call(name, args)
         return self.evaluate(
             PolicyRequest(
                 action="tool_call",
@@ -527,6 +626,8 @@ class GovernanceEngine:
                 url=url,
                 args=args,
                 run_id=run_id,
+                metadata=bound.metadata() if bound is not None else {},
+                scope=bound.scope if bound is not None else None,
             )
         )
 
@@ -623,6 +724,24 @@ def builtin_default_pack() -> PolicyPack:
                     "effect": "require_approval",
                     "reason": "promote_host_skill requires human approval",
                     "match": {"action": "tool_call", "tool": "promote_host_skill"},
+                },
+                {
+                    "id": "approval-upsert-parse-rule",
+                    "priority": 148,
+                    "effect": "require_approval",
+                    "reason": "upsert_parse_rule requires human approval",
+                    "match": {"action": "tool_call", "tool": "upsert_parse_rule"},
+                },
+                {
+                    "id": "approval-parse-strategy-change",
+                    "priority": 146,
+                    "effect": "require_approval",
+                    "reason": "selector / parse method change requires human approval",
+                    "match": {
+                        "action": "tool_call",
+                        "tool_in": ["rate_parse", "learn_parsing_skill", "improve_parsing_skill"],
+                        "metadata": {"parse_strategy_change": True},
+                    },
                 },
                 {
                     "id": "worker-deny-write",

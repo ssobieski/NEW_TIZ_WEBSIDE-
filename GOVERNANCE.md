@@ -88,6 +88,14 @@ python -m market_agents governance revoke --id <grant_id>
 
 Granty: `data/governance/approvals.json`.
 
+Zmiany strategii parsowania (`css_selector` / `parse_method` w `rate_parse`,
+selektory / `extract_patterns` / metoda w `learn_parsing_skill` i `improve_parsing_skill`,
+oraz `upsert_parse_rule` / `promote_host_skill`) zawsze wymagają grantu — także gdy
+załadowany pack nie ma reguły `approval-parse-strategy-change`. Sama ocena jakości
+(`quality_0_to_1`) nie wymaga grantu. Grant `--host` dotyczy hosta, pod którym reguła
+zostanie zapisana; skills (wielohostowe) akceptują tylko granty bez `--host` / `--company`.
+Reguł `origin: manual` agent nie nadpisuje, nawet z grantem.
+
 ## Relacja do cybersecurity
 
 | Warstwa | Odpowiedzialność |

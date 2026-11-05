@@ -114,7 +114,16 @@ class IntelligentParser:
                 "requested_method": method,
                 "applied_selector": selector or None,
             }
-            if self.learn and self.rules is not None and doc.ok and len(doc.text) >= 120:
+            # A caller-forced method / selector is a one-off; persisting it would
+            # bypass the approval required for parse-strategy changes.
+            overridden = force_method is not None or css_selector is not None
+            if (
+                self.learn
+                and self.rules is not None
+                and not overridden
+                and doc.ok
+                and len(doc.text) >= 120
+            ):
                 self._auto_learn(url, doc)
             return doc
 
@@ -161,7 +170,7 @@ class IntelligentParser:
         if not host:
             return
         existing = self.rules.get(host)
-        if existing and existing.origin == "manual" and existing.css_selector:
+        if existing and existing.origin == "manual":
             self.rules.rate(
                 url,
                 quality_0_to_1=0.8,
