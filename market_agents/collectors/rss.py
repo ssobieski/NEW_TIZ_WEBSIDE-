@@ -4,10 +4,9 @@ import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
-import feedparser
-
 from market_agents.collectors.base import BaseCollector
 from market_agents.config import RssSource
+from market_agents.feeds import parse_feed
 from market_agents.models import MarketItem
 
 
@@ -18,7 +17,7 @@ class RssCollector(BaseCollector):
         self.lookback_hours = lookback_hours
 
     def collect(self, max_items: int = 15) -> list[MarketItem]:
-        feed = feedparser.parse(self.source.url)
+        feed = parse_feed(self.source.url)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=self.lookback_hours)
         items: list[MarketItem] = []
         for entry in feed.entries[: max_items * 2]:
