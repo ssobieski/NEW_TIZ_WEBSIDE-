@@ -4,21 +4,30 @@ import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
-import feedparser
-
-from market_agents.collectors.base import BaseCollector
+from market_agents.collectors.base import BaseCollector, fetch_feed
 from market_agents.config import RssSource
 from market_agents.models import MarketItem
+from market_agents.polite_http import AdaptivePoliteFetcher
 
 
 class RssCollector(BaseCollector):
-    def __init__(self, source: RssSource, lookback_hours: int = 48) -> None:
+    def __init__(
+        self,
+        source: RssSource,
+        lookback_hours: int = 48,
+        fetcher: AdaptivePoliteFetcher | None = None,
+    ) -> None:
         self.source = source
         self.name = source.name
         self.lookback_hours = lookback_hours
+        self.fetcher = fetcher
 
     def collect(self, max_items: int = 15) -> list[MarketItem]:
-        feed = feedparser.parse(self.source.url)
+        try:
+            feed = fetch_feed(self.source.url, self.fetcher)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[rss] feed error {self.source.name}: {exc}")
+            return []
         cutoff = datetime.now(timezone.utc) - timedelta(hours=self.lookback_hours)
         items: list[MarketItem] = []
         for entry in feed.entries[: max_items * 2]:

@@ -85,6 +85,40 @@ def host_is_blocked(host: str, *, resolve_dns: bool = True) -> tuple[bool, str]:
     return False, ""
 
 
+def address_is_public(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address((address or "").strip("[]").split("%", 1)[0])
+    except ValueError:
+        return False
+    return not (_is_private_ip(ip) or str(ip) in _METADATA_HOSTS)
+
+
+def resolve_public_addresses(host: str, port: int) -> list[str]:
+    """
+    Jedno rozwiązanie DNS dla połączenia: zwraca adresy do connect().
+    SecurityError gdy którykolwiek adres jest prywatny/metadata;
+    socket.gaierror gdy DNS nie odpowiada.
+    """
+    name = (host or "").strip().strip("[]").lower().rstrip(".")
+    if not name:
+        raise SecurityError("SSRF blocked: empty host")
+    if name in _BLOCKED_HOSTNAMES or name in _METADATA_HOSTS:
+        raise SecurityError(f"SSRF blocked: blocked hostname: {name}")
+    infos = socket.getaddrinfo(name, port, type=socket.SOCK_STREAM)
+    addresses: list[str] = []
+    for info in infos:
+        addr = str(info[4][0])
+        if not address_is_public(addr):
+            raise SecurityError(
+                f"SSRF blocked: DNS resolves to private/metadata IP: {name}→{addr}"
+            )
+        if addr not in addresses:
+            addresses.append(addr)
+    if not addresses:
+        raise SecurityError(f"SSRF blocked: no address for {name}")
+    return addresses
+
+
 def validate_fetch_url(
     url: str,
     *,

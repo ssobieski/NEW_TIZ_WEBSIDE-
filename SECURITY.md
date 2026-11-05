@@ -7,7 +7,7 @@ Poniżej mapa zagrożeń i wdrożone mechanizmy.
 
 | ID | Ryzyko | Mechanizm |
 |----|--------|-----------|
-| T-01 | SSRF (localhost / RFC1918 / cloud metadata) | `validate_fetch_url` w `polite_http` + redirect check |
+| T-01 | SSRF (localhost / RFC1918 / cloud metadata) | `validate_fetch_url` per hop (redirecty ręcznie, także robots.txt i feedy RSS) + transport `polite_http`: jedno DNS lookup, connect na zaakceptowany adres, sprawdzenie peera; proxy z env nie są używane |
 | T-02 | Prompt injection → tool abuse | Tool policy (`allow_*_tools`, `strict_tool_mode`) |
 | T-03 | Hijack fleet knowledge pack | Path tylko pod `fleet/outbox`, allowlista plików, brak symlinków |
 | T-05 | R2 key escape | `enforce_r2_key_prefix` |
