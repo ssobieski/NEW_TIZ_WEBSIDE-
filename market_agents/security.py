@@ -40,7 +40,18 @@ class SecurityError(RuntimeError):
     """Odrzucenie ze względów bezpieczeństwa."""
 
 
+_NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+
+
 def _is_private_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(ip, ipaddress.IPv6Address):
+        embedded = ip.ipv4_mapped or ip.sixtofour
+        if embedded is None and ip.teredo:
+            embedded = ip.teredo[1]
+        if embedded is None and ip in _NAT64_PREFIX:
+            embedded = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        if embedded is not None and _is_private_ip(embedded):
+            return True
     return bool(
         ip.is_private
         or ip.is_loopback
@@ -48,6 +59,7 @@ def _is_private_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         or ip.is_reserved
         or ip.is_multicast
         or ip.is_unspecified
+        or not ip.is_global
     )
 
 
@@ -83,6 +95,43 @@ def host_is_blocked(host: str, *, resolve_dns: bool = True) -> tuple[bool, str]:
         if _is_private_ip(ip) or str(ip) in _METADATA_HOSTS:
             return True, f"DNS resolves to private/metadata IP: {host}→{ip}"
     return False, ""
+
+
+def resolve_connect_addresses(
+    host: str, port: int, *, allow_private: bool = False
+) -> list[str]:
+    """
+    Resolve ``host`` once for an outgoing connection and return the IPs to dial.
+
+    The caller must connect to these addresses and never re-resolve ``host``:
+    a second lookup may return a different (private) answer.
+    Raises SecurityError if any answer is private/metadata, OSError if DNS fails.
+    """
+    name = (host or "").strip().lower().rstrip(".")
+    if name.startswith("[") and name.endswith("]"):
+        name = name[1:-1]
+    if not allow_private:
+        blocked, reason = host_is_blocked(name, resolve_dns=False)
+        if blocked:
+            raise SecurityError(f"SSRF blocked: {reason}")
+    infos = socket.getaddrinfo(name, port, type=socket.SOCK_STREAM)
+    addresses: list[str] = []
+    for info in infos:
+        addr = str(info[4][0])
+        if not allow_private:
+            try:
+                ip = ipaddress.ip_address(addr)
+            except ValueError as exc:
+                raise SecurityError(f"SSRF blocked: unparseable address {addr!r}") from exc
+            if _is_private_ip(ip) or str(ip) in _METADATA_HOSTS:
+                raise SecurityError(
+                    f"SSRF blocked: {name} resolves to private/metadata IP {ip}"
+                )
+        if addr not in addresses:
+            addresses.append(addr)
+    if not addresses:
+        raise OSError(f"no addresses for {name}")
+    return addresses
 
 
 def validate_fetch_url(
