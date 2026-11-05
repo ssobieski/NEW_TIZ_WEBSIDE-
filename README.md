@@ -215,8 +215,10 @@ Eksport: `export-knowledge` / tool `export_knowledge_pack`.
 ## Uruchomienie na Dellu
 
 ```bash
-# terminal 1 — vLLM na 4x A100 (bind 0.0.0.0 pod VPN)
+# terminal 1 — vLLM na 4x A100 (domyślnie bind 127.0.0.1, wymagany klucz API)
+export VLLM_API_KEY="$(openssl rand -hex 32)"
 bash scripts/run_vllm_a100.sh
+# VLLM_TRUST_REMOTE_CODE=1 tylko dla zaufanych modeli wymagających własnego kodu
 
 # terminal 2 — agenci (na tym samym hoście)
 python -m market_agents doctor
@@ -230,15 +232,17 @@ Gdy laptop / VPS jest w VPN Cybertech, a vLLM działa na Dellu:
 
 ```bash
 # 1) VPN Cybertech ON
-# 2) na Dellu: bash scripts/run_vllm_a100.sh
-# 3) na kliencie — IP Dell w sieci VPN (nie commituj):
+# 2) na Dellu: HOST=<dell-vpn-ip> VLLM_API_KEY=... bash scripts/run_vllm_a100.sh
+#    + firewall: TCP 8000 tylko z sieci VPN
+# 3) na kliencie — IP Dell w sieci VPN i ten sam klucz (nie commituj):
 export VLLM_BASE_URL=http://10.x.x.x:8000
+export MARKET_AGENTS_LLM_API_KEY=...
 bash scripts/check_dell_vllm.sh
 python -m market_agents doctor
 python -m market_agents run --agentic
 ```
 
-Aliasy env: `MARKET_AGENTS_LLM_BASE_URL`, `VLLM_MODEL`, `MARKET_AGENTS_LLM_API_KEY`.
+Aliasy env: `MARKET_AGENTS_LLM_BASE_URL`, `VLLM_MODEL`, `MARKET_AGENTS_LLM_API_KEY` (lub `VLLM_API_KEY`).
 Profil: `config/dell_vpn.example.yaml` / `init-config --profile dell-vpn`.
 Plik `.env` jest wczytywany automatycznie (bez nadpisywania zmiennych już ustawionych).
 

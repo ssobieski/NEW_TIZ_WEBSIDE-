@@ -37,3 +37,17 @@ def test_load_dotenv_sets_vllm_base(tmp_path, monkeypatch):
     env.write_text("VLLM_BASE_URL=http://should-not-overwrite:8000\n", encoding="utf-8")
     load_dotenv_files(env)
     assert os.environ["VLLM_BASE_URL"] == "http://keep.me:8000"
+
+
+def test_vllm_api_key_alias(monkeypatch):
+    monkeypatch.delenv("MARKET_AGENTS_LLM_API_KEY", raising=False)
+    monkeypatch.setenv("VLLM_API_KEY", "placeholder-alias-key")
+    cfg = load_config("config/dell_vpn.example.yaml")
+    assert cfg.llm.api_key == "placeholder-alias-key"
+
+
+def test_market_agents_llm_api_key_wins_over_vllm_api_key(monkeypatch):
+    monkeypatch.setenv("MARKET_AGENTS_LLM_API_KEY", "placeholder-primary-key")
+    monkeypatch.setenv("VLLM_API_KEY", "placeholder-alias-key")
+    cfg = load_config("config/dell_vpn.example.yaml")
+    assert cfg.llm.api_key == "placeholder-primary-key"
