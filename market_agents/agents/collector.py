@@ -37,7 +37,11 @@ class CollectorAgent:
         collectors: list[object] = []
         for src in self.config.sources.rss:
             collectors.append(
-                RssCollector(src, lookback_hours=self.config.agents.lookback_hours)
+                RssCollector(
+                    src,
+                    lookback_hours=self.config.agents.lookback_hours,
+                    max_response_bytes=fetcher.policy.max_response_bytes,
+                )
             )
         for src in self.config.sources.web:
             collectors.append(WebCollector(src, fetcher=fetcher))
@@ -70,6 +74,7 @@ class CollectorAgent:
                     self.config.sources.firm_discovery,
                     known,
                     lookback_hours=max(self.config.agents.lookback_hours, 168),
+                    max_response_bytes=fetcher.policy.max_response_bytes,
                 )
             )
 

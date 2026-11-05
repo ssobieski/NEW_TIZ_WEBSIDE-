@@ -6,10 +6,10 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse
 
-import feedparser
 from bs4 import BeautifulSoup
 
 from market_agents.collectors.base import BaseCollector
+from market_agents.collectors.rss import fetch_feed
 from market_agents.config import SocialMediaSource
 from market_agents.firms import extract_candidate_firm_names
 from market_agents.models import MarketItem
@@ -210,7 +210,7 @@ class SocialMediaCollector(BaseCollector):
         }
 
     def _from_feed(self, feed_url: str, limit: int) -> dict[str, Any]:
-        feed = feedparser.parse(feed_url)
+        feed = fetch_feed(feed_url, max_bytes=self.fetcher.policy.max_response_bytes)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=self.lookback_hours)
         posts: list[dict[str, Any]] = []
         for entry in feed.entries[: limit * 2]:
