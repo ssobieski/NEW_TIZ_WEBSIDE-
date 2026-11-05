@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import re
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -246,7 +245,7 @@ class CatalogCollector(BaseCollector):
 
     def _extract_pdf_text(self, url: str, max_pages: int = 8, max_chars: int = 12000) -> str:
         try:
-            from pypdf import PdfReader
+            from market_agents.pdf_text import extract_pdf_text
         except ImportError:
             return "[pypdf niedostępny — pip install pypdf]"
 
@@ -256,17 +255,7 @@ class CatalogCollector(BaseCollector):
             return f"[błąd pobierania PDF: {exc}]"
 
         try:
-            reader = PdfReader(io.BytesIO(data))
-            parts: list[str] = []
-            for i, page in enumerate(reader.pages[: max(1, max_pages)]):
-                try:
-                    parts.append(page.extract_text() or "")
-                except Exception:  # noqa: BLE001
-                    continue
-                if sum(len(p) for p in parts) >= max_chars:
-                    break
-            text = re.sub(r"\s+", " ", "\n".join(parts)).strip()
-            return text[:max_chars]
+            return extract_pdf_text(data, max_pages=max_pages, max_chars=max_chars)
         except Exception as exc:  # noqa: BLE001
             return f"[błąd ekstrakcji PDF: {exc}]"
 
