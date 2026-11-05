@@ -129,7 +129,7 @@ def test_publish_pull_push_absorb_roundtrip(tmp_path: Path):
     assert absorbed["ok"] is True
     assert absorbed["absorbed_packs"] == 1
     assert absorbed["merged_hosts"] >= 1
-    assert absorbed["merged_rules"] >= 1
+    assert absorbed["suggested_rules"] == 1
 
     # drugi absorb nie powinien ponownie liczyć tego samego packa
     again = central.absorb_feedback()
@@ -147,8 +147,18 @@ def test_publish_pull_push_absorb_roundtrip(tmp_path: Path):
         (central_data / "knowledge" / "site_parse_rules.json").read_text(encoding="utf-8")
     )
     by_host = {r["host"]: r for r in rules["rules"]}
-    assert "new-oem.example" in by_host
-    assert by_host["new-oem.example"]["css_selector"] == ".product"
+    assert "new-oem.example" not in by_host
+    assert by_host["sandvik.coromant.com"]["css_selector"] == "article"
+
+    suggestions = json.loads(
+        (central_data / "knowledge" / "fleet_rule_suggestions.json").read_text(encoding="utf-8")
+    )
+    suggested = {s["rule"]["host"]: s for s in suggestions["suggestions"]}
+    assert suggested["new-oem.example"]["rule"]["css_selector"] == ".product"
+    assert suggested["new-oem.example"]["worker_id"] == "vps-1"
+
+    republished = central.publish_knowledge(notes="after absorb")
+    assert "fleet_rule_suggestions.json" not in republished["files"]
 
     assert central.status()["feedback_pending"] == 0
 
