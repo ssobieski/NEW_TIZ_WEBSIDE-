@@ -12,7 +12,8 @@ Poniżej mapa zagrożeń i wdrożone mechanizmy.
 | T-03 | Hijack fleet knowledge pack | Path tylko pod `fleet/outbox`, allowlista plików, brak symlinków |
 | T-05 | R2 key escape | `enforce_r2_key_prefix` |
 | T-07 | Wyciek sekretów w traces | `redact_secrets` w traces / tool errors / R2 excerpts |
-| T-08 | Poisoning parse rules | `auto_promote_host_skills: false` (default) |
+| T-08 | Poisoning parse rules | `auto_promote_host_skills: false` (default); `fleet-absorb` nie nadpisuje reguł centrali (tylko capped liczniki), reguły VPS dla nowych hostów → `knowledge/fleet_rule_suggestions.json` (nie publikowane) |
+| T-09 | Fleet crawl_health DoS | `fleet-absorb` ignoruje `cooldown_until` z VPS, `delay_seconds` ≤ `crawl.max_delay_seconds`, capped liczniki |
 
 ## Konfiguracja (`agents.security` + `agents.crawl`)
 

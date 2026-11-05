@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import socket
 import time
@@ -29,6 +30,12 @@ FEEDBACK_FILES = (
     "crawl_health.json",
     "site_parse_rules.json",
 )
+
+# Central-only; deliberately absent from KNOWLEDGE_FILES and FLEET_ALLOWED_KNOWLEDGE.
+RULE_SUGGESTIONS_FILE = "fleet_rule_suggestions.json"
+MAX_RULE_SUGGESTIONS = 500
+MAX_FEEDBACK_COUNT_PER_PACK = 10_000
+MAX_MERGED_COUNT = 1_000_000
 
 
 @dataclass
@@ -83,6 +90,8 @@ class FleetConfig:
     publish_literature: bool = True
     publish_product_tech: bool = True
     publish_run_status: bool = True
+    # Upper bound for delay_seconds absorbed from worker crawl_health (agents.crawl.max_delay_seconds)
+    max_delay_seconds: float = 45.0
 
 
 class FleetSync:
@@ -348,8 +357,9 @@ class FleetSync:
     def absorb_feedback(self, limit: int = 50) -> dict[str, Any]:
         """
         Centrala: wchłłoń feedback z VPS.
-        - merge crawl_health (max delay, sum counts)
-        - merge site_parse_rules (wyższa success_count wygrywa)
+        - merge crawl_health (max delay ograniczony polityką, capped counts, bez cooldown z VPS)
+        - site_parse_rules: istniejące reguły nie są nadpisywane (tylko capped counts);
+          reguły dla nowych hostów trafiają do fleet_rule_suggestions.json do przeglądu
         """
         if self.fleet.role not in {"central", "both"}:
             return {"ok": False, "error": "absorb_feedback tylko dla role=central|both"}
@@ -362,6 +372,7 @@ class FleetSync:
         absorbed = 0
         merged_hosts = 0
         merged_rules = 0
+        suggested_rules = 0
         signals_appended = 0
         for pack_meta in pending:
             pack = Path(str(pack_meta.get("path") or ""))
@@ -372,7 +383,13 @@ class FleetSync:
                 merged_hosts += self._merge_crawl_health(crawl_src)
             rules_src = pack / "site_parse_rules.json"
             if rules_src.exists():
-                merged_rules += self._merge_parse_rules(rules_src)
+                merged, suggested = self._merge_parse_rules(
+                    rules_src,
+                    worker_id=str(pack_meta.get("worker_id") or pack.parent.name),
+                    pack_id=pack.name,
+                )
+                merged_rules += merged
+                suggested_rules += suggested
             tail = pack / "items_tail.jsonl"
             if tail.exists():
                 signals_appended += self._absorb_items_tail(
@@ -388,6 +405,7 @@ class FleetSync:
             "absorbed_packs": absorbed,
             "merged_hosts": merged_hosts,
             "merged_rules": merged_rules,
+            "suggested_rules": suggested_rules,
             "signals_appended": signals_appended,
         }
 
@@ -425,47 +443,53 @@ class FleetSync:
         return appended
 
     def _merge_crawl_health(self, src: Path) -> int:
+        """
+        Worker crawl_health is untrusted: counters are capped, delay is clamped to
+        the crawl policy maximum, and cooldown_until is never taken from a worker
+        (a cooldown is local to the worker's IP and would block every host fleet-wide).
+        """
         dest = self.knowledge_dir / "crawl_health.json"
         incoming = _load_json(src)
         current = _load_json(dest) if dest.exists() else {"hosts": []}
-        cur_hosts = {
-            h.get("host"): h
-            for h in (current.get("hosts") or [])
-            if isinstance(h, dict) and h.get("host")
-        }
+        cur_hosts: dict[str, dict[str, Any]] = {}
+        for h in current.get("hosts") or []:
+            if isinstance(h, dict):
+                host = _normalize_host(h.get("host"))
+                if host:
+                    cur_hosts[host] = h
+        max_delay = max(0.0, _safe_float(self.fleet.max_delay_seconds, 45.0))
+        now = time.time()
         changed = 0
         for row in incoming.get("hosts") or []:
-            if not isinstance(row, dict) or not row.get("host"):
+            if not isinstance(row, dict):
                 continue
-            host = str(row["host"])
+            host = _normalize_host(row.get("host"))
+            if not host:
+                continue
             prev = cur_hosts.get(host)
-            if prev is None:
-                cur_hosts[host] = row
-                changed += 1
-                continue
-            merged = dict(prev)
-            merged["success_count"] = int(prev.get("success_count") or 0) + int(
-                row.get("success_count") or 0
+            base: dict[str, Any] = dict(prev) if prev is not None else {
+                "host": host,
+                "success_count": 0,
+                "fail_count": 0,
+                "block_count": 0,
+                "delay_seconds": 0.0,
+                "cooldown_until": 0.0,
+                "last_request_at": 0.0,
+                "last_status": None,
+            }
+            merged = dict(base)
+            for key in ("success_count", "fail_count", "block_count"):
+                merged[key] = _merge_counter(base.get(key), row.get(key))
+            worker_delay = min(max(0.0, _safe_float(row.get("delay_seconds"))), max_delay)
+            merged["delay_seconds"] = min(
+                max(_safe_float(base.get("delay_seconds")), worker_delay), max_delay
             )
-            merged["fail_count"] = int(prev.get("fail_count") or 0) + int(
-                row.get("fail_count") or 0
-            )
-            merged["block_count"] = int(prev.get("block_count") or 0) + int(
-                row.get("block_count") or 0
-            )
-            merged["delay_seconds"] = max(
-                float(prev.get("delay_seconds") or 0),
-                float(row.get("delay_seconds") or 0),
-            )
-            merged["cooldown_until"] = max(
-                float(prev.get("cooldown_until") or 0),
-                float(row.get("cooldown_until") or 0),
-            )
-            if float(row.get("last_request_at") or 0) >= float(prev.get("last_request_at") or 0):
-                merged["last_request_at"] = row.get("last_request_at")
-                merged["last_status"] = row.get("last_status")
+            row_last = _safe_float(row.get("last_request_at"))
+            if _safe_float(base.get("last_request_at")) <= row_last <= now:
+                merged["last_request_at"] = row_last
+                merged["last_status"] = _safe_status(row.get("last_status"))
                 if row.get("notes"):
-                    merged["notes"] = row.get("notes")
+                    merged["notes"] = str(row.get("notes"))[:300]
             cur_hosts[host] = merged
             changed += 1
         payload = {
@@ -476,52 +500,57 @@ class FleetSync:
         dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return changed
 
-    def _merge_parse_rules(self, src: Path) -> int:
+    def _merge_parse_rules(self, src: Path, *, worker_id: str, pack_id: str) -> tuple[int, int]:
+        """
+        Worker site_parse_rules is untrusted: live rules keep their selector,
+        method, origin and all other parse settings; only capped counters are
+        merged. Rules for hosts without a central rule are stored as suggestions
+        for operator review (fleet_rule_suggestions.json, never published).
+        Returns (merged_rules, suggested_rules).
+        """
+        from market_agents.parse_rules import SiteParseRule
+
         dest = self.knowledge_dir / "site_parse_rules.json"
         incoming = _load_json(src)
         current = _load_json(dest) if dest.exists() else {"rules": []}
         in_rules = incoming.get("rules", incoming if isinstance(incoming, list) else [])
         cur_rules = current.get("rules", current if isinstance(current, list) else [])
+        if isinstance(in_rules, dict):
+            in_rules = [{**r, "host": r.get("host") or h} for h, r in in_rules.items() if isinstance(r, dict)]
+        if isinstance(cur_rules, dict):
+            cur_rules = [{**r, "host": r.get("host") or h} for h, r in cur_rules.items() if isinstance(r, dict)]
+        if not isinstance(in_rules, list):
+            in_rules = []
+        if not isinstance(cur_rules, list):
+            cur_rules = []
         by_host: dict[str, dict[str, Any]] = {}
         for row in cur_rules:
-            if isinstance(row, dict) and row.get("host"):
-                by_host[str(row["host"])] = row
-        changed = 0
+            if isinstance(row, dict):
+                host = _normalize_host(row.get("host"))
+                if host:
+                    by_host[host] = row
+        merged_count = 0
+        suggestions: list[dict[str, Any]] = []
         for row in in_rules:
-            if not isinstance(row, dict) or not row.get("host"):
+            if not isinstance(row, dict):
                 continue
-            host = str(row["host"])
+            host = _normalize_host(row.get("host"))
+            if not host:
+                continue
             prev = by_host.get(host)
             if prev is None:
-                by_host[host] = row
-                changed += 1
+                try:
+                    rule = SiteParseRule.from_dict({**row, "host": host}).to_dict()
+                except Exception:  # noqa: BLE001
+                    continue
+                rule["success_count"] = _merge_counter(0, rule.get("success_count"))
+                rule["fail_count"] = _merge_counter(0, rule.get("fail_count"))
+                rule["origin"] = "worker"
+                suggestions.append(rule)
                 continue
-            prev_score = int(prev.get("success_count") or 0) - int(prev.get("fail_count") or 0)
-            new_score = int(row.get("success_count") or 0) - int(row.get("fail_count") or 0)
-            if new_score > prev_score or (
-                new_score == prev_score
-                and int(row.get("success_count") or 0) > int(prev.get("success_count") or 0)
-            ):
-                merged = dict(prev)
-                merged.update({k: v for k, v in row.items() if v not in (None, "", [])})
-                merged["success_count"] = max(
-                    int(prev.get("success_count") or 0), int(row.get("success_count") or 0)
-                )
-                merged["fail_count"] = max(
-                    int(prev.get("fail_count") or 0), int(row.get("fail_count") or 0)
-                )
-                by_host[host] = merged
-                changed += 1
-            else:
-                # i tak zsumuj statystyki
-                prev["success_count"] = int(prev.get("success_count") or 0) + int(
-                    row.get("success_count") or 0
-                )
-                prev["fail_count"] = int(prev.get("fail_count") or 0) + int(
-                    row.get("fail_count") or 0
-                )
-                by_host[host] = prev
-                changed += 1
+            prev["success_count"] = _merge_counter(prev.get("success_count"), row.get("success_count"))
+            prev["fail_count"] = _merge_counter(prev.get("fail_count"), row.get("fail_count"))
+            merged_count += 1
         payload = {
             "count": len(by_host),
             "rules": [by_host[k] for k in sorted(by_host.keys())],
@@ -529,7 +558,37 @@ class FleetSync:
             "updated_at": time.time(),
         }
         dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        return changed
+        if suggestions:
+            self._record_rule_suggestions(suggestions, worker_id=worker_id, pack_id=pack_id)
+        return merged_count, len(suggestions)
+
+    def _record_rule_suggestions(
+        self, rules: list[dict[str, Any]], *, worker_id: str, pack_id: str
+    ) -> None:
+        dest = self.knowledge_dir / RULE_SUGGESTIONS_FILE
+        current = _load_json(dest) if dest.exists() else {}
+        rows = current.get("suggestions") or []
+        by_key: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict) and isinstance(row.get("rule"), dict):
+                key = (str(row.get("worker_id") or ""), str(row["rule"].get("host") or ""))
+                by_key[key] = row
+        now = time.time()
+        for rule in rules:
+            by_key[(worker_id, str(rule["host"]))] = {
+                "worker_id": worker_id,
+                "pack_id": pack_id,
+                "received_at": now,
+                "rule": rule,
+            }
+        kept = sorted(by_key.values(), key=lambda r: _safe_float(r.get("received_at")))
+        kept = kept[-MAX_RULE_SUGGESTIONS:]
+        payload = {
+            "updated_at": now,
+            "note": "worker parse-rule suggestions; review before adding to site_parse_rules.json",
+            "suggestions": kept,
+        }
+        dest.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def status(self) -> dict[str, Any]:
         self.ensure_dirs()
@@ -557,11 +616,50 @@ def _load_json(path: Path) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {"rules": raw}
 
 
+def _normalize_host(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    host = value.strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return out if math.isfinite(out) else default
+
+
+def _safe_count(value: Any) -> int:
+    try:
+        out = int(_safe_float(value))
+    except (OverflowError, ValueError):
+        return 0
+    return max(0, out)
+
+
+def _safe_status(value: Any) -> int | None:
+    if value is None:
+        return None
+    status = _safe_count(value)
+    return status if 100 <= status <= 599 else None
+
+
+def _merge_counter(current: Any, incoming: Any) -> int:
+    added = min(_safe_count(incoming), MAX_FEEDBACK_COUNT_PER_PACK)
+    return min(_safe_count(current) + added, MAX_MERGED_COUNT)
+
+
 def fleet_config_from_app(config: Any) -> FleetConfig:
     fleet = getattr(config.agents, "fleet", None)
     if fleet is None:
         return FleetConfig()
+    crawl = getattr(config.agents, "crawl", None)
     return FleetConfig(
+        max_delay_seconds=float(getattr(crawl, "max_delay_seconds", 45.0) or 45.0),
         role=str(getattr(fleet, "role", "central") or "central"),
         worker_id=str(getattr(fleet, "worker_id", "") or "") or None,
         sync_dir=str(getattr(fleet, "sync_dir", "data/fleet")),
