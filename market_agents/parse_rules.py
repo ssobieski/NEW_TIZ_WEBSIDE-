@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from market_agents.approvals import ApprovalScope
 
 PARSE_METHODS = ("trafilatura", "bs4", "css", "auto")
 
@@ -135,7 +138,18 @@ class SiteParseRulesStore:
         rows.sort(key=lambda r: (-int(r.get("success_count") or 0), r.get("host") or ""))
         return rows[:limit]
 
-    def upsert(
+    def commit(self, rule: SiteParseRule, *, previous: SiteParseRule | None) -> None:
+        """Store a planned rule, only if the host still holds the rule it was planned from."""
+        if self.rules.get(rule.host) is not previous:
+            raise ValueError(f"parse rule for {rule.host} changed since it was planned")
+        self.rules[rule.host] = rule
+
+    def upsert(self, host_or_url: str, **kwargs: Any) -> dict[str, Any]:
+        plan = self.plan_upsert(host_or_url, **kwargs)
+        self.commit(plan["rule"], previous=plan["previous"])
+        return {"ok": True, "upserted": True, "rule": plan["rule"].to_dict()}
+
+    def plan_upsert(
         self,
         host_or_url: str,
         *,
@@ -170,10 +184,21 @@ class SiteParseRulesStore:
             notes=notes or (existing.notes if existing else ""),
             origin=origin,
         )
-        self.rules[host] = rule
-        return {"ok": True, "upserted": True, "rule": rule.to_dict()}
+        return {"ok": True, "rule": rule, "previous": existing}
 
-    def rate(
+    def rate(self, url: str, **kwargs: Any) -> dict[str, Any]:
+        plan = self.plan_rate(url, **kwargs)
+        if not plan.get("ok"):
+            return plan
+        self.commit(plan["rule"], previous=plan["previous"])
+        return {
+            "ok": True,
+            "rated": True,
+            "quality": plan["quality"],
+            "rule": plan["rule"].to_dict(),
+        }
+
+    def plan_rate(
         self,
         url: str,
         *,
@@ -187,7 +212,8 @@ class SiteParseRulesStore:
         host = host_from_url(url)
         if not host:
             return {"ok": False, "error": "nie udało się wyciągnąć hosta z URL"}
-        rule = self.rules.get(host) or SiteParseRule(host=host, origin="auto")
+        previous = self.rules.get(host)
+        rule = copy.deepcopy(previous) if previous else SiteParseRule(host=host, origin="auto")
         score = max(0.0, min(1.0, float(quality_0_to_1)))
         if parse_method and parse_method in PARSE_METHODS and parse_method != "auto":
             rule.preferred_method = parse_method
@@ -202,10 +228,9 @@ class SiteParseRulesStore:
             rule.last_ok_url = url
         else:
             rule.fail_count += 1
-        self.rules[host] = rule
-        return {
-            "ok": True,
-            "rated": True,
-            "quality": score,
-            "rule": rule.to_dict(),
-        }
+        return {"ok": True, "quality": score, "rule": rule, "previous": previous}
+
+
+def rule_scope(*rules: SiteParseRule | None) -> ApprovalScope:
+    """A host rule only ever applies to its own host or subdomains of it (see get())."""
+    return ApprovalScope(hosts=tuple(dict.fromkeys(r.host for r in rules if r is not None)))

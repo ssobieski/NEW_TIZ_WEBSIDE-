@@ -43,6 +43,32 @@ def host_matches(grant_host: str, request_host: str) -> bool:
     return r == g or r.endswith("." + g)
 
 
+@dataclass(frozen=True)
+class ApprovalScope:
+    """
+    Hosts on which a knowledge write takes effect, derived from the object being written.
+
+    host_confined=False means the object also applies by kind / URL fragment (or has no
+    host at all), so it can reach any host and only a tool-wide grant may cover it.
+    """
+
+    hosts: tuple[str, ...] = ()
+    host_confined: bool = True
+
+    def union(self, other: ApprovalScope) -> ApprovalScope:
+        return ApprovalScope(
+            hosts=tuple(dict.fromkeys(self.hosts + other.hosts)),
+            host_confined=self.host_confined and other.host_confined,
+        )
+
+
+def _grant_covers_stored_host(grant_host: str, stored_host: str) -> bool:
+    # stored_host is compared verbatim (no URL parsing) so that the string a store
+    # matches against is exactly the string that was authorized.
+    h = (stored_host or "").strip().lower()
+    return bool(h) and bool(grant_host) and (h == grant_host or h.endswith("." + grant_host))
+
+
 @dataclass
 class ApprovalGrant:
     id: str
@@ -180,6 +206,34 @@ class ApprovalStore:
             if g.is_active() and g.tool == tool and not g.company and not g.host:
                 return g
         return None
+
+    def grants_for_scope(self, tool: str, scope: ApprovalScope) -> list[ApprovalGrant]:
+        """
+        Grants that together authorize `tool` for every host in `scope`; [] if not covered.
+
+        A tool-wide grant covers any scope. Host grants cover only host-confined scopes,
+        and every host must fall under one of them. Company-scoped grants never apply,
+        since the written object carries no company to match.
+        """
+        tool = (tool or "").strip()
+        active = [g for g in reversed(self.grants) if g.is_active() and g.tool == tool]
+        for g in active:
+            if not g.company and not g.host:
+                return [g]
+        if not scope.host_confined or not scope.hosts:
+            return []
+        host_grants = [g for g in active if g.host and not g.company]
+        used: list[ApprovalGrant] = []
+        for stored in scope.hosts:
+            grant = next(
+                (g for g in host_grants if _grant_covers_stored_host(g.host or "", stored)),
+                None,
+            )
+            if grant is None:
+                return []
+            if grant not in used:
+                used.append(grant)
+        return used
 
     def list_active(self) -> list[ApprovalGrant]:
         return [g for g in self.grants if g.is_active()]

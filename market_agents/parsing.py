@@ -115,7 +115,13 @@ class IntelligentParser:
                 "applied_selector": selector or None,
             }
             if self.learn and self.rules is not None and doc.ok and len(doc.text) >= 120:
-                self._auto_learn(url, doc)
+                # A caller-forced method/selector is not persisted as the host's rule;
+                # that goes through the approval-gated upsert_parse_rule / rate_parse.
+                self._auto_learn(
+                    url,
+                    doc,
+                    learn_method=force_method is None and css_selector is None,
+                )
             return doc
 
         if method == "css" and selector:
@@ -154,7 +160,7 @@ class IntelligentParser:
             return _finish(doc)
         return _finish(fallback)
 
-    def _auto_learn(self, url: str, doc: ParsedDocument) -> None:
+    def _auto_learn(self, url: str, doc: ParsedDocument, *, learn_method: bool = True) -> None:
         if self.rules is None:
             return
         host = host_from_url(url)
@@ -170,6 +176,8 @@ class IntelligentParser:
             )
             return
         method = doc.parse_method if doc.parse_method in {"trafilatura", "bs4", "css"} else None
+        if not learn_method:
+            method = None
         self.rules.rate(
             url,
             quality_0_to_1=0.85 if len(doc.text) >= 280 else 0.65,

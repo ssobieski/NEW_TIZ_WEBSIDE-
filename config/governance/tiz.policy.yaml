@@ -83,6 +83,44 @@ rules:
       tool: upsert_parse_rule
     obligations: [human_approval, audit]
 
+  # Ta sama współdzielona baza (parsing_skills.json / site_parse_rules.json),
+  # publikowana do każdego workera — wymaga zatwierdzenia jak promote_host_skill.
+  - id: approval-learn-parsing-skill
+    priority: 200
+    effect: require_approval
+    reason: "learn_parsing_skill wymaga zatwierdzenia operatora"
+    match:
+      action: tool_call
+      tool: learn_parsing_skill
+    obligations: [human_approval, audit]
+
+  - id: approval-improve-parsing-skill
+    priority: 200
+    effect: require_approval
+    reason: "improve_parsing_skill wymaga zatwierdzenia operatora"
+    match:
+      action: tool_call
+      tool: improve_parsing_skill
+    obligations: [human_approval, audit]
+
+  - id: approval-rate-parsing-skill
+    priority: 200
+    effect: require_approval
+    reason: "rate_parsing_skill wymaga zatwierdzenia operatora"
+    match:
+      action: tool_call
+      tool: rate_parsing_skill
+    obligations: [human_approval, audit]
+
+  - id: approval-rate-parse
+    priority: 190
+    effect: require_approval
+    reason: "rate_parse zapisuje regułę hosta (css_selector) — wymaga przeglądu"
+    match:
+      action: tool_call
+      tool: rate_parse
+    obligations: [human_approval, audit]
+
   # --- Rate limits / soft controls -----------------------------------------
   - id: rate-limit-deep-fetch
     priority: 120
