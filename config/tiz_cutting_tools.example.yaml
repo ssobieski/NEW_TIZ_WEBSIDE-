@@ -685,8 +685,10 @@ agents:
     allow_write_tools: true
     allow_notion_tools: true
     allow_r2_tools: true
-    # strict_tool_mode: true  # tylko SAFE+FETCH tools
+    # strict_tool_mode: true  # tylko SAFE+FETCH tools, bez zapisu knowledge i bez Notion/R2
     strict_tool_mode: false
+    # strict_allowed_tools: [rate_parse]  # jawne wyjątki strict mode
+    strict_allowed_tools: []
     redact_traces: true
     trace_tool_result_max_chars: 4000
     fleet_allowlist_only: true

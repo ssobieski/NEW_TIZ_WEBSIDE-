@@ -226,6 +226,7 @@ class SecurityConfig(BaseModel):
     allow_notion_tools: bool = True
     allow_r2_tools: bool = True
     strict_tool_mode: bool = False
+    strict_allowed_tools: list[str] = Field(default_factory=list)
     redact_traces: bool = True
     trace_tool_result_max_chars: int = 4000
     fleet_allowlist_only: bool = True

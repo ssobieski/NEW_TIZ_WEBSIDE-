@@ -289,6 +289,17 @@ SENSITIVE_CLOUD_TOOLS = frozenset(
     }
 )
 
+NOTION_TOOLS = frozenset(
+    {
+        "search_notion",
+        "fetch_notion_page",
+        "push_crm_to_notion",
+        "sync_notion_literature",
+    }
+)
+
+R2_TOOLS = frozenset({"search_r2", "fetch_r2_object"})
+
 
 @dataclass
 class SecurityPolicy:
@@ -303,7 +314,9 @@ class SecurityPolicy:
     allow_write_tools: bool = True
     allow_notion_tools: bool = True
     allow_r2_tools: bool = True
-    strict_tool_mode: bool = False  # True = tylko SAFE + FETCH (+ opcjonalnie write)
+    strict_tool_mode: bool = False  # True = tylko SAFE + FETCH (+ strict_allowed_tools)
+    # jawne wyjątki strict mode (nazwy write/cloud tools); allow_* nadal obowiązują
+    strict_allowed_tools: list[str] = field(default_factory=list)
     # redaction
     redact_traces: bool = True
     trace_tool_result_max_chars: int = 4000
@@ -312,36 +325,34 @@ class SecurityPolicy:
     # R2
     enforce_r2_prefix: bool = True
 
+    def _strict_permits(self, name: str) -> bool:
+        return not self.strict_tool_mode or name in self.strict_allowed_tools
+
     def tool_allowed(self, name: str) -> tuple[bool, str]:
         if name in SAFE_TOOLS or name in FETCH_TOOLS:
             return True, ""
-        if name in SENSITIVE_CLOUD_TOOLS:
-            if (
-                name.startswith("search_notion")
-                or name.startswith("fetch_notion")
-                or name == "push_crm_to_notion"
-            ):
-                if not self.allow_notion_tools:
-                    return False, "Notion tools disabled by security policy"
-            if "r2" in name and not self.allow_r2_tools:
-                return False, "R2 tools disabled by security policy"
-            if self.strict_tool_mode and name in SENSITIVE_CLOUD_TOOLS:
-                if not (self.allow_notion_tools or self.allow_r2_tools):
-                    return False, "cloud tools disabled in strict mode"
-            # Notion CRM push also requires write permission
-            if name == "push_crm_to_notion" and not self.allow_write_tools:
-                return False, "write tools disabled by security policy"
-            return True, ""
-        if name in WRITE_TOOLS:
-            if not self.allow_write_tools:
-                return False, "write tools disabled by security policy"
-            if self.strict_tool_mode and not self.allow_write_tools:
-                return False, "write tools blocked in strict mode"
+        if name in NOTION_TOOLS and not self.allow_notion_tools:
+            return False, "Notion tools disabled by security policy"
+        if name in R2_TOOLS and not self.allow_r2_tools:
+            return False, "R2 tools disabled by security policy"
+        if name in WRITE_TOOLS and not self.allow_write_tools:
+            return False, "write tools disabled by security policy"
+        if name in SENSITIVE_CLOUD_TOOLS or name in WRITE_TOOLS:
+            if not self._strict_permits(name):
+                return False, f"tool blocked in strict mode: {name}"
             return True, ""
         # unknown tools: allow unless strict
         if self.strict_tool_mode:
             return False, f"tool not allowed in strict mode: {name}"
         return True, ""
+
+    def persistence_allowed(self, name: str) -> bool:
+        """Czy narzędzie `name` może zapisać knowledge/CRM/profile (także SAFE/FETCH side effects)."""
+        return self.allow_write_tools and self._strict_permits(name)
+
+    def notion_allowed(self, name: str) -> bool:
+        """Czy narzędzie `name` może sięgnąć do Notion API (także SAFE tools z live=true)."""
+        return self.allow_notion_tools and self._strict_permits(name)
 
 
 def default_security_policy() -> SecurityPolicy:
@@ -458,6 +469,7 @@ def security_status(policy: SecurityPolicy) -> dict[str, Any]:
         "allow_notion_tools": policy.allow_notion_tools,
         "allow_r2_tools": policy.allow_r2_tools,
         "strict_tool_mode": policy.strict_tool_mode,
+        "strict_allowed_tools": list(policy.strict_allowed_tools),
         "redact_traces": policy.redact_traces,
         "fleet_allowlist_only": policy.fleet_allowlist_only,
         "enforce_r2_prefix": policy.enforce_r2_prefix,

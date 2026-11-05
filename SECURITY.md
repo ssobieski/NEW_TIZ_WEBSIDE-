@@ -23,7 +23,8 @@ agents:
     allow_write_tools: true
     allow_notion_tools: true
     allow_r2_tools: true
-    strict_tool_mode: false   # true = tylko SAFE+FETCH
+    strict_tool_mode: false   # true = tylko SAFE+FETCH, bez zapisu knowledge i bez Notion/R2
+    strict_allowed_tools: []  # jawne wyjątki strict mode (np. [rate_parse]); allow_* nadal obowiązują
     redact_traces: true
     fleet_allowlist_only: true
     enforce_r2_prefix: true
@@ -48,7 +49,7 @@ python -m market_agents doctor
 2. Notion integration: minimalny share (tylko bazy TIZ).
 3. R2 IAM: tylko prefix `monitoring/` read.
 4. Fleet share (NFS/rsync): tylko zapis z centrali do `outbox/`, workery read-only.
-5. Na produkcji agentic: `strict_tool_mode: true` + przegląd write tools.
+5. Na produkcji agentic: `strict_tool_mode: true` + przegląd write tools. W strict mode write i Notion/R2 tools są blokowane niezależnie od `allow_*`, a SAFE/FETCH tools nie zapisują knowledge/CRM/profili (np. `persist`/`register`/`ingest` są ignorowane) ani nie sięgają do Notion (`live`). Wyjątki tylko przez `strict_allowed_tools`.
 6. Nie commituj `.env` / traces z treścią Notion.
 
 ## Tool: `security_status`
